@@ -1,4 +1,4 @@
-#include <stdboolh>
+#include <stdbool.h>
 
 int return_plus(int a, int b) {
   return a + b;

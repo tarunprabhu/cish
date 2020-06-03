@@ -8,16 +8,22 @@
 
 namespace cish {
 
+class Context;
+
 enum class ASTKind {
   Decl,
   Expr,
+  For,
+  If,
   Stmt,
+  While,
   Type,
 };
 
 /// Abstract base class for all Cish AST nodes
 class ASTBase {
 private:
+  Context& ctxt;
   const ASTKind kind;
   std::string buf;
 
@@ -34,16 +40,9 @@ private:
     ss << s;
   }
 
-  void add_impl_0(llvm::raw_string_ostream& ss, uint64_t i) {
-    ss << i;
-  }
-
-  void add_impl_0(llvm::raw_string_ostream& ss, float f) {
-    ss << f;
-  }
-
-  void add_impl_0(llvm::raw_string_ostream& ss, double d) {
-    ss << d;
+  template <typename T, std::enable_if_t<std::is_arithmetic<T>::value, int> = 0>
+  void add_impl_0(llvm::raw_string_ostream& ss, T val) {
+    ss << val;
   }
 
   void add_impl_0(llvm::raw_string_ostream ss, long double g) {
@@ -69,8 +68,14 @@ private:
   }
 
 protected:
-  ASTBase(ASTKind kind);
-  ASTBase(ASTKind kind, const std::string& s);
+  /// @param ctxt The context object containing all the AST nodes
+  /// @param kind The kind of the AST node
+  ASTBase(Context& ctxt, ASTKind kind);
+
+  /// @param ctxt The context object containing all the AST nodes
+  /// @param kind The kind of the AST node
+  /// @param s    The Cish string representation of the node
+  ASTBase(Context& ctxt, ASTKind kind, const std::string& s);
 
   template <typename T>
   void add(T&& expr) {
@@ -91,6 +96,12 @@ public:
   ASTBase(const ASTBase&) = delete;
   ASTBase(ASTBase&&) = delete;
   virtual ~ASTBase() = default;
+
+  /// @returns The AST context object that owns this node
+  Context& getContext();
+
+  /// @returns The AST context object that owns this node
+  const Context& getContext() const;
 
   /// @returns The kind of this AST node
   ASTKind getKind() const;

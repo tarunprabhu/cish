@@ -17,8 +17,8 @@ public:
   Stmt(Stmt&&) = delete;
 
   template <typename... T>
-  Stmt(const llvm::Value& val, T&&... exprs)
-      : ASTBase(ASTKind::Stmt), val(val) {
+  Stmt(Context& ctxt, const llvm::Value& val, T&&... exprs)
+      : ASTBase(ctxt, ASTKind::Stmt), val(val) {
     this->add(exprs..., std::string(";"));
   }
 

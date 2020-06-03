@@ -1,13 +1,23 @@
 #include "ASTBase.h"
+#include "Context.h"
 
 namespace cish {
 
-ASTBase::ASTBase(ASTKind kind) : kind(kind) {
+ASTBase::ASTBase(Context& ctxt, ASTKind kind) : ctxt(ctxt), kind(kind) {
   ;
 }
 
-ASTBase::ASTBase(ASTKind kind, const std::string& s) : kind(kind), buf(s) {
+ASTBase::ASTBase(Context& ctxt, ASTKind kind, const std::string& s)
+    : ctxt(ctxt), kind(kind), buf(s) {
   ;
+}
+
+Context& ASTBase::getContext() {
+  return ctxt;
+}
+
+const Context& ASTBase::getContext() const {
+  return ctxt;
 }
 
 ASTKind ASTBase::getKind() const {

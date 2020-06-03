@@ -5,9 +5,12 @@ set(SOURCES
   CishPass.cpp
   Decl.cpp
   Expr.cpp
+  For.cpp
+  If.cpp
   Printer.cpp
   Stmt.cpp
-  Type.cpp)
+  Type.cpp
+  While.cpp)
 
 set(CISH_LIBNAME Cish)
 

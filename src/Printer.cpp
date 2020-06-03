@@ -1,5 +1,7 @@
 #include "Printer.h"
 
+#include <llvm/Support/raw_ostream.h>
+
 namespace cish {
 
 Printer::Printer(const Context& ctxt)
@@ -80,10 +82,16 @@ Printer& Printer::begin_block(const std::string& label) {
 }
 
 Printer& Printer::end_block(const std::string& label) {
-  add("}");
+  untab();
+  reposition().add("}");
   if(label.length())
     space().comment(label);
+  endl();
   return *this;
+}
+
+Printer& Printer::label(const std::string& label) {
+  return endl().add(label).add(":").endl();
 }
 
 Printer& Printer::add(const std::string& s) {
@@ -92,10 +100,34 @@ Printer& Printer::add(const std::string& s) {
 }
 
 Printer& Printer::add(const ASTBase& ast) {
-  if(const auto* stmt = llvm::dyn_cast<Stmt>(&ast))
-    return reposition().add(stmt->str()).endl();
-  else
-    return add(ast.str());
+  if(const auto* stmt = llvm::dyn_cast<Stmt>(&ast)) {
+    reposition().add(stmt->str()).endl();
+  } else if(const auto* iff = llvm::dyn_cast<If>(&ast)) {
+    const llvm::BranchInst& br = iff->getLLVM();
+    reposition().add("if (").add(ctxt.get(br.getCondition())).add(")").endl();
+    tab()
+        .reposition()
+        .add("goto ")
+        .add(ctxt.get(br.getSuccessor(0)))
+        .add(";")
+        .endl();
+    untab().reposition().add("else").endl();
+    tab()
+        .reposition()
+        .add("goto ")
+        .add(ctxt.get(br.getSuccessor(1)))
+        .add(";")
+        .endl();
+    untab();
+  } else if(const auto* forr = llvm::dyn_cast<For>(&ast)) {
+    llvm::errs() << "UNIMPLEMENTED: adding for loop\n";
+  } else if(const auto* whil = llvm::dyn_cast<While>(&ast)) {
+    llvm::errs() << "UNIMPLEMENTED: adding while loop\n";
+  } else {
+    add(ast.str());
+  }
+
+  return *this;
 }
 
 const std::string& Printer::str() {

@@ -6,6 +6,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Pass.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/ADT/SmallVector.h>
 
 #include <map>
 #include <set>
@@ -15,14 +16,6 @@
 #include "Printer.h"
 
 using namespace llvm;
-
-const std::string& format(const cish::Expr& expr) {
-  const llvm::Value& val = expr.getLLVM();
-  if(isa<UnaryOperator>(val) or isa<BinaryOperator>(val) or isa<CmpInst>(val))
-    return expr.getParenthetized();
-  else
-    return expr.str();
-}
 
 class CishPass : public FunctionPass {
 public:
@@ -42,6 +35,8 @@ protected:
 protected:
   void initialize(const Function& f);
   bool allUsesIgnored(const Value* v) const;
+  bool shouldUseTemporary(const Instruction& inst);
+  const std::string& format(const cish::Expr& expr);
 
   const cish::ASTBase& handle(const AllocaInst& alloca);
   const cish::ASTBase& handle(const LoadInst& load);
@@ -66,6 +61,9 @@ protected:
 
   const cish::ASTBase& handle(const ConstantInt& cint);
   const cish::ASTBase& handle(const ConstantFP& cfp);
+  const cish::ASTBase& handle(const ConstantExpr& cexpr);
+
+  const cish::ASTBase& handle(const BasicBlock& bb);
 
   const cish::ASTBase& handle(const Value* v);
 
@@ -74,9 +72,8 @@ protected:
   const cish::ASTBase& handle(ArrayType* aty);
   const cish::ASTBase& handle(FunctionType* fty);
   const cish::ASTBase& handle(StructType* sty);
+  const cish::ASTBase& handle(VectorType* vty);
   const cish::ASTBase& handle(Type* type);
-
-  const cish::ASTBase& handle(const BasicBlock& bb);
 
 public:
   CishPass();
@@ -98,12 +95,22 @@ StringRef CishPass::getPassName() const {
 
 void CishPass::getAnalysisUsage(AnalysisUsage& AU) const {
   AU.addRequired<LoopInfoWrapperPass>();
-  AU.addRequired<DomaintorTreeWrapperPass>();
+  AU.addRequired<DominatorTreeWrapperPass>();
   AU.setPreservesAll();
 }
 
 void CishPass::print(raw_ostream& o, const Module* module) const {
   o << cc.str() << "\n";
+}
+
+const std::string& CishPass::format(const cish::Expr& expr) {
+  const llvm::Value& val = expr.getLLVM();
+  if(ctxt.isOverwrite(expr.getLLVM()))
+    return expr.str();
+  else if(isa<BinaryOperator>(val) or isa<CmpInst>(val))
+    return expr.getParenthetized();
+  else
+    return expr.str();
 }
 
 const cish::ASTBase& CishPass::handle(const Function& f) {
@@ -147,9 +154,11 @@ const cish::ASTBase& CishPass::handle(const Argument& arg) {
 const cish::ASTBase& CishPass::handle(const ConstantInt& cint) {
   const APInt& value = cint.getValue();
   if(value.isNegative())
-    return ctxt.add(cint, value.getLimitedValue(0x7fffffffffffffff));
+    // Cast to int64_t so we actually get the sign because
+    // value.getLimitedValue() returns a uint64_t.
+    return ctxt.add(cint, (int64_t)value.getLimitedValue());
   else
-    return ctxt.add(cint, value.getLimitedValue(0xffffffffffffffff));
+    return ctxt.add(cint, value.getLimitedValue());
 }
 
 const cish::ASTBase& CishPass::handle(const ConstantFP& cfp) {
@@ -161,6 +170,16 @@ const cish::ASTBase& CishPass::handle(const ConstantFP& cfp) {
     return ctxt.add(cfp, value.convertToDouble());
   else
     return ctxt.add(cfp, "0xUNKNOWN_FLOAT");
+}
+
+const cish::ASTBase& CishPass::handle(const ConstantExpr& cexpr) {
+  std::string op = cexpr.getOpcodeName();
+  if(op == "bitcast") {
+    return handle(cexpr.getOperand(0));
+  } else {
+    errs() << "UNHANDLED CONSTANT EXPR: " << cexpr << "\n";
+    return ctxt.add(cexpr, "<<UNKNOWN>>");
+  }
 }
 
 const cish::ASTBase& CishPass::handle(const AllocaInst& alloca) {
@@ -182,14 +201,24 @@ const cish::ASTBase& CishPass::handle(const CastInst& cst) {
 }
 
 const cish::ASTBase& CishPass::handle(const BranchInst& br) {
-  errs() << "UNIMPLEMENTED: " << br << "\n";
-  return ctxt.add(br, "");
+  for(const llvm::BasicBlock* bb : br.successors())
+    handle(bb);
+  if(br.isConditional()) {
+    handle(br.getCondition());
+    return ctxt.add(br);
+  } else {
+    return ctxt.add<cish::Stmt>(br, "goto ", handle(br.getSuccessor(0)));
+  }
 }
 
 const cish::ASTBase& CishPass::handle(const LoadInst& load) {
   const Value* ptr = load.getPointerOperand();
   if(isa<GetElementPtrInst>(ptr))
-    return ctxt.add(load, handle(ptr));
+    // GetElementPtr will always be the address of something, so it will
+    // always have '&' at its start. If we are loading from the address, it's
+    // cleaner to just get rid of it since * and & will cancel each other out
+    // anyway
+    return ctxt.add(load, handle(ptr).str().substr(1));
   else
     return ctxt.add(load, "*", handle(ptr));
 }
@@ -204,21 +233,29 @@ const cish::ASTBase& CishPass::handle(const StoreInst& store) {
 const cish::ASTBase& CishPass::handle(const GetElementPtrInst& gep) {
   std::string buf;
   raw_string_ostream ss(buf);
-  auto* pty = dyn_cast<PointerType>(gep.getPointerOperandType());
+  const llvm::Value* ptr = gep.getPointerOperand();
+  auto* pty = dyn_cast<PointerType>(ptr->getType());
   Type* ety = pty->getElementType();
-  ss << handle(gep.getPointerOperand());
+  const std::string& s = handle(gep.getPointerOperand()).str();
+
+  // If the pointer operand is also a GEP and is not overwritten with a
+  // temporary value, it will begin with a &. Obviously, we don't want that
+  if(isa<GetElementPtrInst>(ptr) and not ctxt.isOverwrite(ptr))
+    ss << s.substr(1);
+  else
+    ss << s;
   if(ety->isIntegerTy() or ety->isFloatingPointTy() or ety->isPointerTy()) {
     for(Value* op : gep.indices())
       ss << "[" << handle(op) << "]";
   } else {
     ss << "<<GEP INDICES NOT IMPLEMENTED FOR TYPE>>";
   }
-  return ctxt.add(gep, ss.str());
+  return ctxt.add(gep, "&", ss.str());
 }
 
 const cish::ASTBase& CishPass::handle(const PHINode& phi) {
-  errs() << "UNIMPLEMENTED: " << phi << "\n";
-  return ctxt.add(phi, "");
+  // errs() << "UNIMPLEMENTED: " << phi << "\n";
+  return ctxt.add(phi, "PHI");
 }
 
 const cish::ASTBase& CishPass::handle(const CallInst& call) {
@@ -307,7 +344,7 @@ const cish::ASTBase& CishPass::handle(const UnaryOperator& inst) {
 }
 
 const cish::ASTBase& CishPass::handle(const CmpInst& cmp) {
-  std::string op = "<<UNKNOWN>>";
+  std::string op = "<<UNKNOWN_CMP>>";
   switch(cmp.getPredicate()) {
   case CmpInst::FCMP_OEQ:
   case CmpInst::FCMP_UEQ:
@@ -353,12 +390,6 @@ const cish::ASTBase& CishPass::handle(const CmpInst& cmp) {
 }
 
 const cish::ASTBase& CishPass::handle(const SelectInst& select) {
-  std::string buf;
-  raw_string_ostream ss(buf);
-  ss << "((" << handle(select.getCondition()) << ") ? ("
-     << handle(select.getTrueValue()) << ") : ("
-     << handle(select.getFalseValue()) << "))";
-
   return ctxt.add(select,
                   "(",
                   format(cast<cish::Expr>(handle(select.getCondition()))),
@@ -370,6 +401,7 @@ const cish::ASTBase& CishPass::handle(const SelectInst& select) {
 }
 
 const cish::ASTBase& CishPass::handle(const SwitchInst& sw) {
+  errs() << "UNIMPLEMENTED: " << sw << "\n";
   return ctxt.add(sw, "");
 }
 
@@ -378,6 +410,10 @@ const cish::ASTBase& CishPass::handle(const ReturnInst& ret) {
     return ctxt.add<cish::Stmt>(ret, "return ", handle(value));
   else
     return ctxt.add<cish::Stmt>(ret, "return");
+}
+
+const cish::ASTBase& CishPass::handle(const BasicBlock& bb) {
+  return ctxt.add(bb, ctxt.getNewVar("bb"));
 }
 
 const cish::ASTBase& CishPass::handle(const Value* v) {
@@ -420,6 +456,10 @@ const cish::ASTBase& CishPass::handle(const Value* v) {
     return handle(*cint);
   else if(const auto* cfp = dyn_cast<ConstantFP>(v))
     return handle(*cfp);
+  else if(const auto* cexpr = dyn_cast<ConstantExpr>(v))
+    return handle(*cexpr);
+  else if(const auto* bb = dyn_cast<BasicBlock>(v))
+    return handle(*bb);
   else
     errs() << "UNHANDLED: " << *v << "\n";
 
@@ -485,14 +525,11 @@ const cish::ASTBase& CishPass::handle(StructType* sty) {
     } else {
       ss << sname;
     }
-    std::string buf2;
-    raw_string_ostream ss2(buf2);
-    for(char c : ss.str())
-      if(c == '.')
-        ss2 << '_';
-      else
-        ss2 << c;
-    return ctxt.add(sty, ss2.str());
+    ss.flush();
+    for(size_t i = 0; i < buf.length(); i++)
+      if(buf[i] == '.')
+        buf[i] = '_';
+    return ctxt.add(sty, buf);
   } else {
     return ctxt.add(sty, ctxt.getNewVar("struct"));
   }
@@ -514,6 +551,14 @@ const cish::ASTBase& CishPass::handle(FunctionType* fty) {
   ss << ")";
 
   return ctxt.add(fty, ss.str());
+}
+
+const cish::ASTBase& CishPass::handle(VectorType* vty) {
+  std::string buf;
+  raw_string_ostream ss(buf);
+  ss << handle(vty->getElementType()) << "<" << vty->getNumElements() << ">";
+
+  return ctxt.add(vty, ss.str());
 }
 
 const cish::ASTBase& CishPass::handle(Type* type) {
@@ -542,6 +587,8 @@ const cish::ASTBase& CishPass::handle(Type* type) {
     return handle(sty);
   } else if(auto* fty = dyn_cast<FunctionType>(type)) {
     return handle(fty);
+  } else if(auto* vty = dyn_cast<VectorType>(type)){
+    return handle(vty);
   } else {
     errs() << "Unknown type: " << *type << "\n";
   }
@@ -552,6 +599,8 @@ const cish::ASTBase& CishPass::handle(Type* type) {
 void CishPass::initialize(const Function& f) {
   cc.clear();
 
+  std::set<const llvm::Value*> wl;
+
   // In the preprocessing step, tag anything that we know are never going to be
   // converted. These would be any LLVM debug and lifetime intrinsics but
   // could be other things as well
@@ -559,8 +608,26 @@ void CishPass::initialize(const Function& f) {
     if(const auto* call = dyn_cast<CallInst>(&inst))
       if(const Function* callee = call->getCalledFunction())
         if((callee->getName().find("llvm.dbg") == 0)
-           or (callee->getName().find("llvm.lifetime") == 0))
+           or (callee->getName().find("llvm.lifetime") == 0)) {
           ignore.insert(call);
+          wl.insert(call);
+        }
+
+  // Grow the ignore list to include anything that is only used by values in
+  // the ignore list
+  while(wl.size()) {
+    std::set<const Value*> next;
+    for(const Value* v : wl)
+      if(const auto* user = dyn_cast<User>(v))
+        for(const Use& op : user->operands())
+          if(allUsesIgnored(op.get()))
+            next.insert(op.get());
+    wl.clear();
+    for(const Value* v : next) {
+      ignore.insert(v);
+      wl.insert(v);
+    }
+  }
 }
 
 bool CishPass::allUsesIgnored(const Value* v) const {
@@ -572,6 +639,27 @@ bool CishPass::allUsesIgnored(const Value* v) const {
   return true;
 }
 
+bool CishPass::shouldUseTemporary(const Instruction& inst) {
+  // If there is zero or more than one use of the instruction, then create a
+  // temporary variable for it. This is particularly important in the case
+  // of function calls because if we don't do it this way and the result of
+  // a call is used more than once, the call will appear to be made multiple
+  // times, and if it is never used, then it will appear as if the call is
+  // never made. But if we always use a temporary, the result will never
+  // look remotely reasonable and we might as well just read LLVM.
+  size_t uses = inst.getNumUses();
+  // FIXME: Use llvm::CallBase for newer versions of LLVM
+  if((isa<CallInst>(inst) or isa<InvokeInst>(inst))
+          and (not inst.getType()->isVoidTy())
+          and ((uses == 0) or (uses > 1)))
+    return true;
+  else if(isa<GetElementPtrInst>(inst))
+    return false;
+  else if(not isa<AllocaInst>(inst) and (uses > 1))
+    return true;
+  return false;
+}
+
 bool CishPass::runOnFunction(Function& f) {
   initialize(f);
 
@@ -579,50 +667,62 @@ bool CishPass::runOnFunction(Function& f) {
   for(const Argument& arg : f.args())
     handle(arg);
 
-  cc.begin_func(f);
+  // LoopInfo& li = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+  // errs() << "loops: " << li.getLoopsInPreorder().size() << "\n";
+  // for(const Loop* loop : li) {
+  //   errs() << "Found a loop\n";
+  //   // for(const BasicBlock* bb : loop->blocks())
+  //   //   errs() << *bb << "\n";
+  // }
 
+  cc.begin_func(f);
   for(const BasicBlock& bb : f) {
     // Create a label for this basic block only if it is not the entry block
-    // of the function
-    // if(not bb.hasNPredecessors(0))
-    //   cc.label(ctxt.add(bb, ctxt.getNewVar("bb")));
+    // of the function. Unreachable basic blocks will probably only happen
+    // in broken code, but that doesn't really matter
+    if(not bb.hasNPredecessors(0))
+      // The basic block may have been encountered before because it may
+      // have appeared in a branch instruction that was seen earlier. In that
+      // case, call handle() with BasicBlock* because that will check if
+      // the basic block has already been converted
+      cc.label(handle(&bb));
     for(const Instruction& inst : bb) {
-      if((ignore.find(&inst) != ignore.end()) or allUsesIgnored(&inst))
+      if(ignore.find(&inst) != ignore.end())
         continue;
 
       if(const auto* alloca = dyn_cast<AllocaInst>(&inst)) {
         handle(*alloca);
         cc.add(ctxt.get<cish::Stmt>(alloca));
       } else if(const auto* call = dyn_cast<CallInst>(&inst)) {
+        handle(*call);
         if(call->getType()->isVoidTy())
-          cc.add(handle(*call));
+          cc.add(ctxt.get<cish::Stmt>(call));
       } else if(const auto* invoke = dyn_cast<InvokeInst>(&inst)) {
         handle(*invoke);
       } else if(const auto* load = dyn_cast<LoadInst>(&inst)) {
         handle(*load);
       } else if(const auto* store = dyn_cast<StoreInst>(&inst)) {
-        handle(*store);
-        cc.add(ctxt.get<cish::Stmt>(store));
+        cc.add(handle(*store));
       } else if(const auto* br = dyn_cast<BranchInst>(&inst)) {
-        handle(*br);
+        cc.add(handle(*br));
       } else if(const auto* ret = dyn_cast<ReturnInst>(&inst)) {
         cc.add(handle(ret));
       }
 
-      // If there is more than one use of the instruction, then create a
-      // temporary variable for it. This is particularly important in the case
-      // of function calls because if we don't do it this way and the result of
-      // a call is used more than once, the call will appear to be made multiple
-      // times. But if we always use a temporary, the result will never look
-      // remotely reasonable and we might as well just read LLVM
-      if(not isa<AllocaInst>(inst) and (inst.getNumUses() > 1)) {
+      if(shouldUseTemporary(inst)) {
         std::string varName = ctxt.getNewVar();
-        cc.reposition().add(varName).add(" = ").add(handle(&inst));
-        ctxt.add(inst, varName);
+        cc.reposition()
+            .add(handle(inst.getType()))
+            .space()
+            .add(varName)
+            .add(" = ")
+            .add(handle(&inst))
+            .add(";")
+            .endl();
+        ctxt.overwrite(inst, varName);
       }
     }
   }
-
   cc.end_func(f);
   cc.flush();
 

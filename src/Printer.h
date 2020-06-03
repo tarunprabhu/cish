@@ -70,6 +70,7 @@ public:
   Printer& end_func(const llvm::Function& f);
   Printer& begin_block(const std::string& label = "");
   Printer& end_block(const std::string& label = "");
+  Printer& label(const std::string&);
 
   Printer& add(const std::string&);
   Printer& add(const ASTBase& ast);

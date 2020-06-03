@@ -18,8 +18,8 @@ public:
   virtual ~Decl() = default;
 
   template <typename... T>
-  Decl(const llvm::Value& val, T&&... exprs)
-      : ASTBase(ASTKind::Decl), val(val) {
+  Decl(Context& ctxt, const llvm::Value& val, T&&... exprs)
+      : ASTBase(ctxt, ASTKind::Decl), val(val) {
     this->add(exprs...);
   }
 

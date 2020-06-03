@@ -18,9 +18,10 @@ public:
   Type(Type&&) = delete;
   virtual ~Type() = default;
 
+  /// @param ctxt The Context object containing all the AST nodes
   /// @param type The llvm::Type that this represents
   /// @param s The string representation of the type
-  Type(llvm::Type* type, const std::string& s);
+  Type(Context& ctxt, llvm::Type* type, const std::string& s);
 
   /// @returns The llvm::Type that this represents
   llvm::Type* getLLVM() const;

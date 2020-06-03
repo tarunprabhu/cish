@@ -28,8 +28,8 @@ public:
   virtual ~Expr() = default;
 
   template <typename... T>
-  Expr(const llvm::Value& val, T&&... exprs)
-      : ASTBase(ASTKind::Expr), val(val) {
+  Expr(Context& ctxt, const llvm::Value& val, T&&... exprs)
+      : ASTBase(ctxt, ASTKind::Expr), val(val) {
     this->add(exprs...);
     llvm::raw_string_ostream ss(parenthetized);
     ss << "(" << str() << ")";

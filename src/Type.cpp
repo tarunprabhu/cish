@@ -2,8 +2,8 @@
 
 namespace cish {
 
-Type::Type(llvm::Type* type, const std::string& s)
-    : ASTBase(ASTKind::Type, s), type(type) {
+Type::Type(Context& ctxt, llvm::Type* type, const std::string& s)
+    : ASTBase(ctxt, ASTKind::Type, s), type(type) {
   ;
 }
 
