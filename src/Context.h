@@ -6,6 +6,7 @@
 #include "Expr.h"
 #include "For.h"
 #include "If.h"
+#include "Map.h"
 #include "Stmt.h"
 #include "Type.h"
 #include "While.h"
@@ -13,7 +14,6 @@
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Value.h>
 
-#include <map>
 #include <memory>
 
 namespace cish {
@@ -23,26 +23,28 @@ namespace cish {
 /// of any temporary identifiers that have been generated.
 class Context {
 private:
-  uint64_t nextVarSuffix;
+  std::string varPrefix;
+  uint64_t varSuffix;
 
   // The same LLVM value could have more than one C representation
   // For instance, a function parameter could have a
   // declaration (with a type) and a use (which would be just the name).
   // Similarly, local variables would be allocas which would be a cish::Stmt
   // when declared but a cish::Expr when used
-  std::map<const llvm::Value*, std::unique_ptr<Decl>> decls;
-  std::map<const llvm::Value*, std::unique_ptr<Expr>> exprs;
-  std::map<const llvm::Loop*, std::unique_ptr<For>> fors;
-  std::map<const llvm::Value*, std::unique_ptr<If>> ifs;
-  std::map<const llvm::Value*, std::unique_ptr<Stmt>> stmts;
-  std::map<const llvm::Loop*, std::unique_ptr<While>> whiles;
-  std::map<llvm::Type*, std::unique_ptr<Type>> types;
+  cish::Map<const llvm::Value*, std::unique_ptr<Decl>> decls;
+  cish::Map<const llvm::Value*, std::unique_ptr<Expr>> exprs;
+  cish::Map<const llvm::Loop*, std::unique_ptr<For>> fors;
+  cish::Map<const llvm::Value*, std::unique_ptr<If>> ifs;
+  cish::Map<const llvm::Value*, std::unique_ptr<Stmt>> stmts;
+  cish::Map<const llvm::Loop*, std::unique_ptr<While>> whiles;
+  cish::Map<llvm::Type*, std::unique_ptr<Type>> types;
 
   // The original translations of the LLVM values that were overwritten
-  std::map<const llvm::Value*, std::unique_ptr<Expr>> ovrs;
+  cish::Map<const llvm::Value*, std::unique_ptr<Expr>> ovrs;
 
 public:
-  Context();
+  /// @param prefix The prefix to use when generating names
+  Context(const std::string& prefix);
   Context(const Context&) = delete;
   Context(Context&&) = delete;
   ~Context() = default;
@@ -54,7 +56,7 @@ public:
   ///                         name. Useful to disambiguate between local
   ///                         variables, args, blocks, labels etc.
   /// @returns The new variable name
-  std::string getNewVar(const std::string& prefix = "");
+  std::string getNewVar(const std::string& prefix = "v");
 
   /// Overwrite an existing Expr with the temporary variable name.
   /// @param val  The llvm::Value to be overwritten

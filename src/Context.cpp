@@ -4,19 +4,19 @@
 
 namespace cish {
 
-Context::Context() : nextVarSuffix(0) {
+Context::Context(const std::string& prefix) : varPrefix(prefix), varSuffix(0) {
   ;
 }
 
 std::string Context::getNewVar(const std::string& prefix) {
   std::string buf;
   llvm::raw_string_ostream ss(buf);
-  ss << "c__";
+  ss << varPrefix;
   if(prefix.length())
     ss << prefix << "_";
-  ss << nextVarSuffix;
+  ss << varSuffix;
 
-  nextVarSuffix++;
+  varSuffix++;
 
   return ss.str();
 }
@@ -67,40 +67,40 @@ While& Context::get(const llvm::Loop* loop) {
 
 template <>
 bool Context::has<Decl>(const llvm::Value* val) const {
-  return decls.find(val) != decls.end();
+  return decls.contains(val);
 }
 
 template <>
 bool Context::has<Expr>(const llvm::Value* val) const {
-  return exprs.find(val) != exprs.end();
+  return exprs.contains(val);
 }
 
 template <>
 bool Context::has<For>(const llvm::Loop* loop) const {
-  return fors.find(loop) != fors.end();
+  return fors.contains(loop);
 }
 
 template <>
 bool Context::has<If>(const llvm::Value* val) const {
-  return ifs.find(val) != ifs.end();
+  return ifs.contains(val);
 }
 
 template <>
 bool Context::has<Stmt>(const llvm::Value* val) const {
-  return stmts.find(val) != stmts.end();
+  return stmts.contains(val);
 }
 
 bool Context::has(llvm::Type* type) const {
-  return types.find(type) != types.end();
+  return types.contains(type);
 }
 
 template <>
 bool Context::has<While>(const llvm::Loop* loop) const {
-  return whiles.find(loop) != whiles.end();
+  return whiles.contains(loop);
 }
 
 bool Context::isOverwrite(const llvm::Value* val) const {
-    return ovrs.find(val) != ovrs.end();
+  return ovrs.contains(val);
 }
 
 bool Context::isOverwrite(const llvm::Value& val) const {
