@@ -34,9 +34,8 @@ void pass_by_value(struct Struct s) {
   srand(s.a);
 }
 
-struct Empty return_by_value() {
-  struct Empty e;
-  return e;
+struct Struct return_by_value(struct Struct* s) {
+  return *s;
 }
 
 long* return_local_field(int a, long *b, bool x, long double g) {
