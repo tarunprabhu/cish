@@ -6,9 +6,6 @@
 
 namespace cish {
 
-// Need to find a way to disable the use of this class to store bools
-// because vector<bool> is treated differently and breaks part of this
-// interface. For some reason,
 template <typename T,
           typename std::enable_if_t<!std::is_same<T, bool>::value, int> = 0>
 class Vector {
@@ -66,8 +63,6 @@ public:
   Vector(std::initializer_list<T> init) : _impl(init) {
     ;
   }
-
-  virtual ~Vector() = default;
 
   Vector<T>& operator=(const Vector<T>& other) {
     _impl = other.getImpl();

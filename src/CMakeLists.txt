@@ -7,6 +7,7 @@ set(SOURCES
   Expr.cpp
   For.cpp
   If.cpp
+  LLVMUtils.cpp
   Printer.cpp
   Stmt.cpp
   Type.cpp

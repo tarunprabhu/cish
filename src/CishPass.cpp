@@ -15,6 +15,7 @@
 
 #include "ASTBase.h"
 #include "Context.h"
+#include "LLVMUtils.h"
 #include "Map.h"
 #include "Printer.h"
 #include "Set.h"
@@ -63,14 +64,11 @@ static cl::list<Annotations> OptAnnotations(
                    "Annotations from cish that may or may not be helpful"),
         clEnumValN(Annotations::All, "all", "Add all kinds of annotations")));
 
-template <typename T>
-static bool isPointerToType(Type* ty) {
-  if(auto* pty = dyn_cast<PointerType>(ty))
-    return isa<T>(pty->getElementType());
-  return false;
-}
+static cl::opt<bool> OptQuit("cish-quiet",
+                             cl::desc("Do not print any messages"),
+                             cl::init(false));
 
-class CishPass : public FunctionPass {
+class CishPass : public ModulePass {
 public:
   static char ID;
 
@@ -92,11 +90,6 @@ protected:
             std::unique_ptr<Instruction, std::function<void(Instruction*)>>>
       cexprs;
 
-  // The user names for any values or structs that can be gleaned
-  // from the DebugInfo or elsewhere
-  cish::Map<const llvm::Value*, std::string> vnames;
-  cish::Map<llvm::StructType*, std::string> tnames;
-
   // The actual C code for the current function is here. It should be
   // cleared either after the function is done or before a new function is
   // started
@@ -104,6 +97,8 @@ protected:
 
 protected:
   void initialize(const Function& f);
+  void initialize(const Module& m);
+  void finalize(const Module& m);
   bool allUsesIgnored(const Value* v) const;
   bool shouldUseTemporary(const Instruction& inst);
   const llvm::Instruction&
@@ -135,7 +130,13 @@ protected:
 
   const cish::ASTBase& handle(const ConstantInt& cint);
   const cish::ASTBase& handle(const ConstantFP& cfp);
+  const cish::ASTBase& handle(const ConstantPointerNull& cnull);
   const cish::ASTBase& handle(const ConstantExpr& cexpr);
+  const cish::ASTBase& handle(const UndefValue& undef);
+  const cish::ASTBase& handle(const ConstantDataArray& cda);
+  const cish::ASTBase& handle(const ConstantArray& carray);
+  const cish::ASTBase& handle(const ConstantStruct& cstruct);
+  const cish::ASTBase& handle(const ConstantVector& cvec);
 
   const cish::ASTBase& handle(const BasicBlock& bb);
 
@@ -149,17 +150,27 @@ protected:
   const cish::ASTBase& handle(VectorType* vty);
   const cish::ASTBase& handle(Type* type);
 
+  void handleIndices(Type* ty,
+                     unsigned idx,
+                     const cish::Vector<const Value*>& indices,
+                     const Instruction& inst,
+                     raw_string_ostream& ss);
+
+  bool runOnFunction(Function& f);
+  bool runOnGlobal(GlobalVariable& g);
+  bool runOnStruct(StructType* sty);
+
 public:
   CishPass();
 
   virtual StringRef getPassName() const override;
   void getAnalysisUsage(AnalysisUsage& AU) const override;
-  virtual void print(raw_ostream& o, const Module* module) const override;
+  virtual void print(raw_ostream& o, const Module* m) const override;
 
-  virtual bool runOnFunction(Function& f) override;
+  virtual bool runOnModule(Module& m) override;
 };
 
-CishPass::CishPass() : FunctionPass(ID), ctxt(OptPrefix), cc(ctxt) {
+CishPass::CishPass() : ModulePass(ID), ctxt(OptPrefix), cc(ctxt) {
   for(IgnoreCasts ignore : OptIgnoreCasts)
     ignoreCasts.insert(ignore);
 
@@ -167,7 +178,7 @@ CishPass::CishPass() : FunctionPass(ID), ctxt(OptPrefix), cc(ctxt) {
     annotations.insert(a);
 
   if(annotations.size())
-    WithColor::warning() << "Annotations not implemented\n";
+    WithColor::warning(errs()) << "Annotations not implemented\n";
 }
 
 StringRef CishPass::getPassName() const {
@@ -241,8 +252,8 @@ const cish::ASTBase& CishPass::handle(const Function& f) {
 
   if(const DISubprogram* di = f.getSubprogram())
     return ctxt.add(f, di->getName());
-  else if(vnames.contains(&f))
-    return ctxt.add(f, vnames.at(&f));
+  else if(ctxt.hasSourceName(f))
+    return ctxt.add(f, ctxt.getSourceName(f));
   else
     return ctxt.add(f, f.getName().str());
 }
@@ -250,8 +261,8 @@ const cish::ASTBase& CishPass::handle(const Function& f) {
 const cish::ASTBase& CishPass::handle(const GlobalVariable& g) {
   if(g.hasName()) {
     return ctxt.add(g, g.getName().str());
-  } else if(vnames.contains(&g)) {
-    return ctxt.add(g, vnames.at(&g));
+  } else if(ctxt.hasSourceName(g)) {
+    return ctxt.add(g, ctxt.getSourceName(g));
   } else {
     return ctxt.add(g, ctxt.getNewVar("g"));
   }
@@ -261,8 +272,8 @@ const cish::ASTBase& CishPass::handle(const Argument& arg) {
   std::string name;
   if(arg.hasName()) {
     name = arg.getName().str();
-  } else if(vnames.contains(&arg)) {
-    name = vnames.at(&arg);
+  } else if(ctxt.hasSourceName(arg)) {
+    name = ctxt.getSourceName(arg);
   } else {
     std::string buf;
     raw_string_ostream ss(buf);
@@ -295,14 +306,41 @@ const cish::ASTBase& CishPass::handle(const ConstantInt& cint) {
 }
 
 const cish::ASTBase& CishPass::handle(const ConstantFP& cfp) {
-  const APFloat& value = cfp.getValueAPF();
-  Type* type = cfp.getType();
-  if(type->isFloatTy())
-    return ctxt.add(cfp, value.convertToFloat());
-  else if(type->isDoubleTy())
-    return ctxt.add(cfp, value.convertToDouble());
-  else
-    return ctxt.add(cfp, "0xUNKNOWN_FLOAT");
+  std::string buf;
+  raw_string_ostream ss(buf);
+  cfp.getValueAPF().print(ss);
+  // print() adds a newline at the end of the converted string. Obviously
+  // we don't want it
+  ss.flush();
+  return ctxt.add(cfp, buf.substr(0, buf.length() - 1));
+}
+
+const cish::ASTBase& CishPass::handle(const ConstantPointerNull& cnull) {
+  return ctxt.add(cnull, "NULL");
+}
+
+const cish::ASTBase& CishPass::handle(const UndefValue& undef) {
+  return ctxt.add(undef, "__undef__");
+}
+
+const cish::ASTBase& CishPass::handle(const ConstantArray& carray) {
+  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT ARRAY\n";
+  exit(1);
+}
+
+const cish::ASTBase& CishPass::handle(const ConstantDataArray& cda) {
+  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT DATA ARRAY\n";
+  exit(1);
+}
+
+const cish::ASTBase& CishPass::handle(const ConstantStruct& cstruct) {
+  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT STRUCT\n";
+  exit(1);
+}
+
+const cish::ASTBase& CishPass::handle(const ConstantVector& cvec) {
+  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT VECTOR\n";
+  exit(1);
 }
 
 const cish::ASTBase& CishPass::handle(const ConstantExpr& cexpr) {
@@ -313,8 +351,8 @@ const cish::ASTBase& CishPass::handle(const AllocaInst& alloca) {
   std::string name;
   if(alloca.hasName())
     name = alloca.getName();
-  else if(vnames.contains(&alloca))
-    name = vnames.at(&alloca);
+  else if(ctxt.hasSourceName(alloca))
+    name = ctxt.getSourceName(alloca);
   else
     name = ctxt.getNewVar("local");
 
@@ -375,12 +413,47 @@ const cish::ASTBase& CishPass::handle(const StoreInst& store) {
     return ctxt.add<cish::Stmt>(store, "*", dest, " = ", src);
 }
 
+void CishPass::handleIndices(Type* ty,
+                             unsigned idx,
+                             const cish::Vector<const Value*>& indices,
+                             const Instruction& inst,
+                             raw_string_ostream& ss) {
+  const Value* op = indices[idx];
+  Type* next = nullptr;
+  if(auto* pty = dyn_cast<PointerType>(ty)) {
+    ss << "[" << handle(op) << "]";
+    next = pty->getElementType();
+  } else if(auto* aty = dyn_cast<ArrayType>(ty)) {
+    ss << "[" << handle(op) << "]";
+    next = aty->getElementType();
+  } else if(auto* sty = dyn_cast<StructType>(ty)) {
+    if(auto* cint = dyn_cast<ConstantInt>(op)) {
+      unsigned field = cint->getLimitedValue();
+      ss << "." << ctxt.getElementName(sty, field);
+      next = sty->getElementType(field);
+    } else {
+      WithColor::error(errs()) << "Expected constant index in GEP\n"
+                               << "          idx: " << idx << "\n"
+                               << "           op: " << *op << "\n"
+                               << "         type: " << *ty << "\n"
+                               << "         inst: " << inst << "\n";
+      exit(1);
+    }
+  } else {
+    WithColor::error(errs())
+        << "GEP Indices not implemented for type: " << *ty << "\n";
+    exit(1);
+  }
+
+  if((idx + 1) < indices.size())
+    handleIndices(next, idx + 1, indices, inst, ss);
+}
+
 const cish::ASTBase& CishPass::handle(const GetElementPtrInst& gep) {
   std::string buf;
   raw_string_ostream ss(buf);
   const llvm::Value* ptr = gep.getPointerOperand();
   auto* pty = dyn_cast<PointerType>(ptr->getType());
-  Type* ety = pty->getElementType();
   const std::string& s = handle(gep.getPointerOperand()).str();
 
   // If the pointer operand is also a GEP and is not overwritten with a
@@ -389,18 +462,14 @@ const cish::ASTBase& CishPass::handle(const GetElementPtrInst& gep) {
     ss << s.substr(1);
   else
     ss << s;
-  if(ety->isIntegerTy() or ety->isFloatingPointTy() or ety->isPointerTy()) {
-    for(Value* op : gep.indices())
-      ss << "[" << handle(op) << "]";
-  } else {
-    WithColor::error(errs()) << "GEP Indices not implemented for type\n";
-    exit(1);
-  }
+  cish::Vector<const Value*> indices(gep.idx_begin(), gep.idx_end());
+  handleIndices(pty, 0, indices, gep, ss);
   return ctxt.add(gep, "&", ss.str());
 }
 
 const cish::ASTBase& CishPass::handle(const PHINode& phi) {
   // FIXME: This is not really correct
+  WithColor::warning(errs()) << "PHI nodes not correctly handled\n";
   return ctxt.add(phi, "PHI");
 }
 
@@ -612,12 +681,24 @@ const cish::ASTBase& CishPass::handle(const Value* v) {
     return handle(*cint);
   else if(const auto* cfp = dyn_cast<ConstantFP>(v))
     return handle(*cfp);
+  else if(const auto* cnull = dyn_cast<ConstantPointerNull>(v))
+    return handle(*cnull);
   else if(const auto* cexpr = dyn_cast<ConstantExpr>(v))
     return handle(*cexpr);
+  else if(const auto* undef = dyn_cast<UndefValue>(v))
+    return handle(*undef);
+  else if(const auto* carray = dyn_cast<ConstantArray>(v))
+    return handle(*carray);
+  else if(const auto* cda = dyn_cast<ConstantDataArray>(v))
+    return handle(*cda);
+  else if(const auto* cstruct = dyn_cast<ConstantStruct>(v))
+    return handle(*cstruct);
+  else if(const auto* cvec = dyn_cast<ConstantVector>(v))
+    return handle(*cvec);
   else if(const auto* bb = dyn_cast<BasicBlock>(v))
     return handle(*bb);
   else
-    WithColor(errs()) << "UNHANDLED: " << *v << "\n";
+    WithColor::error(errs()) << "UNHANDLED: " << *v << "\n";
 
   exit(1);
 }
@@ -667,12 +748,12 @@ const cish::ASTBase& CishPass::handle(ArrayType* aty) {
 
 const cish::ASTBase& CishPass::handle(StructType* sty) {
   if(sty->hasName()) {
-    // FIXME: If the struct can be associated with a user-defined type using
-    // debug info, that user name should be returned instead
     std::string buf;
     raw_string_ostream ss(buf);
     StringRef sname = sty->getName();
-    if(sname.find("struct.") == 0) {
+    if(ctxt.hasSourceName(sty)) {
+      ss << ctxt.getSourceName(sty);
+    } else if(sname.find("struct.") == 0) {
       ss << "struct " << sname.substr(7);
     } else if(sname.find("class.") == 0) {
       ss << sname.substr(6);
@@ -749,38 +830,7 @@ const cish::ASTBase& CishPass::handle(Type* type) {
   }
 }
 
-static bool mdHasName(const Metadata* md) {
-  if(isa<DILocalVariable>(md))
-    return true;
-  return false;
-}
-
-static std::string mdGetName(const Metadata* md) {
-  if(const auto* lv = dyn_cast<DILocalVariable>(md))
-    return lv->getName();
-
-  WithColor::error(errs()) << "Name not found in Metadata\n";
-  exit(1);
-}
-
 void CishPass::initialize(const Function& f) {
-  cc.clear();
-
-  for(const Instruction& inst : instructions(f)) {
-    if(const auto* call = dyn_cast<CallInst>(&inst)) {
-      if(const Function* f = call->getCalledFunction()) {
-        if(f->getName() == "llvm.dbg.value") {
-          const auto* mdv = dyn_cast<MetadataAsValue>(call->getArgOperand(0));
-          const auto* vdm = dyn_cast<ValueAsMetadata>(mdv->getMetadata());
-          const auto* md = dyn_cast<MetadataAsValue>(call->getArgOperand(1))
-                               ->getMetadata();
-          if(mdHasName(md))
-            vnames[vdm->getValue()] = mdGetName(md);
-        }
-      }
-    }
-  }
-
   // In the preprocessing step, tag anything that we know are never going to be
   // converted. These would be any LLVM debug and lifetime intrinsics but
   // could be other things as well
@@ -801,12 +851,37 @@ void CishPass::initialize(const Function& f) {
         for(const Use& op : user->operands())
           if(allUsesIgnored(op.get()))
             next.insert(op.get());
-    wl.clear();
-    for(const Value* v : next) {
+    for(const Value* v : next)
       ignoreValues.insert(v);
-      wl.insert(v);
+    wl = std::move(next);
+  }
+}
+
+void CishPass::initialize(const Module& m) {
+  ctxt.parseSourceInformation(m);
+
+  for(StructType* sty : m.getIdentifiedStructTypes()) {
+    if(not ctxt.hasElementNames(sty)) {
+      std::string buf;
+      raw_string_ostream ss(buf);
+      for(unsigned i = 0; i < sty->getNumElements(); i++) {
+        ss << "f_" << i;
+        ss.flush();
+        ctxt.addElementName(sty, ss.str());
+        buf.clear();
+      }
     }
   }
+
+  for(const Function& f : m.functions())
+    if(f.size())
+      initialize(f);
+}
+
+void CishPass::finalize(const Module& m) {
+  // Delete any instructions that were created when processing ConstantExpr's.
+  // Failure to do so will result in a broken module
+  cexprs.clear();
 }
 
 bool CishPass::allUsesIgnored(const Value* v) const {
@@ -836,9 +911,27 @@ bool CishPass::shouldUseTemporary(const Instruction& inst) {
   return false;
 }
 
-bool CishPass::runOnFunction(Function& f) {
-  initialize(f);
+bool CishPass::runOnStruct(StructType* sty) {
+  cc.reposition().add(handle(sty).str()).add(" {").endl().tab();
+  for(unsigned i = 0; i < sty->getNumElements(); i++) {
+    cc.reposition()
+        .add(handle(sty->getElementType(i)))
+        .space()
+        .add(ctxt.getElementName(sty, i))
+        .add(";")
+        .endl();
+  }
+  cc.untab().add("};").endl().endl();
 
+  return false;
+}
+
+bool CishPass::runOnGlobal(GlobalVariable& g) {
+  WithColor::warning(errs()) << "UNIMPLEMENTED: Converting globals\n";
+  return false;
+}
+
+bool CishPass::runOnFunction(Function& f) {
   handle(f);
   for(const Argument& arg : f.args())
     handle(arg);
@@ -889,8 +982,8 @@ bool CishPass::runOnFunction(Function& f) {
       if(shouldUseTemporary(inst)) {
         cc.reposition();
         std::string varName;
-        if(vnames.contains(&inst)) {
-          varName = vnames.at(&inst);
+        if(ctxt.hasSourceName(inst)) {
+          varName = ctxt.getSourceName(inst);
         } else {
           varName = ctxt.getNewVar();
           cc.add(handle(inst.getType())).space();
@@ -903,9 +996,21 @@ bool CishPass::runOnFunction(Function& f) {
   cc.end_func(f);
   cc.flush();
 
-  // Delete any instructions that were created when processing ConstantExpr's.
-  // Failure to do so will result in a broken module
-  cexprs.clear();
+  return false;
+}
+
+bool CishPass::runOnModule(Module& m) {
+  initialize(m);
+
+  for(StructType* sty : m.getIdentifiedStructTypes())
+    runOnStruct(sty);
+  for(GlobalVariable& g : m.globals())
+    runOnGlobal(g);
+  for(Function& f : m.functions())
+    if(f.size())
+      runOnFunction(f);
+
+  finalize(m);
 
   return false;
 }

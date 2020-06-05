@@ -20,6 +20,57 @@ public:
   using const_iterator = typename std::map<K, V>::const_iterator;
 
 protected:
+  template <typename IteratorT>
+  class key_iterator_t : public IteratorT {
+  public:
+    key_iterator_t() : IteratorT() {}
+    key_iterator_t(IteratorT i) : IteratorT(i) {}
+    key_type& operator->() {
+      return IteratorT::operator->()->first;
+    }
+    key_type& operator*() {
+      return IteratorT::operator*().first;
+    }
+  };
+
+  template <typename IteratorT>
+  class mapped_iterator_t : public IteratorT {
+  public:
+    mapped_iterator_t() : IteratorT() {}
+    mapped_iterator_t(IteratorT i) : IteratorT(i) {}
+    mapped_type& operator->() {
+      return IteratorT::operator->()->second;
+    }
+    mapped_type& operator*() {
+      return IteratorT::operator*().second;
+    }
+  };
+
+public:
+  template <typename IteratorT>
+  class iterator_range {
+  protected:
+    IteratorT b, e;
+
+  public:
+    iterator_range(IteratorT begin, IteratorT end)
+        : b(std::move(begin)), e(std::move(end)) {}
+
+    IteratorT begin() const {
+      return b;
+    }
+    IteratorT end() const {
+      return e;
+    }
+  };
+
+public:
+  using key_iterator = key_iterator_t<iterator>;
+  using const_key_iterator = key_iterator_t<const_iterator>;
+  using mapped_iterator = mapped_iterator_t<iterator>;
+  using const_mapped_iterator = mapped_iterator_t<const_iterator>;
+
+protected:
   std::map<K, V>& getImpl() {
     return _impl;
   }
@@ -53,8 +104,6 @@ public:
   Map(std::initializer_list<value_type> init) : _impl(init) {
     ;
   }
-
-  virtual ~Map() = default;
 
   Map<K, V>& operator=(const Map<K, V>& other) {
     _impl = other.getImpl();
@@ -150,22 +199,24 @@ public:
     return _impl.find(k) != _impl.end();
   }
 
-  cish::Vector<K> keys() const {
-    cish::Vector<K> ret;
-
-    for(const auto& it : *this)
-      ret.push_back(it.first);
-
-    return std::move(ret);
+  iterator_range<key_iterator> keys() {
+    return iterator_range<key_iterator>(key_iterator(begin()),
+                                        key_iterator(end()));
   }
 
-  cish::Vector<V> values() const {
-    cish::Vector<V> ret;
+  iterator_range<const_key_iterator> keys() const {
+    return iterator_range<const_key_iterator>(const_key_iterator(begin()),
+                                              const_key_iterator(end()));
+  }
 
-    for(const auto& it : *this)
-      ret.push_back(it.second);
+  iterator_range<mapped_iterator> values() {
+    return iterator_range<mapped_iterator>(mapped_iterator(begin()),
+                                           mapped_iterator(end()));
+  }
 
-    return ret;
+  iterator_range<const_mapped_iterator> values() const {
+    return iterator_range<const_mapped_iterator>(const_mapped_iterator(begin()),
+                                                 const_mapped_iterator(end()));
   }
 
   bool operator==(const Map<K, V>& c2) const {

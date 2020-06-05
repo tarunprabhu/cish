@@ -60,8 +60,6 @@ public:
     ;
   }
 
-  virtual ~Set() = default;
-
   Set<T>& operator=(const Set<T>& other) {
     _impl = other.getImpl();
     return *this;
