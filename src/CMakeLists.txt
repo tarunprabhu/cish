@@ -1,23 +1,14 @@
 set(SOURCES
-  ASTBase.cpp
-  Context.cpp
-  CishPreparePass.cpp
-  CishPass.cpp
-  Decl.cpp
-  Expr.cpp
-  For.cpp
-  If.cpp
+  cish.cpp
+  CishContext.cpp
+  # CishPreparePass.cpp
+  DIParser.cpp
+  LLVMParser.cpp
   LLVMUtils.cpp
   Printer.cpp
-  Stmt.cpp
-  Type.cpp
-  While.cpp)
+  Stream.cpp)
 
-set(CISH_LIBNAME Cish)
-
-# Don't need to link any of the LLVM libraries because this is meant to be
-# used with LLVM's opt tool and that will have all the libraries linked
-# Linking LLVM here anyway will result in duplicate definition errors
-# from LLVM's commandline libraries which has a lot of global static stuff
-# in header files
-add_library(${CISH_LIBNAME} SHARED ${SOURCES})
+set(CISH cish)
+add_executable(${CISH} ${SOURCES})
+target_link_directories(${CISH} PUBLIC ${LLVM_LIBRARY_DIR} ${Clang_DIR})
+target_link_libraries(${CISH} clangAST clangBasic LLVM)
