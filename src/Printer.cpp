@@ -12,21 +12,20 @@ using namespace clang;
 
 namespace cish {
 
-Printer::Printer(clang::ASTContext& astContext, const FormatOptions& fmtOpts)
-    : astContext(astContext), fmtOpts(fmtOpts) {
+Printer::Printer(CishContext& context)
+    : astContext(context.getASTContext()), fmtOpts(context.getFormatOptions()) {
   ;
 }
 
 void Printer::run(llvm::raw_ostream& os) {
   Stream stream(astContext, fmtOpts, os);
 
-  const TranslationUnitDecl& tu = *astContext.getTranslationUnitDecl();
   Vector<const RecordDecl*> structs;
   Vector<const VarDecl*> globals;
   Vector<const FunctionDecl*> decls;
   Vector<const FunctionDecl*> funcs;
 
-  for(Decl* decl : tu.decls())
+  for(Decl* decl : astContext.getTranslationUnitDecl()->decls())
     if(const auto* record = dyn_cast<RecordDecl>(decl))
       structs.push_back(record);
     else if(const auto* global = dyn_cast<VarDecl>(decl))

@@ -3,6 +3,8 @@
 
 #include "Set.h"
 
+#include <string>
+
 namespace cish {
 
 enum class IgnoreCasts {
@@ -30,6 +32,8 @@ enum class Parens {
 };
 
 struct FormatOptions {
+  // The prefix string to use for generated variable names
+  std::string prefix;
   Set<IgnoreCasts> ignoreCasts;
   Set<Annotations> annotations;
   Indentation indentation;

@@ -6,18 +6,19 @@
 
 #include <clang/AST/ExprCXX.h>
 
+#include "CishContext.h"
+#include "DIParser.h"
+#include "LLVMBackend.h"
 #include "Map.h"
 #include "Set.h"
 
 namespace cish {
 
-class CishContext;
-class DIParser;
-
 class LLVMParser {
 protected:
-  CishContext& ctxt;
-  const DIParser& di;
+  CishContext& context;
+  LLVMBackend cg;
+  DIParser di;
 
   // Options from the command line
   // Set<IgnoreCasts> ignoreCasts;
@@ -86,8 +87,7 @@ protected:
   void handleIndices(llvm::Type* ty,
                      unsigned idx,
                      const Vector<const llvm::Value*>& indices,
-                     const llvm::Instruction& inst,
-                     llvm::raw_string_ostream& ss);
+                     const llvm::Instruction& inst);
 
   std::string getName(llvm::StructType* sty);
   std::string getName(const llvm::Value* v, const std::string& prefix = "");
@@ -99,7 +99,9 @@ protected:
   void runOnStruct(llvm::StructType* sty);
 
 public:
-  LLVMParser(CishContext& ctxt, const DIParser& di);
+  LLVMParser(CishContext& context);
+  LLVMParser(const LLVMParser&) = delete;
+  LLVMParser(LLVMParser&&) = delete;
 
   void runOnModule(const llvm::Module& m);
 };

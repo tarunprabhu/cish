@@ -1,6 +1,7 @@
 #ifndef CISH_PRINTER_H
 #define CISH_PRINTER_H
 
+#include "CishContext.h"
 #include "FormatOptions.h"
 
 #include <clang/AST/ASTContext.h>
@@ -15,7 +16,7 @@ protected:
   const FormatOptions& fmtOpts;
 
 public:
-  Printer(clang::ASTContext& astContext, const FormatOptions& fmtOpts);
+  Printer(CishContext& context);
   Printer(const Printer&) = delete;
   Printer(Printer&&) = delete;
   ~Printer() = default;

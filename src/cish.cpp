@@ -1,14 +1,13 @@
 #include "CishContext.h"
 #include "DIParser.h"
 #include "FormatOptions.h"
+#include "LLVMBackend.h"
 #include "LLVMParser.h"
 #include "Printer.h"
 #include "Set.h"
 #include "Stream.h"
 
-#include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
-#include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Basic/Builtins.h>
 
 #include <llvm/IR/LLVMContext.h>
@@ -135,46 +134,20 @@ void initLLVM(int argc, char* argv[]) {
 }
 
 int main(int argc, char* argv[]) {
-  llvm::LLVMContext llvmContext;
+  cish::CishContext context;
   initLLVM(argc, argv);
 
   llvm::SMDiagnostic err;
   std::unique_ptr<llvm::Module> pModule
-      = parseIRFile(optFilename, err, llvmContext);
+      = parseIRFile(optFilename, err, context.getLLVMContext());
   if(!pModule) {
     err.print(argv[0], llvm::errs());
     return 1;
   }
 
-  // If we have a valid LLVM module, go through the whole rigmarole of
-  // creating a clang ASTContext
-  clang::FileSystemOptions fileOpts;
-  clang::FileManager fileMgr(fileOpts);
-
-  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagIDs(
-      new clang::DiagnosticIDs());
-  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diagOpts(
-      new clang::DiagnosticOptions());
-  clang::DiagnosticsEngine diagEngine(diagIDs, diagOpts);
-  clang::SourceManager srcMgr(diagEngine, fileMgr);
-
-  clang::LangOptions langOpts;
-  langOpts.CPlusPlus11 = true;
-  langOpts.Bool = true;
-
-  clang::IdentifierTable idents(langOpts);
-  clang::Builtin::Context builtins;
-  clang::SelectorTable sels;
-
-  std::shared_ptr<clang::TargetOptions> targetOpts(new clang::TargetOptions());
-  targetOpts->Triple = pModule->getTargetTriple();
-  clang::TargetInfo& targetInfo
-      = *clang::TargetInfo::CreateTargetInfo(diagEngine, targetOpts);
-
-  clang::ASTContext astContext(langOpts, srcMgr, idents, sels, builtins);
-  astContext.InitBuiltinTypes(targetInfo);
-
-  cish::FormatOptions fmtOpts;
+  context.createASTContext(pModule->getTargetTriple());
+  cish::FormatOptions& fmtOpts = context.getFormatOptions();
+  fmtOpts.prefix = optPrefix;
   fmtOpts.ignoreCasts.insert(optIgnoreCasts.begin(), optIgnoreCasts.end());
   fmtOpts.annotations.insert(optAnnotations.begin(), optAnnotations.end());
   fmtOpts.indentation = optIndentation;
@@ -182,12 +155,9 @@ int main(int argc, char* argv[]) {
   fmtOpts.offset = optOffset;
 
   // Now that the clang AST Context has been set up, get down to business
-  cish::CishContext cishContext(optPrefix, astContext);
-  cish::DIParser diParser;
-  cish::LLVMParser llvmParser(cishContext, diParser);
-  cish::Printer printer(astContext, fmtOpts);
+  cish::LLVMParser llvmParser(context);
+  cish::Printer printer(context);
 
-  diParser.runOnModule(*pModule);
   llvmParser.runOnModule(*pModule);
   if(optOutput == "-") {
     llvm::raw_fd_ostream fs(STDOUT_FILENO, false);
@@ -203,8 +173,6 @@ int main(int argc, char* argv[]) {
       fs.close();
     }
   }
-
-  llvm::llvm_shutdown();
 
   return 0;
 }
