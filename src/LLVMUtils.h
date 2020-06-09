@@ -11,11 +11,25 @@
 /// @returns Returns the @i'th argument of function @f
 const llvm::Argument& getArg(const llvm::Function& f, unsigned i);
 
+/// @param f The llvm::Instruction
+/// @returns The function to which this instruction belongs
+const llvm::Function& getFunction(const llvm::Instruction& inst);
+
+/// @param f The llvm::Instruction
+/// @returns The function to which this instruction belongs
+const llvm::Function& getFunction(const llvm::Instruction* inst);
+
+/// @param ty The llvm::Type
+/// @returns true if @ty is a pointer to the template parameter type T
 template <typename T>
-static bool isPointerToType(llvm::Type* ty) {
+bool isPointerToType(llvm::Type* ty) {
   if(auto* pty = llvm::dyn_cast<llvm::PointerType>(ty))
     return llvm::isa<T>(pty->getElementType());
   return false;
 }
+
+/// @param aty The llvm::ArrayType
+/// @returns The innermost non-array type within @aty
+llvm::Type* getBaseType(llvm::ArrayType* aty);
 
 #endif // CISH_LLVM_UTILS_H

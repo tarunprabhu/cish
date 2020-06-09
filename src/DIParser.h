@@ -5,6 +5,7 @@
 #include <llvm/IR/Module.h>
 
 #include "Map.h"
+#include "Set.h"
 #include "Vector.h"
 
 namespace cish {
@@ -17,6 +18,8 @@ protected:
   Map<const llvm::Value*, std::string> valueNames;
   Map<llvm::StructType*, std::string> structNames;
   Map<llvm::StructType*, Vector<std::string>> elemNames;
+  Set<const llvm::Value*> cstrings;
+  Set<const llvm::Value*> stringLiterals;
 
 protected:
   void runOnStruct(llvm::StructType* sty,
@@ -32,15 +35,20 @@ protected:
   void runOnFunction(const llvm::Function& f);
 
 public:
-  bool hasSourceName(const llvm::Value* v) const;
-  bool hasSourceName(const llvm::Value& v) const;
-  bool hasSourceName(llvm::StructType* sty) const;
-  bool hasSourceName(llvm::StructType* sty, unsigned i) const;
+  bool isCString(const llvm::Value* g) const;
+  bool isCString(const llvm::Value& g) const;
+  bool isStringLiteral(const llvm::Value& g) const;
+  bool isStringLiteral(const llvm::Value* g) const;
 
-  const std::string& getSourceName(const llvm::Value* v) const;
-  const std::string& getSourceName(const llvm::Value& v) const;
-  const std::string& getSourceName(llvm::StructType* sty) const;
-  const std::string& getSourceName(llvm::StructType* sty, unsigned i) const;
+  bool hasName(const llvm::Value* v) const;
+  bool hasName(const llvm::Value& v) const;
+  bool hasName(llvm::StructType* sty) const;
+  bool hasElementName(llvm::StructType* sty, unsigned i) const;
+
+  const std::string& getName(const llvm::Value* v) const;
+  const std::string& getName(const llvm::Value& v) const;
+  const std::string& getName(llvm::StructType* sty) const;
+  const std::string& getElementName(llvm::StructType* sty, unsigned i) const;
 
   void runOnModule(const llvm::Module& m);
 };

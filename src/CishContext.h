@@ -13,12 +13,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 
-// #include <clang/AST/Decl.h>
-// #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
-// #include <clang/AST/Stmt.h>
-// #include <clang/AST/ASTContext.h>
-// #include <clang/Basic/Builtins.h>
 
 #include <memory>
 
@@ -30,11 +25,11 @@ namespace cish {
 /// and any that are generated
 class CishContext {
 private:
-  // The current function being constructed
-  clang::FunctionDecl* currFunc;
-
   std::string varPrefix;
   uint64_t varSuffix;
+
+  // The statements comprising the body of the function
+  std::vector<clang::Stmt*> stmts;
 
   // The same LLVM value could have more than one C representation
   // For instance, a function parameter could have a
@@ -61,6 +56,8 @@ private:
   Map<const llvm::Value*, clang::DeclStmt*> temps;
   Map<llvm::Type*, clang::QualType> types;
   Map<llvm::StructType*, clang::RecordDecl*> udts;
+  Map<const llvm::Function*, clang::FunctionDecl*> funcs;
+  Map<const llvm::BasicBlock*, clang::LabelDecl*> blocks;
 
   // All of these are needed to set up the clang::ASTContext object
   // std::unique_ptr<clang::ASTContext> astContext;
@@ -74,14 +71,6 @@ protected:
   ClassT& add(const llvm::Value& val, ClassT* ast) {
     return *llvm::dyn_cast<ClassT>(exprs[&val] = ast);
   }
-
-  clang::Decl* getCurrentDecl();
-
-  clang::QualType add(llvm::IntegerType* ity);
-  clang::QualType add(llvm::PointerType* pty);
-  clang::QualType add(llvm::ArrayType* aty);
-  clang::QualType add(llvm::FunctionType* fty);
-  clang::QualType add(llvm::VectorType* vty);
 
 public:
   /// @param prefix The prefix to use when generating names
@@ -99,48 +88,65 @@ public:
   /// @returns The new variable name
   std::string getNewVar(const std::string& prefix = "v");
 
-  clang::DeclRefExpr& add(const llvm::AllocaInst& alloca,
+  void beginFunction(const llvm::Function& f);
+  void endFunction(const llvm::Function& f);
+  void beginBlock(const llvm::BasicBlock& bb);
+  void endBlock(const llvm::BasicBlock& bb);
+
+  clang::Stmt& add(const llvm::AllocaInst& alloca,
                           const std::string& name);
   clang::Stmt& add(const llvm::BranchInst& br);
-  clang::CastExpr& add(const llvm::CastInst& cst);
-  clang::CallExpr& add(const llvm::CallInst& call);
-  clang::CallExpr& add(const llvm::InvokeInst& call);
-  clang::Expr& add(const llvm::LoadInst& load);
-  clang::BinaryOperator& add(const llvm::StoreInst& store);
-  clang::BinaryOperator& add(const llvm::BinaryOperator& inst,
+  clang::Stmt& add(const llvm::CastInst& cst);
+  clang::Stmt& add(const llvm::CallInst& call);
+  clang::Stmt& add(const llvm::InvokeInst& call);
+  clang::Stmt& add(const llvm::LoadInst& load);
+  clang::Stmt& add(const llvm::StoreInst& store);
+  clang::Stmt& add(const llvm::BinaryOperator& inst,
                              clang::BinaryOperator::Opcode opc);
-  clang::BinaryOperator& add(const llvm::CmpInst& cmp,
+  clang::Stmt& add(const llvm::CmpInst& cmp,
                              clang::BinaryOperator::Opcode opc);
-  clang::UnaryOperator& add(const llvm::UnaryOperator& inst,
+  clang::Stmt& add(const llvm::UnaryOperator& inst,
                             clang::UnaryOperator::Opcode opc);
-  clang::DeclRefExpr& add(const llvm::PHINode& phi, const std::string& name);
-  clang::ConditionalOperator& add(const llvm::SelectInst& select);
-  clang::ReturnStmt& add(const llvm::ReturnInst& ret);
+  clang::Stmt& add(const llvm::PHINode& phi, const std::string& name);
+  clang::Stmt& add(const llvm::SelectInst& select);
+  clang::Stmt& add(const llvm::ReturnInst& ret);
 
-  clang::IntegerLiteral& add(const llvm::ConstantInt& cint);
-  clang::FloatingLiteral& add(const llvm::ConstantFP& cfp);
-  clang::CXXNullPtrLiteralExpr& add(const llvm::ConstantPointerNull& cnull);
-  clang::GNUNullExpr& add(const llvm::UndefValue& cundef);
-  clang::CXXStdInitializerListExpr& add(const llvm::ConstantDataArray& cda);
-  clang::CXXStdInitializerListExpr& add(const llvm::ConstantStruct& cstruct);
+  clang::Stmt& add(const llvm::ConstantInt& cint);
+  clang::Stmt& add(const llvm::ConstantFP& cfp);
+  clang::Stmt& add(const llvm::ConstantPointerNull& cnull);
+  clang::Stmt& add(const llvm::ConstantAggregateZero& czero);
+  clang::Stmt& add(const llvm::UndefValue& cundef);
+  clang::Stmt& add(const llvm::ConstantDataArray& cda);
+  clang::Stmt& add(const llvm::ConstantStruct& cstruct);
   clang::Stmt& add(const llvm::ConstantExpr& cexpr,
-                   const llvm::Instruction& inst);
-  clang::Expr& add(const llvm::ConstantArray& carray);
+                   const llvm::Value& val);
+  clang::Stmt& add(const llvm::ConstantArray& carray);
 
-  clang::DeclRefExpr& add(const llvm::Function& f, const std::string& name);
-  clang::DeclRefExpr& add(const llvm::GlobalVariable& g,
+  clang::Stmt& add(const llvm::Function& f, const std::string& name,
+                   const Vector<std::string>& argNames = {});
+  clang::Stmt& add(const llvm::GlobalVariable& g,
                           const std::string& name);
-  clang::DeclRefExpr& add(const llvm::Argument& arg, const std::string& name);
+  clang::Stmt& add(const llvm::Argument& arg, const std::string& name);
 
-  clang::DeclRefExpr& add(const llvm::BasicBlock& bb, const std::string& name);
+  void add(const llvm::BasicBlock& bb, const std::string& name = "");
 
+
+  clang::QualType add(llvm::IntegerType* ity);
+  clang::QualType add(llvm::PointerType* pty);
+  clang::QualType add(llvm::ArrayType* aty);
+  clang::QualType add(llvm::FunctionType* fty);
+  clang::QualType add(llvm::VectorType* vty);
   clang::QualType add(llvm::Type* type);
+
+  // Struct types need to be added in two phases because they may be recursive.
+  // In the first phase, all the structs are added and they are all empty.
+  // In the second phase, bodies are added to all of them.
   clang::QualType add(llvm::StructType* sty,
-                      const std::string& name,
+                      const std::string& name);
+  clang::QualType add(llvm::StructType* sty,
                       const Vector<std::string>& elems);
 
-  clang::DeclRefExpr&
-  addTemp(const llvm::Value& val, const std::string& name);
+  void addTemp(const llvm::Instruction& val, const std::string& name);
 
   template <
       typename ClangT = clang::Stmt,
@@ -156,18 +162,20 @@ public:
     return get<ClangT>(&val);
   }
 
-  template<typename ClangT,
-    std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value& val) {
-    return llvm::dyn_cast<ClangT>(get<clang::DeclRefExpr>(val).getFoundDecl());
-  }
-
-  template<typename ClangT,
-    std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
+  template <
+      typename ClangT,
+      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
   ClangT& get(const llvm::Value* val) {
-    return *llvm::dyn_cast<ClangT>(get<clang::DeclRefExpr>(val).getFoundDecl());
+    return *llvm::dyn_cast<ClangT>(
+        get<clang::DeclRefExpr>(val).getFoundDecl());
   }
 
+  template <
+      typename ClangT,
+      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
+  ClangT& get(const llvm::Value& val) {
+    return get<ClangT>(&val);
+  }
 
   // /// @param loop A llvm::Loop
   // /// @returns The AST node for the llvm::Loop @loop

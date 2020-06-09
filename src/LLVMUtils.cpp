@@ -13,3 +13,18 @@ const Argument& getArg(const Function& f, unsigned i) {
                            << f.getName() << "\n";
   exit(1);
 }
+
+const Function& getFunction(const Instruction& inst) {
+  return *inst.getParent()->getParent();
+}
+
+const Function& getFunction(const Instruction* inst) {
+  return getFunction(*inst);
+}
+
+llvm::Type* getBaseType(ArrayType* aty) {
+  Type* ety = aty->getElementType();
+  if(auto* bty = dyn_cast<ArrayType>(ety))
+    return getBaseType(bty);
+  return ety;
+}

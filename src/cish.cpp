@@ -59,21 +59,36 @@ static cl::list<cish::Annotations> optAnnotations(
 static cl::opt<cish::Indentation> optIndentation(
     "indentation",
     cl::desc("The indentation style to use"),
-    cl::values(clEnumValN(cish::Indentation::KR, "kr", "K&R style"),
-               clEnumValN(cish::Indentation::Allman, "allman", "Allman style"),
-               clEnumValN(cish::Indentation::Stroustrup,
-                          "stroupstrup",
-                          "Stroustrup style")),
+    cl::values(
+        clEnumValN(cish::Indentation::KR, "kr", "K&R style"),
+        clEnumValN(cish::Indentation::Allman, "allman", "Allman style"),
+        clEnumValN(
+            cish::Indentation::Stroustrup,
+            "stroupstrup",
+            "Stroustrup style (like K&R but without the \"cuddled else\")")),
     cl::value_desc("style"),
     cl::init(cish::Indentation::KR),
     cl::cat(cishOptionCategory));
+
+static cl::opt<cish::Parens>
+    optParens("parens",
+              cl::desc("How to use parentheses in expressions"),
+              cl::values(clEnumValN(cish::Parens::Always,
+                                    "always",
+                                    "Always use parentheses"),
+                         clEnumValN(cish::Parens::Smart,
+                                    "smart",
+                                    "Be smart about using parentheses")),
+              cl::init(cish::Parens::Smart),
+              cl::cat(cishOptionCategory));
 
 static cl::opt<unsigned>
     optOffset("offset",
               cl::desc("Number of spaces to use for indentation. If 0, tabs "
                        "are used instead of spaces"),
               cl::value_desc("<n>"),
-              cl::init(4));
+              cl::init(4),
+              cl::cat(cishOptionCategory));
 
 static cl::opt<bool> optQuiet("quiet",
                               cl::desc("Do not print any messages"),
@@ -163,6 +178,7 @@ int main(int argc, char* argv[]) {
   fmtOpts.ignoreCasts.insert(optIgnoreCasts.begin(), optIgnoreCasts.end());
   fmtOpts.annotations.insert(optAnnotations.begin(), optAnnotations.end());
   fmtOpts.indentation = optIndentation;
+  fmtOpts.parens = optParens;
   fmtOpts.offset = optOffset;
 
   // Now that the clang AST Context has been set up, get down to business
@@ -187,15 +203,6 @@ int main(int argc, char* argv[]) {
       fs.close();
     }
   }
-
-  // for(IgnoreCasts ignore : OptIgnoreCasts)
-  //   ignoreCasts.insert(ignore);
-
-  // for(Annotations a : OptAnnotations)
-  //   annotations.insert(a);
-
-  // if(annotations.size())
-  //   WithColor::warning(errs()) << "Annotations not implemented\n";
 
   llvm::llvm_shutdown();
 

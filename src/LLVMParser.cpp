@@ -52,51 +52,70 @@ LLVMParser::getInstructionForConstantExpr(const ConstantExpr& cexpr) {
   return *cexprs.at(&cexpr);
 }
 
-clang::IntegerLiteral& LLVMParser::handle(const ConstantInt& cint) {
+const ConstantDataArray*
+LLVMParser::getStringLiteral(const llvm::Instruction& inst) {
+  if(const auto* gep = dyn_cast<GetElementPtrInst>(&inst))
+    if(di.isStringLiteral(gep->getPointerOperand())
+       and gep->hasAllZeroIndices())
+      return dyn_cast<ConstantDataArray>(
+          dyn_cast<GlobalVariable>(gep->getPointerOperand())->getInitializer());
+  return nullptr;
+}
+
+void LLVMParser::handle(const ConstantInt& cint) {
   handle(cint.getType());
-  return ctxt.add(cint);
+  ctxt.add(cint);
 }
 
-clang::FloatingLiteral& LLVMParser::handle(const ConstantFP& cfp) {
+void LLVMParser::handle(const ConstantFP& cfp) {
   handle(cfp.getType());
-  return ctxt.add(cfp);
+  ctxt.add(cfp);
 }
 
-clang::CXXNullPtrLiteralExpr&
+void
 LLVMParser::handle(const ConstantPointerNull& cnull) {
   handle(cnull.getType());
-  return ctxt.add(cnull);
+  ctxt.add(cnull);
+}
+
+void LLVMParser::handle(const ConstantAggregateZero& czero) {
+  handle(czero.getType());
+  ctxt.add(czero);
 }
 
 // This is a somewhat grotesque abuse of things. But there isn't an equivalent
 // clang Expr for LLVM's undef value. Until (if) I actually make one, just
 // use the GNUNullExpr instead to refer to this undef value
-clang::GNUNullExpr& LLVMParser::handle(const UndefValue& undef) {
+void LLVMParser::handle(const UndefValue& undef) {
   handle(undef.getType());
-  return ctxt.add(undef);
+  ctxt.add(undef);
 }
 
-clang::Expr& LLVMParser::handle(const ConstantArray& carray) {
-  // Not really sure what to do here because I am not sure if we an just
-  // use C++11 initializer lists for this
-  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT ARRAY\n";
-  exit(1);
+void LLVMParser::handle(const ConstantArray& carray) {
+  handle(carray.getType());
+  for(const Use& op : carray.operands())
+    handle(op.get());
+
+  ctxt.add(carray);
 }
 
-clang::CXXStdInitializerListExpr&
-LLVMParser::handle(const ConstantDataArray& cda) {
-  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT DATA ARRAY\n";
-  exit(1);
+void LLVMParser::handle(const ConstantDataArray& cda) {
+  handle(cda.getType());
+  if(not(cda.isCString() or cda.isString()))
+    for(unsigned i = 0; i < cda.getNumElements(); i++)
+      handle(cda.getElementAsConstant(i));
+  ctxt.add(cda);
 }
 
-clang::CXXStdInitializerListExpr&
-LLVMParser::handle(const ConstantStruct& cstruct) {
-  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT STRUCT\n";
-  exit(1);
+void LLVMParser::handle(const ConstantStruct& cstruct) {
+  handle(cstruct.getType());
+  for(const Use& op : cstruct.operands())
+    handle(op.get());
+
+  ctxt.add(cstruct);
 }
 
-clang::CXXStdInitializerListExpr&
-LLVMParser::handle(const ConstantVector& cvec) {
+void LLVMParser::handle(const ConstantVector& cvec) {
   // We may be able to use something else to explicitly represent a vector
   // since obviously nothing precisely like it exists in C/C++, but an
   // initializer list ought to be good enough and once annotations are
@@ -106,67 +125,50 @@ LLVMParser::handle(const ConstantVector& cvec) {
   exit(1);
 }
 
-clang::Expr& LLVMParser::handle(const ConstantExpr& cexpr) {
+void LLVMParser::handle(const ConstantExpr& cexpr) {
   const llvm::Instruction& inst = getInstructionForConstantExpr(cexpr);
-  handle(&inst);
-  return llvm::cast<clang::Expr>(ctxt.add(cexpr, inst));
+  // If we are looking up a string literal, just use the literal because
+  // that is almost always what we want, I think. I am not sure there is a lot
+  // of value in exposing the intricacies of string literals being created
+  // in "constant" memory and having their addresses taken when being used.
+  if(const ConstantDataArray* lit = getStringLiteral(inst)) {
+    handle(lit);
+    llvm::cast<clang::Expr>(ctxt.add(cexpr, *lit));
+  } else {
+    handle(&inst);
+    llvm::cast<clang::Expr>(ctxt.add(cexpr, inst));
+  }
 }
 
-clang::DeclRefExpr& LLVMParser::handle(const AllocaInst& alloca) {
-  std::string name;
-  if(di.hasSourceName(alloca))
-    name = di.getSourceName(alloca);
-  else if(alloca.hasName())
-    name = alloca.getName();
-  else
-    name = ctxt.getNewVar("local");
-
+void LLVMParser::handle(const AllocaInst& alloca) {
   handle(alloca.getAllocatedType());
-  return ctxt.add(alloca, name);
+  ctxt.add(alloca, getName(alloca, "local"));
 }
 
-clang::CastExpr& LLVMParser::handle(const CastInst& cst) {
+void LLVMParser::handle(const CastInst& cst) {
   handle(cst.getDestTy());
   handle(cst.getOperand(0));
-  return ctxt.add(cst);
+  ctxt.add(cst);
 }
 
-clang::Stmt& LLVMParser::handle(const BranchInst& br) {
+void LLVMParser::handle(const BranchInst& br) {
   if(const Value* cond = br.getCondition())
     handle(cond);
   for(const llvm::BasicBlock* bb : br.successors())
     handle(bb);
 
-  return ctxt.add(br);
+  ctxt.add(br);
 }
 
-clang::Expr& LLVMParser::handle(const LoadInst& load) {
+void LLVMParser::handle(const LoadInst& load) {
   handle(load.getPointerOperand());
-
-  WithColor::error(errs()) << "UNIMPLEMENTED: LoadInst\n";
-  exit(1);
-  // return ctxt.add(load);
-  // // If the pointer operand begins with an '&', just remove it because that
-  // // and '*' "cancel" each other out.
-  // if(s[0] == '&')
-  //   return ctxt.add(load, handle(ptr).str().substr(1));
-  // else
-  //   return ctxt.add(load, "*", handle(ptr));
+  ctxt.add(load);
 }
 
-clang::BinaryOperator& LLVMParser::handle(const StoreInst& store) {
+void LLVMParser::handle(const StoreInst& store) {
   handle(store.getPointerOperand());
   handle(store.getValueOperand());
-
-  WithColor::error(errs()) << "UNIMPLEMENTED: StoreInst\n";
-  exit(1);
-  // return ctxt.add(store);
-  // // If the pointer operand begins with an '&', just remove it because that
-  // // and '*' "cancel" each other out.
-  // if(dest[0] == '&')
-  //   return ctxt.add<Stmt>(store, dest.substr(1), " = ", src);
-  // else
-  //   return ctxt.add<Stmt>(store, "*", dest, " = ", src);
+  ctxt.add(store);
 }
 
 void LLVMParser::handleIndices(Type* ty,
@@ -205,7 +207,7 @@ void LLVMParser::handleIndices(Type* ty,
     handleIndices(next, idx + 1, indices, inst, ss);
 }
 
-clang::Expr& LLVMParser::handle(const GetElementPtrInst& gep) {
+void LLVMParser::handle(const GetElementPtrInst& gep) {
   std::string buf;
   raw_string_ostream ss(buf);
   const llvm::Value* ptr = gep.getPointerOperand();
@@ -225,44 +227,25 @@ clang::Expr& LLVMParser::handle(const GetElementPtrInst& gep) {
   // return ctxt.add(gep, "&", ss.str());
 }
 
-clang::DeclRefExpr& LLVMParser::handle(const PHINode& phi) {
+void LLVMParser::handle(const PHINode& phi) {
   // FIXME: This is not correct
   WithColor::warning(errs()) << "PHI nodes not correctly handled\n";
-  std::string var;
-  if(di.hasSourceName(phi))
-    var = di.getSourceName(phi);
-  else
-    var = ctxt.getNewVar();
-  return ctxt.add(phi, var);
+  ctxt.add(phi, getName(phi, "phi"));
 }
 
-clang::CallExpr& LLVMParser::handle(const CallInst& call) {
+void LLVMParser::handle(const CallInst& call) {
   handle(call.getCalledValue());
   for(const Value* arg : call.arg_operands())
     handle(arg);
-  WithColor::error(errs()) << "UNIMPLEMENTED: CallInst\n";
-  exit(1);
-  // std::string buf;
-  // raw_string_ostream ss(buf);
-  // ss << handle(call.getCalledValue()) << "(";
-  // if(call.getNumArgOperands()) {
-  //   ss << handle(call.getArgOperand(0));
-  //   for(unsigned i = 1; i < call.getNumArgOperands(); i++)
-  //     ss << ", " << handle(call.getArgOperand(i));
-  // }
-  // ss << ")";
-  // if(call.getType()->isVoidTy())
-  //   return ctxt.add<Stmt>(call, ss.str());
-  // else
-  //   return ctxt.add(call, ss.str());
+  ctxt.add(call);
 }
 
-clang::CallExpr& LLVMParser::handle(const InvokeInst& invoke) {
+void LLVMParser::handle(const InvokeInst& invoke) {
   WithColor::error(errs()) << "UNIMPLEMENTED: " << invoke << "\n";
   exit(1);
 }
 
-clang::BinaryOperator& LLVMParser::handle(const BinaryOperator& inst) {
+void LLVMParser::handle(const BinaryOperator& inst) {
   clang::BinaryOperator::Opcode op = (clang::BinaryOperator::Opcode)-1;
 
   switch(inst.getOpcode()) {
@@ -311,10 +294,10 @@ clang::BinaryOperator& LLVMParser::handle(const BinaryOperator& inst) {
 
   handle(inst.getOperand(0));
   handle(inst.getOperand(1));
-  return ctxt.add(inst, op);
+  ctxt.add(inst, op);
 }
 
-clang::UnaryOperator& LLVMParser::handle(const UnaryOperator& inst) {
+void LLVMParser::handle(const UnaryOperator& inst) {
   clang::UnaryOperator::Opcode op = (clang::UnaryOperator::Opcode)-1;
   switch(inst.getOpcode()) {
   case UnaryOperator::FNeg:
@@ -327,10 +310,10 @@ clang::UnaryOperator& LLVMParser::handle(const UnaryOperator& inst) {
   }
 
   handle(inst.getOperand(0));
-  return ctxt.add(inst, op);
+  ctxt.add(inst, op);
 }
 
-clang::BinaryOperator& LLVMParser::handle(const CmpInst& cmp) {
+void LLVMParser::handle(const CmpInst& cmp) {
   clang::BinaryOperator::Opcode op = (clang::BinaryOperator::Opcode)-1;
   switch(cmp.getPredicate()) {
   case CmpInst::FCMP_OEQ:
@@ -375,32 +358,35 @@ clang::BinaryOperator& LLVMParser::handle(const CmpInst& cmp) {
 
   handle(cmp.getOperand(0));
   handle(cmp.getOperand(1));
-  return ctxt.add(cmp, op);
+  ctxt.add(cmp, op);
 }
 
-clang::ConditionalOperator& LLVMParser::handle(const SelectInst& select) {
+void LLVMParser::handle(const SelectInst& select) {
   handle(select.getCondition());
   handle(select.getTrueValue());
   handle(select.getFalseValue());
-  return ctxt.add(select);
+  ctxt.add(select);
 }
 
-clang::SwitchStmt& LLVMParser::handle(const SwitchInst& sw) {
+void LLVMParser::handle(const SwitchInst& sw) {
   WithColor::error(errs()) << "UNIMPLEMENTED: " << sw << "\n";
   exit(1);
 }
 
-clang::ReturnStmt& LLVMParser::handle(const ReturnInst& ret) {
+void LLVMParser::handle(const ReturnInst& ret) {
   if(Value* val = ret.getReturnValue())
     handle(ret.getReturnValue());
-  return ctxt.add(ret);
+  ctxt.add(ret);
 }
 
-clang::DeclRefExpr& LLVMParser::handle(const BasicBlock& bb) {
-  return ctxt.add(bb, ctxt.getNewVar("bb"));
+void LLVMParser::handle(const BasicBlock& bb) {
+  if(bb.hasNPredecessors(0))
+    ctxt.add(bb);
+  else
+    ctxt.add(bb, ctxt.getNewVar("bb"));
 }
 
-clang::Stmt& LLVMParser::handle(const Instruction* inst) {
+void LLVMParser::handle(const Instruction* inst) {
   if(const auto* load = dyn_cast<LoadInst>(inst))
     handle(*load);
   else if(const auto* store = dyn_cast<StoreInst>(inst))
@@ -449,28 +435,24 @@ clang::Stmt& LLVMParser::handle(const Instruction* inst) {
   else if(not isa<AllocaInst>(inst) and (uses > 1))
     useTemp = true;
 
-  if(useTemp) {
-    if(di.hasSourceName(inst))
-      ctxt.addTemp(*inst, di.getSourceName(inst));
-    else
-      ctxt.addTemp(*inst, ctxt.getNewVar());
-  }
-
-  return ctxt.get(inst);
+  if(useTemp)
+    ctxt.addTemp(*inst, getName(inst));
 }
 
-clang::DeclRefExpr& LLVMParser::handle(const GlobalValue* gv) {
+void LLVMParser::handle(const GlobalValue* gv) {
   WithColor::error(errs()) << "UNKNOWN GLOBAL: " << *gv << "\n";
   exit(1);
 }
 
-clang::Expr& LLVMParser::handle(const Constant* c) {
+void LLVMParser::handle(const Constant* c) {
   if(const auto* cint = dyn_cast<ConstantInt>(c))
     return handle(*cint);
   else if(const auto* cfp = dyn_cast<ConstantFP>(c))
     return handle(*cfp);
   else if(const auto* cnull = dyn_cast<ConstantPointerNull>(c))
     return handle(*cnull);
+  else if(const auto* czero = dyn_cast<ConstantAggregateZero>(c))
+    return handle(*czero);
   else if(const auto* cexpr = dyn_cast<ConstantExpr>(c))
     return handle(*cexpr);
   else if(const auto* undef = dyn_cast<UndefValue>(c))
@@ -489,9 +471,10 @@ clang::Expr& LLVMParser::handle(const Constant* c) {
   exit(1);
 }
 
-clang::Stmt& LLVMParser::handle(const Value* v) {
+void LLVMParser::handle(const Value* v) {
+  handle(v->getType());
   if(ctxt.has(*v))
-    return ctxt.get(*v);
+    return;
 
   // The order of the statements is important. All globals are constants
   // but they need to be handled differently from the other constants
@@ -509,22 +492,192 @@ clang::Stmt& LLVMParser::handle(const Value* v) {
   exit(1);
 }
 
-clang::QualType LLVMParser::handle(Type* type) {
-  if(ctxt.has(type))
-    return ctxt.get(type);
-  return ctxt.add(type);
+void LLVMParser::handle(PointerType* pty) {
+  handle(pty->getElementType());
+  ctxt.add(pty);
 }
 
-void LLVMParser::initialize(const Function& f) {
-  // In the preprocessing step, tag anything that we know are never going to be
+void LLVMParser::handle(ArrayType* aty) {
+  handle(aty->getElementType());
+  ctxt.add(aty);
+}
+
+void LLVMParser::handle(FunctionType* fty) {
+  handle(fty->getReturnType());
+  for(Type* param : fty->params())
+    handle(param);
+  ctxt.add(fty);
+}
+
+void LLVMParser::handle(Type* type) {
+  if(ctxt.has(type))
+    return;
+
+  if(auto* pty = dyn_cast<PointerType>(type))
+    handle(pty);
+  else if(auto* aty = dyn_cast<ArrayType>(type))
+    handle(aty);
+  else if(auto* fty = dyn_cast<FunctionType>(type))
+    handle(fty);
+  else if(isa<IntegerType>(type) or type->isFloatingPointTy()
+          or type->isVoidTy())
+    ctxt.add(type);
+}
+
+std::string LLVMParser::getName(llvm::StructType* sty) {
+  if(di.hasName(sty))
+    return di.getName(sty);
+  else if(sty->hasName())
+    if(sty->getName().find("struct.") == 0)
+      return sty->getName().substr(7);
+    else if(sty->getName().find("class.") == 0)
+      return sty->getName().substr(6);
+    else if(sty->getName().find("union.") == 0)
+      return sty->getName().substr(6);
+    else
+      return sty->getName();
+  else
+    return ctxt.getNewVar("struct");
+}
+
+std::string LLVMParser::getName(const llvm::Value& val,
+                                const std::string& prefix) {
+  if(di.hasName(val))
+    return di.getName(val);
+  else if(val.hasName())
+    return val.getName();
+  else if(prefix.length())
+    return ctxt.getNewVar(prefix);
+  else
+    return ctxt.getNewVar();
+}
+
+std::string LLVMParser::getName(const llvm::Value* val,
+                                const std::string& prefix) {
+  return getName(*val);
+}
+
+bool LLVMParser::allUsesIgnored(const Value* v) const {
+  if(v->getNumUses() == 0)
+    return false;
+  for(const Use& u : v->uses())
+    if(not ignoreValues.contains(u.getUser()))
+      return false;
+  return true;
+}
+
+void LLVMParser::runOnStruct(StructType* sty) {
+  Vector<std::string> fields;
+  for(unsigned i = 0; i < sty->getNumElements(); i++) {
+    // Shouldn't handle struct types because the only "handling" is done
+    // by this method. And it's not clear
+    Type* ety = sty->getElementType(i);
+    if(not isa<StructType>(ety))
+      handle(sty->getElementType(i));
+    if(di.hasElementName(sty, i))
+      fields.push_back(di.getElementName(sty, i));
+    else
+      fields.push_back("elem_" + std::to_string(i));
+  }
+  ctxt.add(sty, fields);
+}
+
+void LLVMParser::runOnGlobal(const GlobalVariable& g) {
+  handle(g.getType());
+  if(const Constant* init = g.getInitializer())
+    handle(init);
+
+  if(not di.isStringLiteral(g))
+    ctxt.add(g, getName(g, "g"));
+}
+
+void LLVMParser::runOnDeclaration(const Function& f) {
+  handle(f.getFunctionType());
+
+  ctxt.add(f, getName(f));
+}
+
+void LLVMParser::runOnFunction(const Function& f) {
+  handle(f.getFunctionType());
+
+  Vector<std::string> argNames;
+  for(const Argument& arg : f.args())
+    if(di.hasName(arg))
+      argNames.push_back(di.getName(arg));
+    else if(arg.hasName())
+      argNames.push_back(arg.getName());
+    else
+      argNames.push_back("arg_" + std::to_string(arg.getArgNo()));
+  if(di.hasName(f))
+    ctxt.add(f, di.getName(f), argNames);
+  else
+    ctxt.add(f, f.getName(), argNames);
+  for(const BasicBlock& bb : f)
+    handle(bb);
+
+  // LoopInfo& li = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+  // errs() << "loops: " << li.getLoopsInPreorder().size() << "\n";
+  // for(const Loop* loop : li) {
+  //   errs() << "Found a loop\n";
+  //   // for(const BasicBlock* bb : loop->blocks())
+  //   //   errs() << *bb << "\n";
+  // }
+
+  ctxt.beginFunction(f);
+
+  for(const BasicBlock& bb : f) {
+    ctxt.beginBlock(bb);
+    for(const Instruction& inst : bb) {
+      if(ignoreValues.contains(&inst))
+        continue;
+
+      if(const auto* alloca = dyn_cast<AllocaInst>(&inst)) {
+        handle(*alloca);
+      } else if(const auto* call = dyn_cast<CallInst>(&inst)) {
+        handle(*call);
+      } else if(const auto* invoke = dyn_cast<InvokeInst>(&inst)) {
+        handle(*invoke);
+      } else if(const auto* load = dyn_cast<LoadInst>(&inst)) {
+        handle(*load);
+      } else if(const auto* store = dyn_cast<StoreInst>(&inst)) {
+        handle(*store);
+      } else if(const auto* phi = dyn_cast<PHINode>(&inst)) {
+        handle(*phi);
+      } else if(const auto* br = dyn_cast<BranchInst>(&inst)) {
+        handle(br);
+      } else if(const auto* ret = dyn_cast<ReturnInst>(&inst)) {
+        handle(ret);
+      }
+    }
+    ctxt.endBlock(bb);
+  }
+
+  ctxt.endFunction(f);
+}
+
+static bool isMetadataFunction(const Function& f) {
+  FunctionType* fty = f.getFunctionType();
+  if(fty->getReturnType()->isMetadataTy())
+    return true;
+  for(Type* param : fty->params())
+    if(param->isMetadataTy())
+      return true;
+  return false;
+}
+
+void LLVMParser::runOnModule(const Module& m) {
+  // First find anything that we know are never going to be
   // converted. These would be any LLVM debug and lifetime intrinsics but
   // could be other things as well
-  for(const Instruction& inst : instructions(f))
-    if(const auto* call = dyn_cast<CallInst>(&inst))
-      if(const Function* callee = call->getCalledFunction())
-        if((callee->getName().find("llvm.dbg") == 0)
-           or (callee->getName().find("llvm.lifetime") == 0))
-          ignoreValues.insert(call);
+  for(const Function& f : m.functions()) {
+    if(isMetadataFunction(f)
+       or f.getName().startswith("llvm.lifetime")
+       or f.getName().startswith("llvm.dbg.")) {
+      ignoreValues.insert(&f);
+      for(const Use& u : f.uses())
+        ignoreValues.insert(u.getUser());
+    }
+  }
 
   // Grow the ignore list to include anything that is only used by values in
   // the ignore list
@@ -540,170 +693,19 @@ void LLVMParser::initialize(const Function& f) {
       ignoreValues.insert(v);
     wl = std::move(next);
   }
-}
 
-void LLVMParser::initialize(const Module& m) {
 
-  // for(StructType* sty : m.getIdentifiedStructTypes()) {
-  //   if(not ctxt.hasElementNames(sty)) {
-  //     std::string buf;
-  //     raw_string_ostream ss(buf);
-  //     for(unsigned i = 0; i < sty->getNumElements(); i++) {
-  //       ss << "f_" << i;
-  //       ss.flush();
-  //       ctxt.addElementName(sty, ss.str());
-  //       buf.clear();
-  //     }
-  //   }
-  // }
-
-  // for(const Function& f : m.functions())
-  //   if(f.size())
-  //     initialize(f);
-}
-
-void LLVMParser::finalize(const Module& m) {
-  // Delete any instructions that were created when processing ConstantExpr's.
-  // Failure to do so will result in a broken module
-  cexprs.clear();
-}
-
-bool LLVMParser::allUsesIgnored(const Value* v) const {
-  if(v->getNumUses() == 0)
-    return false;
-  for(const Use& u : v->uses())
-    if(not ignoreValues.contains(u.getUser()))
-      return false;
-  return true;
-}
-
-void LLVMParser::runOnStruct(StructType* sty) {
-  WithColor::error(errs()) << "UNIMPLEMNTED: runOnStruct()";
-  exit(1);
-  // cc.reposition().add(handle(sty).str()).add(" {").endl().tab();
-  // for(unsigned i = 0; i < sty->getNumElements(); i++) {
-  //   cc.reposition()
-  //       .add(handle(sty->getElementType(i)))
-  //       .space()
-  //       .add(ctxt.getElementName(sty, i))
-  //       .add(";")
-  //       .endl();
-  // }
-  // cc.untab().add("};").endl().endl();
-}
-
-void LLVMParser::runOnGlobal(const GlobalVariable& g) {
-  handle(g.getType());
-  if(const Constant* init = g.getInitializer())
-    handle(init);
-
-  if(di.hasSourceName(g)) {
-    ctxt.add(g, di.getSourceName(g));
-  } else if(g.hasName()) {
-    ctxt.add(g, g.getName().str());
-  } else {
-    ctxt.add(g, ctxt.getNewVar("g"));
-  }
-}
-
-void LLVMParser::runOnDeclaration(const Function& f) {
-  // Skip functions that have a metadata type in the arguments or as a
-  // return value because they are LLVM debug intrinsics and we don't want
-  // to print those
-  FunctionType* fty = f.getFunctionType();
-  if(fty->getReturnType()->isMetadataTy())
-    return;
-  for(Type* param : fty->params())
-    if(param->isMetadataTy())
-      return;
-
-  WithColor::error(errs())
-      << "UNIMPLEMENTED: Converting function declaration\n";
-  exit(1);
-}
-
-void LLVMParser::runOnFunction(const Function& f) {
-  handle(f.getReturnType());
-  for(const Argument& arg : f.args()) {
-    handle(arg.getType());
-    std::string name;
-    if(di.hasSourceName(arg)) {
-      name = di.getSourceName(arg);
-    } else if(arg.hasName()) {
-      name = arg.getName().str();
-    } else {
-      std::string buf;
-      raw_string_ostream ss(buf);
-      ss << "arg_" << arg.getArgNo();
-      name = ss.str();
-    }
-
-    // We could look for dereferenceable bytes in the argument and then display
-    // it as a byref parameter, but that gets problematic because then we would
-    // also have to go in and handle anything that was originally a reference
-    // in the original code. The point is not really to get back the original
-    // code but make it easier to understand what the compiler has done to the
-    // code. In this case, it is good to understand that what is a reference in
-    // C++ is just a non-null pointer under the hood.
-    //
-    // FIXME: Add argument attributes like const, restrict, non-null etc. that
-    // were inferred by the compiler and/or were present in the original code
-    ctxt.add(arg, name);
-  }
-
-  if(di.hasSourceName(f))
-    ctxt.add(f, di.getSourceName(f));
-  else
-    ctxt.add(f, f.getName().str());
-
-  // ctxt.beginFunction(f);
-
-  // LoopInfo& li = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  // errs() << "loops: " << li.getLoopsInPreorder().size() << "\n";
-  // for(const Loop* loop : li) {
-  //   errs() << "Found a loop\n";
-  //   // for(const BasicBlock* bb : loop->blocks())
-  //   //   errs() << *bb << "\n";
-  // }
-
-  // for(const BasicBlock& bb : f) {
-  //   handle(bb);
-  //   // ctxt.beginBlock(bb);
-  //   for(const Instruction& inst : bb) {
-  //     if(ignoreValues.contains(&inst))
-  //       continue;
-
-  //     if(const auto* alloca = dyn_cast<AllocaInst>(&inst)) {
-  //       handle(*alloca);
-  //     } else if(const auto* call = dyn_cast<CallInst>(&inst)) {
-  //       handle(*call);
-  //     } else if(const auto* invoke = dyn_cast<InvokeInst>(&inst)) {
-  //       handle(*invoke);
-  //     } else if(const auto* load = dyn_cast<LoadInst>(&inst)) {
-  //       handle(*load);
-  //     } else if(const auto* store = dyn_cast<StoreInst>(&inst)) {
-  //       handle(*store);
-  //     } else if(const auto* phi = dyn_cast<PHINode>(&inst)) {
-  //       handle(*phi);
-  //     } else if(const auto* br = dyn_cast<BranchInst>(&inst)) {
-  //       handle(br);
-  //     } else if(const auto* ret = dyn_cast<ReturnInst>(&inst)) {
-  //       handle(ret);
-  //     }
-  //   }
-  //   // ctxt.endBlock(bb);
-  // }
-
-  // ctxt.endFunction(f);
-}
-
-void LLVMParser::runOnModule(const Module& m) {
-  // Convert
+  // Add all the structs to the context first so a decl exists for each of
+  // them first. Then add bodies for them
+  for(StructType* sty : m.getIdentifiedStructTypes())
+    ctxt.add(sty, getName(sty));
   for(StructType* sty : m.getIdentifiedStructTypes())
     runOnStruct(sty);
+
   for(const Function& f : m.functions())
-    if(not f.size())
+    if(not f.size() and not ignoreValues.contains(&f))
       runOnDeclaration(f);
+
   for(const GlobalVariable& g : m.globals())
     runOnGlobal(g);
   for(const Function& f : m.functions())

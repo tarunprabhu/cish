@@ -30,15 +30,6 @@ static std::string mdGetName(const Metadata* md) {
 }
 
 void DIParser::runOnFunction(const Function& f) {
-  if(const DISubprogram* subp = f.getSubprogram()) {
-    std::string buf;
-    raw_string_ostream ss(buf);
-    if(const auto* cls = dyn_cast_or_null<DICompositeType>(subp->getScope()))
-      ss << cls->getName() << "::";
-    ss << subp->getName();
-    valueNames[&f] = ss.str();
-  }
-
   for(const Instruction& inst : instructions(f)) {
     if(const auto* call = dyn_cast<CallInst>(&inst)) {
       if(const Function* f = call->getCalledFunction()) {
@@ -53,6 +44,56 @@ void DIParser::runOnFunction(const Function& f) {
       }
     }
   }
+
+  if(const DISubprogram* subp = f.getSubprogram()) {
+    std::string buf;
+    raw_string_ostream ss(buf);
+    if(const auto* cls = dyn_cast_or_null<DICompositeType>(subp->getScope()))
+      ss << cls->getName() << "::";
+    ss << subp->getName();
+    valueNames[&f] = ss.str();
+
+    // In some cases, the function arguments may not be "registered"
+    // with llvm.dbg.value. Not sure why this happens, but in that case,
+    // look for it directly in the debug info
+    for(const DINode* op : subp->getRetainedNodes()) {
+      if(const auto* di = dyn_cast<DILocalVariable>(op)) {
+        if(di->getArg()) {
+          const Argument& arg = getArg(f, di->getArg() - 1);
+          if(not valueNames.contains(&arg))
+            valueNames[&arg] = di->getName();
+        }
+      }
+    }
+  }
+}
+
+static bool isChar(const Metadata* md) {
+  if(const auto* diBasic = dyn_cast_or_null<DIBasicType>(md))
+    return diBasic->getEncoding() == dwarf::DW_ATE_signed_char;
+  return false;
+}
+
+static bool isConstChar(const Metadata* md) {
+  if(const auto* diConst = dyn_cast_or_null<DIDerivedType>(md))
+    if(diConst->getTag() == dwarf::DW_TAG_const_type)
+      return isChar(diConst->getBaseType());
+  return false;
+}
+
+static bool isCString(const Metadata* md) {
+  if(const auto* diPtr = dyn_cast_or_null<DIDerivedType>(md))
+    if(diPtr->getTag() == dwarf::DW_TAG_pointer_type)
+      return isConstChar(diPtr->getBaseType());
+  return false;
+}
+
+static bool isStringLiteral(const llvm::GlobalVariable& g) {
+  if(const auto* init = dyn_cast_or_null<ConstantDataArray>(g.getInitializer()))
+    if(init->getType()->getElementType()->isIntegerTy(8))
+      if(g.hasGlobalUnnamedAddr() and g.hasPrivateLinkage())
+        return true;
+  return false;
 }
 
 void DIParser::runOnGlobal(const GlobalVariable& g) {
@@ -60,14 +101,19 @@ void DIParser::runOnGlobal(const GlobalVariable& g) {
   g.getDebugInfo(gexprs);
   if(gexprs.size()) {
     if(gexprs.size() == 1) {
-      const Metadata* md = gexprs[0]->getVariable();
-      if(mdHasName(md))
-        valueNames[&g] = mdGetName(md);
+      const auto* di = dyn_cast<DIGlobalVariable>(gexprs[0]->getVariable());
+      valueNames[&g] = di->getName();
+      if(cish::isCString(di->getType()))
+        cstrings.insert(&g);
     } else {
       WithColor::warning(errs())
           << "Got more than one expression for global: " << g << "\n";
     }
   }
+  // Irrespective of whether or not there is debug info associated with a global
+  // check if it is a string literal
+  if(cish::isStringLiteral(g))
+    stringLiterals.insert(&g);
 }
 
 void DIParser::runOnStruct(StructType* sty,
@@ -85,8 +131,7 @@ void DIParser::runOnClass(StructType* sty,
                           const DICompositeType* di,
                           const StructLayout& sl) {
   // FIXME: Support for classes
-  WithColor::warning(errs())
-      << "UNIMPLEMENTED: Source information for classes\n";
+  WithColor::warning(errs()) << "UNIMPLEMENTED:  information for classes\n";
 }
 
 void DIParser::runOnUnion(StructType* sty,
@@ -104,21 +149,23 @@ diWarning(Type* type, const Metadata* md, const std::string& expected) {
   errs() << " for type " << *type << "\n";
 }
 
-static void collectTypes(Type* type,
-                         const Metadata* md,
-                         const DataLayout& m,
-                         Map<StructType*, const DICompositeType*>& types);
+static void collectStructs(Type* type,
+                           const Metadata* md,
+                           const DataLayout& m,
+                           Map<StructType*, const DICompositeType*>& types);
 
-static void collectTypes(PointerType* pty,
-                         const DIDerivedType* derived,
-                         const DataLayout& dl,
-                         Map<StructType*, const DICompositeType*>& types) {
+static void collectStructs(PointerType* pty,
+                           const DIDerivedType* derived,
+                           const DataLayout& dl,
+                           Map<StructType*, const DICompositeType*>& types) {
   if(derived) {
     switch(derived->getTag()) {
     case dwarf::DW_TAG_pointer_type:
-    case dwarf::DW_TAG_restrict_type:
-      return collectTypes(
+      return collectStructs(
           pty->getElementType(), derived->getBaseType(), dl, types);
+    case dwarf::DW_TAG_restrict_type:
+    case dwarf::DW_TAG_const_type:
+      return collectStructs(pty, derived->getBaseType(), dl, types);
     }
     return diWarning(pty, derived, "Derived");
   }
@@ -126,32 +173,31 @@ static void collectTypes(PointerType* pty,
       << "Expected derived DI node for " << *pty << ". Got null\n";
 }
 
-static void collectTypes(ArrayType* aty,
-                         const DICompositeType* comp,
-                         const DataLayout& dl,
-                         Map<StructType*, const DICompositeType*>& types) {
+static void collectStructs(ArrayType* aty,
+                           const DICompositeType* comp,
+                           const DataLayout& dl,
+                           Map<StructType*, const DICompositeType*>& types) {
   if(comp) {
     if(comp->getTag() == dwarf::DW_TAG_array_type)
-      return collectTypes(
-          aty->getElementType(), comp->getBaseType(), dl, types);
+      return collectStructs(getBaseType(aty), comp->getBaseType(), dl, types);
     return diWarning(aty, comp, "Composite");
   }
   WithColor::warning(errs())
       << "Expected composite DI node for " << *aty << ". Got null\n";
 }
 
-static void collectTypes(FunctionType* fty,
-                         const DIDerivedType* md,
-                         const DataLayout& dl,
-                         Map<StructType*, const DICompositeType*>& types) {
+static void collectStructs(FunctionType* fty,
+                           const DIDerivedType* md,
+                           const DataLayout& dl,
+                           Map<StructType*, const DICompositeType*>& types) {
   WithColor::warning(errs()) << "UNIMPLEMENTED: Associating function types\n";
 }
 
 static void
-collectTypesFromStruct(StructType* sty,
-                       const DICompositeType* comp,
-                       const DataLayout& dl,
-                       Map<StructType*, const DICompositeType*>& types) {
+collectStructsFromStruct(StructType* sty,
+                         const DICompositeType* comp,
+                         const DataLayout& dl,
+                         Map<StructType*, const DICompositeType*>& types) {
   const StructLayout& sl = *dl.getStructLayout(sty);
   const auto& elements = comp->getElements();
   types[sty] = comp;
@@ -162,7 +208,8 @@ collectTypesFromStruct(StructType* sty,
       const auto* derived = dyn_cast<DIDerivedType>(elements->getOperand(i));
       size_t offset = sl.getElementOffset(i) * 8;
       if(derived->getOffsetInBits() == offset) {
-        collectTypes(sty->getElementType(i), derived->getBaseType(), dl, types);
+        collectStructs(
+            sty->getElementType(i), derived->getBaseType(), dl, types);
       } else {
         WithColor::warning(errs()) << "Mismatched offsets of field " << i
                                    << " for struct " << *sty << "\n";
@@ -184,36 +231,36 @@ fail:
 }
 
 static void
-collectTypesFromUnion(StructType* sty,
-                      const DICompositeType* md,
-                      const DataLayout& dl,
-                      Map<StructType*, const DICompositeType*>& types) {
+collectStructsFromUnion(StructType* sty,
+                        const DICompositeType* md,
+                        const DataLayout& dl,
+                        Map<StructType*, const DICompositeType*>& types) {
   // At some point, I might figure out if this can be used in any reasonable
   // way
 }
 
 static void
-collectTypesFromClass(StructType* sty,
-                      const DICompositeType* md,
-                      const DataLayout& dl,
-                      Map<StructType*, const DICompositeType*>& types) {
+collectStructsFromClass(StructType* sty,
+                        const DICompositeType* md,
+                        const DataLayout& dl,
+                        Map<StructType*, const DICompositeType*>& types) {
   WithColor::warning(errs()) << "UNIMPLEMENTED: Associating class types\n";
   types[sty] = nullptr;
 }
 
-static void collectTypes(Type* type,
-                         const Metadata* md,
-                         const DataLayout& dl,
-                         Map<StructType*, const DICompositeType*>& types) {
+static void collectStructs(Type* type,
+                           const Metadata* md,
+                           const DataLayout& dl,
+                           Map<StructType*, const DICompositeType*>& types) {
   if(not md)
     return;
 
   if(auto* pty = dyn_cast<PointerType>(type)) {
-    collectTypes(pty, dyn_cast<DIDerivedType>(md), dl, types);
+    collectStructs(pty, dyn_cast<DIDerivedType>(md), dl, types);
   } else if(auto* aty = dyn_cast<ArrayType>(type)) {
-    collectTypes(aty, dyn_cast<DICompositeType>(md), dl, types);
+    collectStructs(aty, dyn_cast<DICompositeType>(md), dl, types);
   } else if(auto* fty = dyn_cast<FunctionType>(type)) {
-    collectTypes(fty, cast<DIDerivedType>(md), dl, types);
+    collectStructs(fty, cast<DIDerivedType>(md), dl, types);
   } else if(auto* sty = dyn_cast<StructType>(type)) {
     if(not types.contains(sty)) {
       const auto comp = dyn_cast<DICompositeType>(md);
@@ -221,11 +268,14 @@ static void collectTypes(Type* type,
       // outside the struct. So recurse into the struct
       switch(comp->getTag()) {
       case dwarf::DW_TAG_structure_type:
-        collectTypesFromStruct(sty, comp, dl, types);
+        collectStructsFromStruct(sty, comp, dl, types);
+        break;
       case dwarf::DW_TAG_class_type:
-        collectTypesFromClass(sty, comp, dl, types);
+        collectStructsFromClass(sty, comp, dl, types);
+        break;
       case dwarf::DW_TAG_union_type:
-        collectTypesFromUnion(sty, comp, dl, types);
+        collectStructsFromUnion(sty, comp, dl, types);
+        break;
       default:
         break;
       }
@@ -233,7 +283,8 @@ static void collectTypes(Type* type,
   }
 }
 
-static Map<StructType*, const DICompositeType*> collectTypes(const Module& m) {
+static Map<StructType*, const DICompositeType*>
+collectStructs(const Module& m) {
   const DataLayout& dl = m.getDataLayout();
   Map<StructType*, const DICompositeType*> structs;
 
@@ -268,11 +319,12 @@ static Map<StructType*, const DICompositeType*> collectTypes(const Module& m) {
         continue;
       }
 
-      collectTypes(retTy, types->getOperand(0), dl, structs);
+      collectStructs(retTy, types->getOperand(0), dl, structs);
       for(unsigned i = 1, j = start; i < types->getNumOperands(); i++, j++)
         // FIXME: Newer versions of LLVM have a getArg() function in
         // Function
-        collectTypes(getArg(f, j).getType(), types->getOperand(i), dl, structs);
+        collectStructs(
+            getArg(f, j).getType(), types->getOperand(i), dl, structs);
     }
 
     for(const Instruction& inst : instructions(f)) {
@@ -284,10 +336,10 @@ static Map<StructType*, const DICompositeType*> collectTypes(const Module& m) {
             const auto* md = dyn_cast<MetadataAsValue>(call->getArgOperand(1))
                                  ->getMetadata();
             if(const auto* alloca = dyn_cast<AllocaInst>(vdm->getValue()))
-              collectTypes(alloca->getAllocatedType(),
-                           dyn_cast<DILocalVariable>(md)->getType(),
-                           dl,
-                           structs);
+              collectStructs(alloca->getAllocatedType(),
+                             dyn_cast<DILocalVariable>(md)->getType(),
+                             dl,
+                             structs);
           }
         }
       }
@@ -299,7 +351,8 @@ static Map<StructType*, const DICompositeType*> collectTypes(const Module& m) {
     g.getDebugInfo(gexprs);
     if(gexprs.size() == 1) {
       if(const auto* gv = dyn_cast<DIGlobalVariable>(gexprs[0]->getVariable()))
-        collectTypes(g.getType()->getElementType(), gv->getType(), dl, structs);
+        collectStructs(
+            g.getType()->getElementType(), gv->getType(), dl, structs);
     }
   }
 
@@ -313,59 +366,74 @@ void DIParser::runOnModule(const Module& m) {
     runOnGlobal(g);
 
   const DataLayout& dl = m.getDataLayout();
-  for(const auto& p : collectTypes(m)) {
+  for(const auto& p : collectStructs(m)) {
     StructType* sty = p.first;
     const DICompositeType* di = p.second;
     const StructLayout& sl = *dl.getStructLayout(sty);
-    std::string buf;
-    raw_string_ostream sname(buf);
 
-    if(di->getTag() == dwarf::DW_TAG_structure_type) {
-      sname << "struct";
+    if(di->getTag() == dwarf::DW_TAG_structure_type)
       runOnStruct(sty, di, sl);
-    } else if(di->getTag() == dwarf::DW_TAG_class_type) {
-      sname << "class";
+    else if(di->getTag() == dwarf::DW_TAG_class_type)
       runOnClass(sty, di, sl);
-    } else if(di->getTag() == dwarf::DW_TAG_union_type) {
-      sname << "union";
+    else if(di->getTag() == dwarf::DW_TAG_union_type)
       runOnUnion(sty, di, sl);
-    } else {
+    else
       WithColor::warning(errs()) << "Unexpected DI tag\n";
-    }
 
     // FIXME: There might be namespace and/or parent information in the struct
     // name. Make use of it
-    sname << " " << di->getName();
-    structNames[sty] = sname.str();
+    structNames[sty] = di->getName();
   }
 }
 
-bool DIParser::hasSourceName(const llvm::Value* val) const {
+bool DIParser::isCString(const llvm::Value* val) const {
+  return cstrings.contains(val);
+}
+
+bool DIParser::isCString(const llvm::Value& val) const {
+  return isCString(&val);
+}
+
+bool DIParser::isStringLiteral(const llvm::Value* val) const {
+  return stringLiterals.contains(val);
+}
+
+bool DIParser::isStringLiteral(const llvm::Value& val) const {
+  return stringLiterals.contains(&val);
+}
+
+bool DIParser::hasName(const llvm::Value* val) const {
   return valueNames.contains(val);
 }
 
-bool DIParser::hasSourceName(const llvm::Value& val) const {
-  return hasSourceName(&val);
+bool DIParser::hasName(const llvm::Value& val) const {
+  return hasName(&val);
 }
 
-bool DIParser::hasSourceName(llvm::StructType* sty) const {
+bool DIParser::hasName(llvm::StructType* sty) const {
   return structNames.contains(sty);
 }
 
-const std::string& DIParser::getSourceName(const llvm::Value* v) const {
+bool DIParser::hasElementName(llvm::StructType* sty, unsigned i) const {
+  if(structNames.contains(sty))
+    return structNames.at(sty).size() > i;
+  return false;
+}
+
+const std::string& DIParser::getName(const llvm::Value* v) const {
   return valueNames.at(v);
 }
 
-const std::string& DIParser::getSourceName(const llvm::Value& v) const {
-  return getSourceName(&v);
+const std::string& DIParser::getName(const llvm::Value& v) const {
+  return getName(&v);
 }
 
-const std::string& DIParser::getSourceName(llvm::StructType* sty) const {
+const std::string& DIParser::getName(llvm::StructType* sty) const {
   return structNames.at(sty);
 }
 
-const std::string& DIParser::getSourceName(llvm::StructType* sty,
-                                           unsigned i) const {
+const std::string& DIParser::getElementName(llvm::StructType* sty,
+                                            unsigned i) const {
   return elemNames.at(sty).at(i);
 }
 

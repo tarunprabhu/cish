@@ -36,56 +36,62 @@ protected:
       cexprs;
 
 protected:
-  void initialize(const llvm::Function& f);
-  void initialize(const llvm::Module& m);
-  void finalize(const llvm::Module& m);
   bool allUsesIgnored(const llvm::Value* v) const;
   bool shouldUseTemporary(const llvm::Instruction& inst);
   const llvm::Instruction&
   getInstructionForConstantExpr(const llvm::ConstantExpr& cexpr);
+  const llvm::ConstantDataArray*
+  getStringLiteral(const llvm::Instruction& inst);
 
-  clang::DeclRefExpr& handle(const llvm::AllocaInst& alloca);
-  clang::Expr& handle(const llvm::LoadInst& load);
-  clang::BinaryOperator& handle(const llvm::StoreInst& store);
-  clang::Expr& handle(const llvm::GetElementPtrInst& gep);
-  clang::DeclRefExpr& handle(const llvm::PHINode& phi);
-  clang::CallExpr& handle(const llvm::CallInst& call);
-  clang::CallExpr& handle(const llvm::InvokeInst& invoke);
-  clang::BinaryOperator& handle(const llvm::CmpInst& cmp);
-  clang::BinaryOperator& handle(const llvm::BinaryOperator& op);
-  clang::UnaryOperator& handle(const llvm::UnaryOperator& op);
-  clang::CastExpr& handle(const llvm::CastInst& cst);
-  clang::Stmt& handle(const llvm::BranchInst& br);
-  clang::SwitchStmt& handle(const llvm::SwitchInst& sw);
-  clang::ConditionalOperator& handle(const llvm::SelectInst& select);
-  clang::ReturnStmt& handle(const llvm::ReturnInst& ret);
-  clang::Stmt& handle(const llvm::ShuffleVectorInst& shuffle);
-  clang::Stmt& handle(const llvm::Instruction* inst);
+  void handle(const llvm::AllocaInst& alloca);
+  void handle(const llvm::LoadInst& load);
+  void handle(const llvm::StoreInst& store);
+  void handle(const llvm::GetElementPtrInst& gep);
+  void handle(const llvm::PHINode& phi);
+  void handle(const llvm::CallInst& call);
+  void handle(const llvm::InvokeInst& invoke);
+  void handle(const llvm::CmpInst& cmp);
+  void handle(const llvm::BinaryOperator& op);
+  void handle(const llvm::UnaryOperator& op);
+  void handle(const llvm::CastInst& cst);
+  void handle(const llvm::BranchInst& br);
+  void handle(const llvm::SwitchInst& sw);
+  void handle(const llvm::SelectInst& select);
+  void handle(const llvm::ReturnInst& ret);
+  void handle(const llvm::ShuffleVectorInst& shuffle);
 
-  clang::DeclRefExpr& handle(const llvm::GlobalValue* g);
+  void handle(const llvm::ConstantInt& cint);
+  void handle(const llvm::ConstantFP& cfp);
+  void handle(const llvm::ConstantPointerNull& cnull);
+  void handle(const llvm::ConstantAggregateZero& czero);
+  void handle(const llvm::ConstantExpr& cexpr);
+  void handle(const llvm::UndefValue& undef);
+  void handle(const llvm::ConstantDataArray& cda);
+  void handle(const llvm::ConstantArray& carray);
+  void handle(const llvm::ConstantStruct& cstruct);
+  void handle(const llvm::ConstantVector& cvec);
 
-  clang::IntegerLiteral& handle(const llvm::ConstantInt& cint);
-  clang::FloatingLiteral& handle(const llvm::ConstantFP& cfp);
-  clang::CXXNullPtrLiteralExpr& handle(const llvm::ConstantPointerNull& cnull);
-  clang::Expr& handle(const llvm::ConstantExpr& cexpr);
-  clang::GNUNullExpr& handle(const llvm::UndefValue& undef);
-  clang::CXXStdInitializerListExpr& handle(const llvm::ConstantDataArray& cda);
-  clang::Expr& handle(const llvm::ConstantArray& carray);
-  clang::CXXStdInitializerListExpr& handle(const llvm::ConstantStruct& cstruct);
-  clang::CXXStdInitializerListExpr& handle(const llvm::ConstantVector& cvec);
-  clang::Expr& handle(const llvm::Constant* c);
+  void handle(const llvm::BasicBlock& bb);
 
-  clang::DeclRefExpr& handle(const llvm::BasicBlock& bb);
+  void handle(const llvm::Instruction* inst);
+  void handle(const llvm::GlobalValue* g);
+  void handle(const llvm::Constant* c);
+  void handle(const llvm::Value* v);
 
-  clang::Stmt& handle(const llvm::Value* v);
-
-  clang::QualType handle(llvm::Type* type);
+  void handle(llvm::PointerType* pty);
+  void handle(llvm::ArrayType* aty);
+  void handle(llvm::FunctionType* fty);
+  void handle(llvm::Type* type);
 
   void handleIndices(llvm::Type* ty,
                      unsigned idx,
                      const Vector<const llvm::Value*>& indices,
                      const llvm::Instruction& inst,
                      llvm::raw_string_ostream& ss);
+
+  std::string getName(llvm::StructType* sty);
+  std::string getName(const llvm::Value* v, const std::string& prefix = "");
+  std::string getName(const llvm::Value& v, const std::string& prefix = "");
 
   void runOnDeclaration(const llvm::Function& f);
   void runOnFunction(const llvm::Function& f);

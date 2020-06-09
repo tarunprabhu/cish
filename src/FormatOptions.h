@@ -19,15 +19,21 @@ enum class Annotations {
 };
 
 enum class Indentation {
-  KR,
-  Allman,
-  Stroustrup,
+  KR,         // K&R style
+  Allman,     // Allman style
+  Stroustrup, // Stroustrup style (like K&R but without the "cuddled else")
+};
+
+enum class Parens {
+  Always, // Always add parentheses to operands of oeprators
+  Smart,  // Be "smart" about adding parentheses to operands of operators
 };
 
 struct FormatOptions {
   Set<IgnoreCasts> ignoreCasts;
   Set<Annotations> annotations;
   Indentation indentation;
+  Parens parens;
   unsigned offset;
 };
 

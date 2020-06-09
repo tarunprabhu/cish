@@ -12,20 +12,35 @@ namespace cish {
 
 class Stream {
 protected:
-  clang::ASTContext& astContext;
-  llvm::raw_ostream& os;
+  const clang::ASTContext& astContext;
   const FormatOptions& fmtOpts;
+  llvm::raw_ostream& os;
 
   std::string tabStr;
   unsigned ilevel;
 
+protected:
+  bool shouldPrintCast(const clang::Type*) const;
+
+  Stream& parenthetize(const clang::Stmt*);
+
 public:
-  Stream(llvm::raw_ostream& os,
-         clang::ASTContext& astContext,
-         const FormatOptions& fmtOpts);
+  Stream(const clang::ASTContext& astContext,
+         const FormatOptions& fmtOpts,
+         llvm::raw_ostream& os);
 
   Stream& tab();
   Stream& endl();
+  Stream& space(unsigned spaces = 1);
+  Stream& endst(bool newline = true);
+
+  // The optional label is used if the block represents a basic block and a
+  // label is added before the block
+  Stream& beginBlock(const std::string& label = "");
+
+  // endst will be true when ending the body of a struct because a semicolon
+  // must be added immediately after the block in that case
+  Stream& endBlock(bool endst = false);
 
   Stream& operator<<(char);
   Stream& operator<<(int16_t);
@@ -42,17 +57,46 @@ public:
   Stream& operator<<(const std::string&);
   Stream& operator<<(Stream&);
 
+  Stream& operator<<(clang::BinaryOperator::Opcode);
+  Stream& operator<<(clang::UnaryOperator::Opcode);
+
   Stream& operator<<(const clang::Type*);
   Stream& operator<<(const clang::PointerType*);
   Stream& operator<<(const clang::ConstantArrayType*);
+  Stream& operator<<(const clang::FunctionProtoType*);
   Stream& operator<<(const clang::RecordType*);
+  Stream& operator<<(const clang::VectorType*);
   Stream& operator<<(clang::QualType);
 
+  Stream& operator<<(const clang::Stmt*);
+  Stream& operator<<(const clang::CompoundStmt*);
+  Stream& operator<<(const clang::LabelStmt*);
+  Stream& operator<<(const clang::GotoStmt*);
+  Stream& operator<<(const clang::IfStmt*);
+  Stream& operator<<(const clang::ReturnStmt*);
+  Stream& operator<<(const clang::BinaryOperator*);
+  Stream& operator<<(const clang::UnaryOperator*);
+  Stream& operator<<(const clang::ConditionalOperator*);
+  Stream& operator<<(const clang::CallExpr*);
+  Stream& operator<<(const clang::CStyleCastExpr*);
+  Stream& operator<<(const clang::ForStmt*);
+  Stream& operator<<(const clang::WhileStmt*);
+
+  Stream& operator<<(const clang::CXXBoolLiteralExpr*);
   Stream& operator<<(const clang::CharacterLiteral*);
   Stream& operator<<(const clang::IntegerLiteral*);
   Stream& operator<<(const clang::FloatingLiteral*);
-  Stream& operator<<(const clang::Expr*);
+  Stream& operator<<(const clang::StringLiteral*);
+  Stream& operator<<(const clang::CXXNullPtrLiteralExpr*);
+  Stream& operator<<(const clang::InitListExpr*);
+  Stream& operator<<(const clang::DeclRefExpr*);
+
+  Stream& operator<<(const clang::DeclaratorDecl*);
   Stream& operator<<(const clang::VarDecl*);
+  Stream& operator<<(const clang::FunctionDecl*);
+  Stream& operator<<(const clang::FieldDecl*);
+  Stream& operator<<(const clang::RecordDecl*);
+  Stream& operator<<(const clang::ParmVarDecl*);
 };
 
 } // namespace cish

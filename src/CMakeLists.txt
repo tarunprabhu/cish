@@ -1,6 +1,7 @@
 set(SOURCES
   cish.cpp
   CishContext.cpp
+  ClangUtils.cpp
   # CishPreparePass.cpp
   DIParser.cpp
   LLVMParser.cpp

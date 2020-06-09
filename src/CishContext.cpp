@@ -12,24 +12,13 @@ using namespace clang;
 
 namespace cish {
 
-using llvm::cast;
-using llvm::dyn_cast;
-using llvm::dyn_cast_or_null;
-using llvm::isa;
-
+// We obviously don't have any SourceLocations, so just use this wherever
+// we need a clang::SourceLocation
 static FullSourceLoc invLoc;
 
 CishContext::CishContext(const std::string& prefix, ASTContext& astContext)
-    : currFunc(nullptr), varPrefix(prefix), varSuffix(0),
-      astContext(astContext) {
+    : varPrefix(prefix), varSuffix(0), astContext(astContext) {
   ;
-}
-
-Decl* CishContext::getCurrentDecl() {
-  if(currFunc)
-    return currFunc;
-  else
-    return astContext.getTranslationUnitDecl();
 }
 
 std::string CishContext::getNewVar(const std::string& prefix) {
@@ -45,11 +34,29 @@ std::string CishContext::getNewVar(const std::string& prefix) {
   return ss.str();
 }
 
-DeclRefExpr& CishContext::add(const llvm::AllocaInst& alloca,
-                              const std::string& name) {
+void CishContext::beginFunction(const llvm::Function& f) {
+  stmts.clear();
+}
+
+void CishContext::endFunction(const llvm::Function& f) {
+  CompoundStmt* body = CompoundStmt::Create(
+      astContext, llvm::ArrayRef<Stmt*>(stmts), invLoc, invLoc);
+  funcs.at(&f)->setBody(body);
+}
+
+void CishContext::beginBlock(const llvm::BasicBlock& bb) {
+  stmts.push_back(new(astContext) LabelStmt(invLoc, blocks.at(&bb), nullptr));
+}
+
+void CishContext::endBlock(const llvm::BasicBlock& bb) {
+  // Nothing to do here
+}
+
+Stmt& CishContext::add(const llvm::AllocaInst& alloca,
+                       const std::string& name) {
   QualType type = get(alloca.getAllocatedType());
   VarDecl* var = VarDecl::Create(astContext,
-                                 currFunc,
+                                 funcs.at(&getFunction(alloca)),
                                  invLoc,
                                  invLoc,
                                  &astContext.Idents.get(name),
@@ -71,28 +78,30 @@ DeclRefExpr& CishContext::add(const llvm::AllocaInst& alloca,
 Stmt& CishContext::add(const llvm::BranchInst& br) {
   if(llvm::Value* cond = br.getCondition()) {
     auto* thn = new(astContext)
-        GotoStmt(&get<LabelDecl>(br.getSuccessor(0)), invLoc, invLoc);
+        GotoStmt(blocks.at(br.getSuccessor(0)), invLoc, invLoc);
     auto* els = new(astContext)
-        GotoStmt(&get<LabelDecl>(br.getSuccessor(1)), invLoc, invLoc);
-    return add(br,
-               IfStmt::Create(astContext,
-                              invLoc,
-                              false,
-                              nullptr,
-                              nullptr,
-                              &get<Expr>(cond),
-                              thn,
-                              invLoc,
-                              els));
+        GotoStmt(blocks.at(br.getSuccessor(1)), invLoc, invLoc);
+    add(br,
+        IfStmt::Create(astContext,
+                       invLoc,
+                       false,
+                       nullptr,
+                       nullptr,
+                       &get<Expr>(cond),
+                       thn,
+                       invLoc,
+                       els));
   } else {
-    return add(br,
-               new(astContext) GotoStmt(
-                   &get<LabelDecl>(br.getSuccessor(0)), invLoc, invLoc));
+    add(br,
+        new(astContext)
+            GotoStmt(blocks.at(br.getSuccessor(0)), invLoc, invLoc));
   }
+  stmts.push_back(&get(br));
+  return *stmts.back();
 }
 
-BinaryOperator& CishContext::add(const llvm::BinaryOperator& inst,
-                                 BinaryOperator::Opcode opc) {
+Stmt& CishContext::add(const llvm::BinaryOperator& inst,
+                       BinaryOperator::Opcode opc) {
   return add(inst,
              new(astContext) BinaryOperator(&get<Expr>(inst.getOperand(0)),
                                             &get<Expr>(inst.getOperand(1)),
@@ -104,8 +113,7 @@ BinaryOperator& CishContext::add(const llvm::BinaryOperator& inst,
                                             FPOptions()));
 }
 
-BinaryOperator& CishContext::add(const llvm::CmpInst& cmp,
-                                 BinaryOperator::Opcode opc) {
+Stmt& CishContext::add(const llvm::CmpInst& cmp, BinaryOperator::Opcode opc) {
   return add(cmp,
              new(astContext) BinaryOperator(&get<Expr>(cmp.getOperand(0)),
                                             &get<Expr>(cmp.getOperand(1)),
@@ -117,8 +125,8 @@ BinaryOperator& CishContext::add(const llvm::CmpInst& cmp,
                                             FPOptions()));
 }
 
-UnaryOperator& CishContext::add(const llvm::UnaryOperator& inst,
-                                UnaryOperator::Opcode opc) {
+Stmt& CishContext::add(const llvm::UnaryOperator& inst,
+                       UnaryOperator::Opcode opc) {
   return add(inst,
              new(astContext) UnaryOperator(&get<Expr>(inst.getOperand(0)),
                                            opc,
@@ -129,27 +137,64 @@ UnaryOperator& CishContext::add(const llvm::UnaryOperator& inst,
                                            false));
 }
 
-CallExpr& CishContext::add(const llvm::CallInst& call) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << call << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::CallInst& call) {
+  std::vector<Expr*> exprs;
+  for(const llvm::Value* arg : call.arg_operands())
+    exprs.push_back(&get<Expr>(arg));
+
+  add(call,
+      CallExpr::Create(astContext,
+                       &get<Expr>(call.getCalledValue()),
+                       llvm::ArrayRef<Expr*>(exprs),
+                       get(call.getType()),
+                       VK_RValue,
+                       invLoc));
+  if(call.getType()->isVoidTy())
+    stmts.push_back(&get<CallExpr>(call));
+
+  return get(call);
 }
 
-Expr& CishContext::add(const llvm::LoadInst& load) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << load << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::LoadInst& load) {
+  return add(load,
+             new(astContext) UnaryOperator(&get<Expr>(load.getPointerOperand()),
+                                           UO_Deref,
+                                           get(load.getType()),
+                                           VK_RValue,
+                                           OK_Ordinary,
+                                           invLoc,
+                                           false));
 }
 
-BinaryOperator& CishContext::add(const llvm::StoreInst& store) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << store << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::StoreInst& store) {
+  const llvm::Value* ptr = store.getPointerOperand();
+  const llvm::Value* val = store.getValueOperand();
+  auto* assign = new(astContext) BinaryOperator(&get<Expr>(ptr),
+                                                &get<Expr>(val),
+                                                BO_Assign,
+                                                get(val->getType()),
+                                                VK_LValue,
+                                                OK_Ordinary,
+                                                invLoc,
+                                                FPOptions());
+  stmts.push_back(assign);
+  return add(store, assign);
 }
 
-CastExpr& CishContext::add(const llvm::CastInst& cst) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << cst << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::CastInst& cst) {
+  return add(cst,
+             CStyleCastExpr::Create(astContext,
+                                    get(cst.getType()),
+                                    VK_RValue,
+                                    CastKind::CK_BitCast,
+                                    &get<Expr>(cst.getOperand(0)),
+                                    nullptr,
+                                    nullptr,
+                                    invLoc,
+                                    invLoc));
 }
 
-ConditionalOperator& CishContext::add(const llvm::SelectInst& select) {
+Stmt& CishContext::add(const llvm::SelectInst& select) {
   return add(select,
              new(astContext)
                  ConditionalOperator(&get<Expr>(select.getCondition()),
@@ -162,31 +207,99 @@ ConditionalOperator& CishContext::add(const llvm::SelectInst& select) {
                                      OK_Ordinary));
 }
 
-ReturnStmt& CishContext::add(const llvm::ReturnInst& ret) {
+Stmt& CishContext::add(const llvm::ReturnInst& ret) {
   if(const llvm::Value* val = ret.getReturnValue()) {
-    return add(
-        ret, ReturnStmt::Create(astContext, invLoc, &get<Expr>(val), nullptr));
+    add(ret, ReturnStmt::Create(astContext, invLoc, &get<Expr>(val), nullptr));
   } else {
-    return add(ret, ReturnStmt::CreateEmpty(astContext, false));
+    add(ret, ReturnStmt::CreateEmpty(astContext, false));
   }
+  stmts.push_back(&get(ret));
+  return *stmts.back();
 }
 
-DeclRefExpr& CishContext::add(const llvm::PHINode& phi,
-                              const std::string& name) {
+Stmt& CishContext::add(const llvm::PHINode& phi, const std::string& name) {
   llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << phi << "\n";
   exit(1);
 }
 
-DeclRefExpr& CishContext::add(const llvm::Function& f,
-                              const std::string& name) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << f << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::Argument& arg, const std::string& name) {
+  // We could look for dereferenceable bytes in the argument and then display
+  // it as a byref parameter, but that gets problematic because then we would
+  // also have to go in and handle anything that was originally a reference
+  // in the original code. The point is not really to get back the original
+  // code but make it easier to understand what the compiler has done to the
+  // code. In this case, it is good to understand that what is a reference in
+  // C++ is just a non-null pointer under the hood.
+  //
+  // FIXME: Add argument attributes like const, restrict, non-null etc. that
+  // were inferred by the compiler and/or were present in the original code
+  QualType type = get(arg.getType());
+  FunctionDecl* func = funcs.at(arg.getParent());
+  ParmVarDecl* param = ParmVarDecl::Create(astContext,
+                                           func,
+                                           invLoc,
+                                           invLoc,
+                                           &astContext.Idents.get(name),
+                                           type,
+                                           nullptr,
+                                           SC_None,
+                                           nullptr);
+
+  return add(arg,
+             DeclRefExpr::Create(astContext,
+                                 NestedNameSpecifierLoc(),
+                                 invLoc,
+                                 param,
+                                 false,
+                                 invLoc,
+                                 type,
+                                 VK_LValue,
+                                 param));
 }
 
-DeclRefExpr& CishContext::add(const llvm::GlobalVariable& g,
-                              const std::string& name) {
+Stmt& CishContext::add(const llvm::Function& f,
+                       const std::string& name,
+                       const Vector<std::string>& argNames) {
+  QualType type = get(f.getFunctionType());
+  funcs[&f]
+      = FunctionDecl::Create(astContext,
+                             astContext.getTranslationUnitDecl(),
+                             invLoc,
+                             invLoc,
+                             DeclarationName(&astContext.Idents.get(name)),
+                             type,
+                             nullptr,
+                             SC_None);
+  astContext.getTranslationUnitDecl()->addDecl(funcs.at(&f));
+
+  std::vector<ParmVarDecl*> args;
+  for(unsigned i = 0; i < f.getFunctionType()->getNumParams(); i++) {
+    const llvm::Argument& arg = getArg(f, i);
+    if(argNames.size())
+      add(arg, argNames[i]);
+    else
+      add(arg, "");
+    args.push_back(&get<ParmVarDecl>(arg));
+  }
+  funcs.at(&f)->setParams(ArrayRef<ParmVarDecl*>(args));
+
+  return add(f,
+             DeclRefExpr::Create(astContext,
+                                 NestedNameSpecifierLoc(),
+                                 invLoc,
+                                 funcs.at(&f),
+                                 false,
+                                 invLoc,
+                                 type,
+                                 VK_LValue,
+                                 funcs.at(&f)));
+}
+
+Stmt& CishContext::add(const llvm::GlobalVariable& g, const std::string& name) {
   TranslationUnitDecl* tu = astContext.getTranslationUnitDecl();
   QualType type = get(g.getType()->getElementType());
+  if(g.isConstant())
+    type.addConst();
   VarDecl* decl = VarDecl::Create(astContext,
                                   tu,
                                   invLoc,
@@ -210,71 +323,139 @@ DeclRefExpr& CishContext::add(const llvm::GlobalVariable& g,
                                  decl));
 }
 
-DeclRefExpr& CishContext::add(const llvm::Argument& arg,
-                              const std::string& name) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << arg << "\n";
-  exit(1);
+void CishContext::add(const llvm::BasicBlock& bb, const std::string& name) {
+  blocks[&bb] = LabelDecl::Create(astContext,
+                                  funcs.at(bb.getParent()),
+                                  invLoc,
+                                  &astContext.Idents.get(name));
 }
 
-DeclRefExpr& CishContext::add(const llvm::BasicBlock& bb,
-                              const std::string& name) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << bb << "\n";
-  exit(1);
+QualType CishContext::add(llvm::StructType* sty, const std::string& name) {
+  RecordDecl* decl = RecordDecl::Create(astContext,
+                                        TTK_Struct,
+                                        astContext.getTranslationUnitDecl(),
+                                        invLoc,
+                                        invLoc,
+                                        &astContext.Idents.get(name));
+
+  astContext.getTranslationUnitDecl()->addDecl(decl);
+  udts[sty] = decl;
+  return types[sty] = QualType(udts.at(sty)->getTypeForDecl(), 0);
 }
 
 QualType CishContext::add(llvm::StructType* sty,
-                          const std::string& name,
                           const Vector<std::string>& elements) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << *sty << "\n";
-  exit(1);
+  RecordDecl* record = udts.at(sty);
+  for(unsigned i = 0; i < sty->getNumElements(); i++) {
+    FieldDecl* field = FieldDecl::Create(astContext,
+                                         udts.at(sty),
+                                         invLoc,
+                                         invLoc,
+                                         &astContext.Idents.get(elements[i]),
+                                         get(sty->getElementType(i)),
+                                         nullptr,
+                                         nullptr,
+                                         true,
+                                         ICIS_NoInit);
+    record->addDecl(field);
+  }
+
+  // Not sure if adding a body to the struct will result in the underlying
+  // RecordType changing. Just in case, add the type back to the map
+  return types[sty] = QualType(udts.at(sty)->getTypeForDecl(), 0);
 }
 
-IntegerLiteral& CishContext::add(const llvm::ConstantInt& cint) {
-  return add(cint,
-             IntegerLiteral::Create(
-                 astContext, cint.getValue(), get(cint.getType()), invLoc));
+Stmt& CishContext::add(const llvm::ConstantInt& cint) {
+  llvm::Type* type = cint.getType();
+  if(type->isIntegerTy(1))
+    return add(cint,
+               new(astContext) CXXBoolLiteralExpr(
+                   (bool)cint.getLimitedValue(), get(type), invLoc));
+  else
+    return add(cint,
+               IntegerLiteral::Create(
+                   astContext, cint.getValue(), get(cint.getType()), invLoc));
 }
 
-FloatingLiteral& CishContext::add(const llvm::ConstantFP& cfp) {
+Stmt& CishContext::add(const llvm::ConstantFP& cfp) {
   return add(
       cfp,
       FloatingLiteral::Create(
           astContext, cfp.getValueAPF(), false, get(cfp.getType()), invLoc));
 }
 
-CXXNullPtrLiteralExpr&
-CishContext::add(const llvm::ConstantPointerNull& cnull) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << cnull << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::ConstantPointerNull& cnull) {
+  return add(cnull,
+             new(astContext) CXXNullPtrLiteralExpr(get(cnull.getType()), invLoc)
+
+  );
+}
+
+Stmt& CishContext::add(const llvm::ConstantAggregateZero& czero) {
+  // FIXME: Implement this properly. It's not that hard. Just recursively
+  // build an init list with zeros in it.
+  llvm::Type* i64 = llvm::Type::getInt64Ty(czero.getContext());
+  add(i64);
+  return add(
+      czero,
+      IntegerLiteral::Create(astContext, llvm::APInt(64, 0), get(i64), invLoc));
 }
 
 Stmt& CishContext::add(const llvm::ConstantExpr& cexpr,
-                       const llvm::Instruction& inst) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << cexpr << "\n";
-  exit(1);
+                       const llvm::Value& val) {
+  return *(exprs[&cexpr] = &get(val));
 }
 
-CXXStdInitializerListExpr&
-CishContext::add(const llvm::ConstantDataArray& cda) {
+Stmt& CishContext::add(const llvm::ConstantDataArray& cda) {
+  if(cda.isCString()) {
+    return add(cda,
+               StringLiteral::Create(astContext,
+                                     cda.getAsString(),
+                                     StringLiteral::Ascii,
+                                     false,
+                                     get(cda.getType()),
+                                     invLoc));
+  } else if(cda.isString()) {
+    return add(cda,
+               StringLiteral::Create(astContext,
+                                     cda.getAsString(),
+                                     StringLiteral::Ascii,
+                                     false,
+                                     get(cda.getType()),
+                                     invLoc));
+  } else {
+    std::vector<Expr*> exprs;
+    llvm::ArrayRef<Expr*> aref(exprs);
+    for(unsigned i = 0; i < cda.getNumElements(); i++)
+      exprs.push_back(&get<Expr>(cda.getElementAsConstant(i)));
+    return add(cda,
+               new(astContext) InitListExpr(astContext, invLoc, exprs, invLoc));
+  }
   llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << cda << "\n";
   exit(1);
 }
 
-CXXStdInitializerListExpr&
-CishContext::add(const llvm::ConstantStruct& cstruct) {
-  llvm::WithColor::error(llvm::errs())
-      << "NOT IMPLEMENTED: " << cstruct << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::ConstantStruct& cstruct) {
+  std::vector<Expr*> exprs;
+  llvm::ArrayRef<Expr*> aref(exprs);
+  for(const llvm::Use& op : cstruct.operands())
+    exprs.push_back(&get<Expr>(op.get()));
+  return add(cstruct,
+             new(astContext) InitListExpr(astContext, invLoc, exprs, invLoc));
 }
 
-Expr& CishContext::add(const llvm::ConstantArray& carray) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << carray << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::ConstantArray& carray) {
+  std::vector<Expr*> exprs;
+  llvm::ArrayRef<Expr*> aref(exprs);
+  for(const llvm::Use& op : carray.operands())
+    exprs.push_back(&get<Expr>(op.get()));
+  return add(carray,
+             new(astContext) InitListExpr(astContext, invLoc, exprs, invLoc));
 }
 
-GNUNullExpr& CishContext::add(const llvm::UndefValue& cundef) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << cundef << "\n";
-  exit(1);
+Stmt& CishContext::add(const llvm::UndefValue& cundef) {
+  return add(cundef,
+             new(astContext) GNUNullExpr(get(cundef.getType()), invLoc));
 }
 
 QualType CishContext::add(llvm::IntegerType* ity) {
@@ -347,18 +528,43 @@ QualType CishContext::add(llvm::Type* type) {
     return add(pty);
   else if(auto* aty = dyn_cast<llvm::ArrayType>(type))
     return add(aty);
+  else if(auto* fty = dyn_cast<llvm::FunctionType>(type))
+    return add(fty);
 
   llvm::WithColor::error(llvm::errs())
       << "COULD NOT ADD TYPE: " << *type << "\n";
   exit(1);
 }
 
-DeclRefExpr& CishContext::addTemp(const llvm::Value& val,
-                                  const std::string& name) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: "
-                                       << "addTemp()"
-                                       << "\n";
-  exit(1);
+void CishContext::addTemp(const llvm::Instruction& inst,
+                          const std::string& name) {
+  // QualType type = get(inst.getType());
+  // auto* var = VarDecl::Create(astContext,
+  //                             funcs.at(&getFunction(inst)),
+  //                             invLoc,
+  //                             invLoc,
+  //                             &astContext.Idents.get(name),
+  //                             type,
+  //                             nullptr,
+  //                             SC_None);
+  // auto* ref = DeclRefExpr::Create(astContext,
+  //                                 NestedNameSpecifierLoc(),
+  //                                 invLoc,
+  //                                 var,
+  //                                 false,
+  //                                 invLoc,
+  //                                 type,
+  //                                 VK_LValue,
+  //                                 var);
+  // auto* temp = new(astContext) BinaryOperator(ref,
+  //                                             &get<Expr>(inst),
+  //                                             BO_Assign,
+  //                                             type,
+  //                                             VK_LValue,
+  //                                             OK_Ordinary,
+  //                                             invLoc,
+  //                                             FPOptions());
+  // return add(inst, temp);
 }
 
 bool CishContext::has(llvm::Type* type) const {
