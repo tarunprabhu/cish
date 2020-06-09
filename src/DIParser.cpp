@@ -1,11 +1,11 @@
 #include "DIParser.h"
+#include "Diagnostics.h"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Metadata.h>
-#include <llvm/Support/WithColor.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include "LLVMUtils.h"
@@ -25,8 +25,7 @@ static std::string mdGetName(const Metadata* md) {
   else if(const auto* gv = dyn_cast<DIGlobalVariable>(md))
     return gv->getName();
 
-  WithColor::error(errs()) << "Name not found in Metadata\n";
-  exit(1);
+  fatal(error() << "Name not found in Metadata");
 }
 
 void DIParser::runOnFunction(const Function& f) {

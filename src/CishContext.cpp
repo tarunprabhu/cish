@@ -44,7 +44,7 @@ clang::ASTContext& CishContext::getASTContext() {
   return *astContext;
 }
 
-  const clang::ASTContext& CishContext::getASTContext() const {
+const clang::ASTContext& CishContext::getASTContext() const {
   return *astContext;
 }
 

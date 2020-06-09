@@ -1,7 +1,6 @@
 #include "Stream.h"
 #include "ClangUtils.h"
-
-#include <llvm/Support/WithColor.h>
+#include "Diagnostics.h"
 
 #include <sstream>
 
@@ -179,12 +178,9 @@ Stream& Stream::operator<<(const std::string& s) {
 }
 
 Stream& Stream::operator<<(Stream& ss) {
-  if(&ss != this) {
-    llvm::WithColor::error(llvm::errs());
-    llvm::WithColor(llvm::errs())
-        << "INTERNAL ERROR: Cannot stream a different stream instance\n";
-    exit(1);
-  }
+  if(&ss != this)
+    fatal(
+        error() << "INTERNAL ERROR: Cannot stream a different stream instance");
 
   return *this;
 }
@@ -256,12 +252,8 @@ Stream& Stream::operator<<(const Type* type) {
     *this << fty;
   else if(auto* vty = dyn_cast<VectorType>(type))
     *this << vty;
-  else {
-    llvm::WithColor::error(llvm::errs()) << "UNEXPECTED TYPE: ";
-    type->dump(llvm::errs());
-    llvm::errs() << "\n";
-    exit(1);
-  }
+  else
+    fatal(error() << "UNEXPECTED TYPE: " << type->getTypeClassName());
 
   return *this;
 }
@@ -379,8 +371,7 @@ Stream& Stream::operator<<(const Stmt* stmt) {
   else if(const auto* castExpr = dyn_cast<CStyleCastExpr>(stmt))
     *this << castExpr;
   else
-    llvm::WithColor::error(llvm::errs())
-        << "UNKNOWN STMT: " << stmt->getStmtClassName() << "\n";
+    fatal(error() << "UNKNOWN STMT: " << stmt->getStmtClassName());
   return *this;
 }
 
@@ -405,9 +396,7 @@ Stream& Stream::operator<<(const DeclaratorDecl* decl) {
     return *this;
   }
 
-  llvm::WithColor::error(llvm::errs())
-      << "Unsupported declarator: " << decl->getDeclKindName() << "\n";
-  exit(1);
+  fatal(error() << "Unsupported declarator: " << decl->getDeclKindName());
 }
 
 Stream& Stream::operator<<(const ParmVarDecl* param) {
@@ -457,9 +446,7 @@ Stream& Stream::operator<<(const DeclRefExpr* declRefExpr) {
   if(const auto* namedDecl = dyn_cast<NamedDecl>(decl))
     return *this << namedDecl->getName();
 
-  llvm::WithColor::error(llvm::errs())
-      << "Unknown decl in declRef: " << decl->getDeclKindName() << "\n";
-  exit(1);
+  fatal(error() << "Unknown decl in declRef: " << decl->getDeclKindName());
 }
 
 Stream& Stream::operator<<(UnaryOperator::Opcode opc) {
@@ -616,8 +603,7 @@ Stream& Stream::operator<<(const CompoundStmt* compoundStmt) {
 }
 
 Stream& Stream::operator<<(const ForStmt* forStmt) {
-  llvm::WithColor::error(llvm::errs())
-      << "NOT IMPLEMENTED: " << forStmt->getStmtClassName() << "\n";
+  fatal(error() << "NOT IMPLEMENTED: " << forStmt->getStmtClassName());
   return *this;
 }
 

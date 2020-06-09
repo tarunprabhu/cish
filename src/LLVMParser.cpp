@@ -1,6 +1,7 @@
 #include "LLVMParser.h"
 #include "CishContext.h"
 #include "DIParser.h"
+#include "Diagnostics.h"
 #include "LLVMUtils.h"
 #include "Vector.h"
 
@@ -119,8 +120,7 @@ void LLVMParser::handle(const ConstantVector& cvec) {
   // initializer list ought to be good enough and once annotations are
   // implemented, a comment could be added near where these are used
   // indicating that they are actually vectors
-  WithColor::error(errs()) << "UNIMPLEMENTED: CONSTANT VECTOR\n";
-  exit(1);
+  fatal(error() << "UNIMPLEMENTED: CONSTANT VECTOR");
 }
 
 void LLVMParser::handle(const ConstantExpr& cexpr) {
@@ -168,51 +168,10 @@ void LLVMParser::handle(const StoreInst& store) {
   cg.add(store);
 }
 
-void LLVMParser::handleIndices(Type* ty,
-                               unsigned idx,
-                               const Vector<const Value*>& indices,
-                               const Instruction& inst) {
-  const Value* op = indices[idx];
-  Type* next = nullptr;
-  // if(auto* pty = dyn_cast<PointerType>(ty)) {
-  //   ss << "[" << handle(op) << "]";
-  //   next = pty->getElementType();
-  // } else if(auto* aty = dyn_cast<ArrayType>(ty)) {
-  //   ss << "[" << handle(op) << "]";
-  //   next = aty->getElementType();
-  // } else if(auto* sty = dyn_cast<StructType>(ty)) {
-  //   if(auto* cint = dyn_cast<ConstantInt>(op)) {
-  //     unsigned field = cint->getLimitedValue();
-  //     ss << "." << cg.getElementName(sty, field);
-  //     next = sty->getElementType(field);
-  //   } else {
-  //     WithColor::error(errs()) << "Expected constant index in GEP\n"
-  //                              << "          idx: " << idx << "\n"
-  //                              << "           op: " << *op << "\n"
-  //                              << "         type: " << *ty << "\n"
-  //                              << "         inst: " << inst << "\n";
-  //     exit(1);
-  //   }
-  // } else {
-  //   WithColor::error(errs())
-  //       << "GEP Indices not implemented for type: " << *ty << "\n";
-  //   exit(1);
-  // }
-
-  if((idx + 1) < indices.size())
-    handleIndices(next, idx + 1, indices, inst);
-}
-
 void LLVMParser::handle(const GetElementPtrInst& gep) {
   handle(gep.getPointerOperand());
   for(const Value* op : gep.indices())
     handle(op);
-
-  const llvm::Value* ptr = gep.getPointerOperand();
-  auto* pty = dyn_cast<PointerType>(ptr->getType());
-
-  Vector<const Value*> indices(gep.idx_begin(), gep.idx_end());
-  handleIndices(pty, 0, indices, gep);
   cg.add(gep);
 }
 
@@ -230,8 +189,7 @@ void LLVMParser::handle(const CallInst& call) {
 }
 
 void LLVMParser::handle(const InvokeInst& invoke) {
-  WithColor::error(errs()) << "UNIMPLEMENTED: " << invoke << "\n";
-  exit(1);
+  fatal(error() << "UNIMPLEMENTED: " << invoke);
 }
 
 void LLVMParser::handle(const BinaryOperator& inst) {
@@ -260,8 +218,7 @@ void LLVMParser::handle(const SelectInst& select) {
 }
 
 void LLVMParser::handle(const SwitchInst& sw) {
-  WithColor::error(errs()) << "UNIMPLEMENTED: " << sw << "\n";
-  exit(1);
+  fatal(error() << "UNIMPLEMENTED: " << sw);
 }
 
 void LLVMParser::handle(const ReturnInst& ret) {
@@ -306,10 +263,8 @@ void LLVMParser::handle(const Instruction* inst) {
     handle(*binop);
   else if(const auto* unop = dyn_cast<UnaryOperator>(inst))
     handle(*unop);
-  else {
-    WithColor::error(errs()) << "UNKNOWN INSTRUCTION: " << *inst << "\n";
-    exit(1);
-  }
+  else
+    fatal(error() << "UNKNOWN INSTRUCTION: " << *inst);
 
   // If there is zero or more than one use of the instruction, then create a
   // temporary variable for it. This is particularly important in the case
@@ -331,8 +286,7 @@ void LLVMParser::handle(const Instruction* inst) {
 }
 
 void LLVMParser::handle(const GlobalValue* gv) {
-  WithColor::error(errs()) << "UNKNOWN GLOBAL: " << *gv << "\n";
-  exit(1);
+  fatal(error() << "UNKNOWN GLOBAL: " << *gv);
 }
 
 void LLVMParser::handle(const Constant* c) {
@@ -357,9 +311,7 @@ void LLVMParser::handle(const Constant* c) {
   else if(const auto* cvec = dyn_cast<ConstantVector>(c))
     return handle(*cvec);
   else
-    WithColor::error(errs()) << "UNKNOWN CONSTANT: " << *c << "\n";
-
-  exit(1);
+    fatal(error() << "UNKNOWN CONSTANT: " << *c);
 }
 
 void LLVMParser::handle(const Value* v) {
@@ -378,9 +330,7 @@ void LLVMParser::handle(const Value* v) {
   else if(const auto* bb = dyn_cast<BasicBlock>(v))
     return handle(*bb);
   else
-    WithColor::error(errs()) << "UNHANDLED: " << *v << "\n";
-
-  exit(1);
+    fatal(error() << "UNHANDLED: " << *v);
 }
 
 void LLVMParser::handle(PointerType* pty) {
@@ -400,6 +350,11 @@ void LLVMParser::handle(FunctionType* fty) {
   cg.add(fty);
 }
 
+void LLVMParser::handle(VectorType* vty) {
+  handle(vty->getElementType());
+  cg.add(vty);
+}
+
 void LLVMParser::handle(Type* type) {
   if(cg.has(type))
     return;
@@ -410,6 +365,8 @@ void LLVMParser::handle(Type* type) {
     handle(aty);
   else if(auto* fty = dyn_cast<FunctionType>(type))
     handle(fty);
+  else if(auto* vty = dyn_cast<VectorType>(type))
+    handle(vty);
   else if(isa<IntegerType>(type) or type->isFloatingPointTy()
           or type->isVoidTy())
     cg.add(type);
@@ -519,10 +476,9 @@ void LLVMParser::runOnFunction(const Function& f) {
   for(const BasicBlock& bb : f) {
     cg.beginBlock(bb);
     for(const Instruction& inst : bb) {
-      if(ignoreValues.contains(&inst))
+      if(ignoreValues.contains(&inst)) {
         continue;
-
-      if(const auto* alloca = dyn_cast<AllocaInst>(&inst)) {
+      } else if(const auto* alloca = dyn_cast<AllocaInst>(&inst)) {
         handle(*alloca);
       } else if(const auto* call = dyn_cast<CallInst>(&inst)) {
         handle(*call);

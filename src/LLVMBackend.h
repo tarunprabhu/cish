@@ -60,6 +60,11 @@ protected:
     return *llvm::dyn_cast<ClassT>(exprs[&val] = ast);
   }
 
+  void handleIndices(llvm::Type* ty,
+                     unsigned idx,
+                     const Vector<const llvm::Value*>& indices,
+                     const llvm::Instruction& inst);
+
 public:
   /// @param prefix The prefix to use when generating names
   LLVMBackend(CishContext& context);

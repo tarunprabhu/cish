@@ -82,12 +82,8 @@ protected:
   void handle(llvm::PointerType* pty);
   void handle(llvm::ArrayType* aty);
   void handle(llvm::FunctionType* fty);
+  void handle(llvm::VectorType* vty);
   void handle(llvm::Type* type);
-
-  void handleIndices(llvm::Type* ty,
-                     unsigned idx,
-                     const Vector<const llvm::Value*>& indices,
-                     const llvm::Instruction& inst);
 
   std::string getName(llvm::StructType* sty);
   std::string getName(const llvm::Value* v, const std::string& prefix = "");
@@ -100,6 +96,7 @@ protected:
 
 public:
   LLVMParser(CishContext& context);
+  LLVMParser() = delete;
   LLVMParser(const LLVMParser&) = delete;
   LLVMParser(LLVMParser&&) = delete;
 

@@ -4,6 +4,7 @@ set(SOURCES
   CishContext.cpp
   ClangUtils.cpp
   # CishPreparePass.cpp
+  Diagnostics.cpp
   DIParser.cpp
   LLVMBackend.cpp
   LLVMParser.cpp

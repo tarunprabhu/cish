@@ -1,11 +1,11 @@
 #include "LLVMBackend.h"
+#include "Diagnostics.h"
 #include "LLVMUtils.h"
 
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/Support/WithColor.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace clang;
@@ -120,9 +120,7 @@ void LLVMBackend::add(const llvm::BinaryOperator& inst) {
     opc = BO_Xor;
     break;
   default:
-    llvm::WithColor::error(llvm::errs())
-        << "Unknown binary operator: " << inst << "\n";
-    exit(1);
+    fatal(llvm::errs() << "Unknown binary operator: " << inst);
     break;
   }
 
@@ -175,9 +173,7 @@ void LLVMBackend::add(const llvm::CmpInst& cmp) {
     opc = BO_LE;
     break;
   default:
-    llvm::WithColor::error(llvm::errs())
-        << "Unknown compare predicate: " << cmp << "\n";
-    exit(1);
+    fatal(error() << "Unknown compare predicate: " << cmp);
     break;
   }
 
@@ -199,9 +195,7 @@ void LLVMBackend::add(const llvm::UnaryOperator& inst) {
     opc = UO_Minus;
     break;
   default:
-    llvm::WithColor::error(llvm::errs())
-        << "Unknown unary operator: " << inst << "\n";
-    exit(1);
+    fatal(error() << "Unknown unary operator: " << inst);
     break;
   }
 
@@ -231,9 +225,43 @@ void LLVMBackend::add(const llvm::CallInst& call) {
     stmts.push_back(&get<CallExpr>(call));
 }
 
+void LLVMBackend::handleIndices(llvm::Type* ty,
+                                unsigned idx,
+                                const Vector<const llvm::Value*>& indices,
+                                const llvm::Instruction& inst) {
+  const llvm::Value* op = indices[idx];
+  llvm::Type* next = nullptr;
+  // if(auto* pty = dyn_cast<PointerType>(ty)) {
+  //   ss << "[" << handle(op) << "]";
+  //   next = pty->getElementType();
+  // } else if(auto* aty = dyn_cast<ArrayType>(ty)) {
+  //   ss << "[" << handle(op) << "]";
+  //   next = aty->getElementType();
+  // } else if(auto* sty = dyn_cast<StructType>(ty)) {
+  //   if(auto* cint = dyn_cast<ConstantInt>(op)) {
+  //     unsigned field = cint->getLimitedValue();
+  //     ss << "." << cg.getElementName(sty, field);
+  //     next = sty->getElementType(field);
+  //   } else {
+  //     WithColor::error(errs()) << "Expected constant index in GEP\n"
+  //                              << "          idx: " << idx << "\n"
+  //                              << "           op: " << *op << "\n"
+  //                              << "         type: " << *ty << "\n"
+  //                              << "         inst: " << inst << "\n";
+  //     exit(1);
+  //   }
+  // } else {
+  //   WithColor::error(errs())
+  //       << "GEP Indices not implemented for type: " << *ty << "\n";
+  //   exit(1);
+  // }
+
+  if((idx + 1) < indices.size())
+    handleIndices(next, idx + 1, indices, inst);
+}
+
 void LLVMBackend::add(const llvm::GetElementPtrInst& gep) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << gep << "\n";
-  exit(1);
+  fatal(error() << "NOT IMPLEMENTED: " << gep);
 }
 
 void LLVMBackend::add(const llvm::LoadInst& load) {
@@ -297,8 +325,7 @@ void LLVMBackend::add(const llvm::ReturnInst& ret) {
 }
 
 void LLVMBackend::add(const llvm::PHINode& phi, const std::string& name) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << phi << "\n";
-  exit(1);
+  fatal(error() << "NOT IMPLEMENTED: " << phi);
 }
 
 void LLVMBackend::add(const llvm::Argument& arg, const std::string& name) {
@@ -547,9 +574,8 @@ void LLVMBackend::add(llvm::IntegerType* ity) {
     types[ity] = astContext.Int128Ty;
     break;
   default:
-    llvm::WithColor::error(llvm::errs())
-        << "UNKNOWN INTEGER TYPE: " << *ity << "\n";
-    exit(1);
+    fatal(error() << "UNKNOWN INTEGER TYPE: " << *ity);
+    break;
   }
 }
 
@@ -578,8 +604,7 @@ void LLVMBackend::add(llvm::FunctionType* fty) {
 }
 
 void LLVMBackend::add(llvm::VectorType* vty) {
-  llvm::WithColor::error(llvm::errs()) << "NOT IMPLEMENTED: " << *vty << "\n";
-  exit(1);
+  fatal(error() << "NOT IMPLEMENTED: " << *vty);
 }
 
 void LLVMBackend::add(llvm::Type* type) {
@@ -604,11 +629,8 @@ void LLVMBackend::add(llvm::Type* type) {
     add(aty);
   else if(auto* fty = dyn_cast<llvm::FunctionType>(type))
     add(fty);
-  else {
-    llvm::WithColor::error(llvm::errs())
-        << "COULD NOT ADD TYPE: " << *type << "\n";
-    exit(1);
-  }
+  else
+    fatal(error() << "COULD NOT ADD TYPE: " << *type);
 }
 
 void LLVMBackend::addTemp(const llvm::Instruction& inst,

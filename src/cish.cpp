@@ -1,5 +1,6 @@
 #include "CishContext.h"
 #include "DIParser.h"
+#include "Diagnostics.h"
 #include "FormatOptions.h"
 #include "LLVMBackend.h"
 #include "LLVMParser.h"
@@ -7,15 +8,11 @@
 #include "Set.h"
 #include "Stream.h"
 
-#include <clang/AST/ASTContext.h>
-#include <clang/Basic/Builtins.h>
-
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/TargetSelect.h>
-#include <llvm/Support/WithColor.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <unistd.h>
@@ -126,11 +123,8 @@ void initLLVM(int argc, char* argv[]) {
   }
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM to C-ish converter\n");
-  if(optOffset > 8) {
-    llvm::WithColor::error(llvm::errs())
-        << "Invalid value for offset. Min 0, Max 8\n";
-    exit(1);
-  }
+  if(optOffset > 8)
+    cish::fatal(cish::error() << "Invalid value for offset. Min 0, Max 8");
 }
 
 int main(int argc, char* argv[]) {
@@ -166,8 +160,7 @@ int main(int argc, char* argv[]) {
     std::error_code ec;
     llvm::raw_fd_ostream fs(optOutput, ec);
     if(ec) {
-      llvm::WithColor(llvm::errs()) << ec.message() << "\n";
-      exit(1);
+      cish::fatal(cish::error() << ec.message());
     } else {
       printer.run(fs);
       fs.close();

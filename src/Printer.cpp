@@ -1,11 +1,8 @@
 #include "Printer.h"
+#include "Diagnostics.h"
 #include "Stream.h"
 #include "Vector.h"
 
-#include <clang/AST/ASTConsumer.h>
-#include <clang/AST/RecursiveASTVisitor.h>
-
-#include <llvm/Support/WithColor.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace clang;
@@ -36,8 +33,7 @@ void Printer::run(llvm::raw_ostream& os) {
       else
         decls.push_back(f);
     else
-      llvm::WithColor::error(llvm::errs()) << "Unexpected decl found: "
-                                           << decl->getDeclKindName() << "\n";
+      error() << "Unexpected decl found: " << decl->getDeclKindName() << "\n";
 
   // TODO: Could consider creating a definition order for structs so that
   // structs are defined or forward declared before use because that would be
