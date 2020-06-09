@@ -79,26 +79,43 @@ public:
   void endBlock(const llvm::BasicBlock& bb);
 
   void add(const llvm::AllocaInst& alloca, const std::string& name);
+  void add(const llvm::AtomicCmpXchgInst& axchg);
+  void add(const llvm::AtomicRMWInst& rmw);
+  void add(const llvm::BinaryOperator& op);
   void add(const llvm::BranchInst& br);
   void add(const llvm::CastInst& cst);
+  void add(const llvm::InvokeInst& invoke);
   void add(const llvm::CallInst& call);
-  void add(const llvm::GetElementPtrInst& gep);
-  void add(const llvm::InvokeInst& call);
-  void add(const llvm::LoadInst& load);
-  void add(const llvm::StoreInst& store);
-  void add(const llvm::BinaryOperator& inst);
+  void add(const llvm::CatchReturnInst& catchRet);
+  void add(const llvm::CatchSwitchInst& catchSwitch);
+  void add(const llvm::CleanupReturnInst& cleanup);
   void add(const llvm::CmpInst& cmp);
-  void add(const llvm::UnaryOperator& inst);
+  void add(const llvm::ExtractElementInst& extract);
+  void add(const llvm::ExtractValueInst& extract);
+  void add(const llvm::FenceInst& fence);
+  void add(const llvm::CatchPadInst& pad);
+  void add(const llvm::GetElementPtrInst& gep);
+  void add(const llvm::IndirectBrInst& br);
+  void add(const llvm::InsertElementInst& insert);
+  void add(const llvm::InsertValueInst& insert);
+  void add(const llvm::LandingPadInst& pad);
+  void add(const llvm::LoadInst& load);
   void add(const llvm::PHINode& phi, const std::string& name);
+  void add(const llvm::ResumeInst& resume);
+  void add(const llvm::ReturnInst& returnInst);
   void add(const llvm::SelectInst& select);
-  void add(const llvm::ReturnInst& ret);
+  void add(const llvm::ShuffleVectorInst& shuffle);
+  void add(const llvm::StoreInst& store);
+  void add(const llvm::SwitchInst& sw);
+  void add(const llvm::UnaryOperator& op);
+  void add(const llvm::UnreachableInst& unreachable);
 
   void add(const llvm::ConstantInt& cint);
   void add(const llvm::ConstantFP& cfp);
   void add(const llvm::ConstantPointerNull& cnull);
   void add(const llvm::ConstantAggregateZero& czero);
   void add(const llvm::UndefValue& cundef);
-  void add(const llvm::ConstantDataArray& cda);
+  void add(const llvm::ConstantDataSequential& cseq);
   void add(const llvm::ConstantStruct& cstruct);
   void add(const llvm::ConstantExpr& cexpr, const llvm::Value& val);
   void add(const llvm::ConstantArray& carray);
@@ -107,6 +124,7 @@ public:
            const std::string& name,
            const Vector<std::string>& argNames = {});
   void add(const llvm::GlobalVariable& g, const std::string& name);
+  void add(const llvm::GlobalAlias& g, const std::string& name);
   void add(const llvm::Argument& arg, const std::string& name);
 
   void add(const llvm::BasicBlock& bb, const std::string& name = "");

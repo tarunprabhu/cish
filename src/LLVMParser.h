@@ -45,21 +45,36 @@ protected:
   getStringLiteral(const llvm::Instruction& inst);
 
   void handle(const llvm::AllocaInst& alloca);
-  void handle(const llvm::LoadInst& load);
-  void handle(const llvm::StoreInst& store);
-  void handle(const llvm::GetElementPtrInst& gep);
-  void handle(const llvm::PHINode& phi);
-  void handle(const llvm::CallInst& call);
-  void handle(const llvm::InvokeInst& invoke);
-  void handle(const llvm::CmpInst& cmp);
+  void handle(const llvm::AtomicCmpXchgInst& axchg);
+  void handle(const llvm::AtomicRMWInst& rmw);
   void handle(const llvm::BinaryOperator& op);
-  void handle(const llvm::UnaryOperator& op);
-  void handle(const llvm::CastInst& cst);
   void handle(const llvm::BranchInst& br);
-  void handle(const llvm::SwitchInst& sw);
+  void handle(const llvm::CastInst& cst);
+  void handle(const llvm::InvokeInst& invoke);
+  void handle(const llvm::CallInst& call);
+  void handle(const llvm::CatchReturnInst& catchRet);
+  void handle(const llvm::CatchSwitchInst& catchSwitch);
+  void handle(const llvm::CleanupReturnInst& cleanup);
+  void handle(const llvm::CmpInst& cmp);
+  void handle(const llvm::ExtractElementInst& extract);
+  void handle(const llvm::ExtractValueInst& extract);
+  void handle(const llvm::FenceInst& fence);
+  void handle(const llvm::CatchPadInst& pad);
+  void handle(const llvm::GetElementPtrInst& gep);
+  void handle(const llvm::IndirectBrInst& br);
+  void handle(const llvm::InsertElementInst& insert);
+  void handle(const llvm::InsertValueInst& insert);
+  void handle(const llvm::LandingPadInst& pad);
+  void handle(const llvm::LoadInst& load);
+  void handle(const llvm::PHINode& phi);
+  void handle(const llvm::ResumeInst& resume);
+  void handle(const llvm::ReturnInst& returnInst);
   void handle(const llvm::SelectInst& select);
-  void handle(const llvm::ReturnInst& ret);
   void handle(const llvm::ShuffleVectorInst& shuffle);
+  void handle(const llvm::StoreInst& store);
+  void handle(const llvm::SwitchInst& sw);
+  void handle(const llvm::UnaryOperator& op);
+  void handle(const llvm::UnreachableInst& unreachable);
 
   void handle(const llvm::ConstantInt& cint);
   void handle(const llvm::ConstantFP& cfp);
@@ -67,12 +82,13 @@ protected:
   void handle(const llvm::ConstantAggregateZero& czero);
   void handle(const llvm::ConstantExpr& cexpr);
   void handle(const llvm::UndefValue& undef);
-  void handle(const llvm::ConstantDataArray& cda);
+  void handle(const llvm::ConstantDataSequential& cseq);
   void handle(const llvm::ConstantArray& carray);
   void handle(const llvm::ConstantStruct& cstruct);
   void handle(const llvm::ConstantVector& cvec);
 
   void handle(const llvm::BasicBlock& bb);
+  void handle(const llvm::GlobalAlias& g);
 
   void handle(const llvm::Instruction* inst);
   void handle(const llvm::GlobalValue* g);
@@ -91,6 +107,7 @@ protected:
 
   void runOnDeclaration(const llvm::Function& f);
   void runOnFunction(const llvm::Function& f);
+  void runOnAlias(const llvm::GlobalAlias& a);
   void runOnGlobal(const llvm::GlobalVariable& g);
   void runOnStruct(llvm::StructType* sty);
 

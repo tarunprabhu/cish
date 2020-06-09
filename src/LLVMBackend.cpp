@@ -12,6 +12,11 @@ using namespace clang;
 
 namespace cish {
 
+#define UNIMPLEMENTED(TYPE)                          \
+  void LLVMBackend::add(const llvm::TYPE& inst) { \
+    fatal(error() << "NOT IMPLEMENTED: " << inst);   \
+  }
+
 LLVMBackend::LLVMBackend(CishContext& context) : BackendBase(context) {
   ;
 }
@@ -54,29 +59,8 @@ void LLVMBackend::add(const llvm::AllocaInst& alloca, const std::string& name) {
                           var));
 }
 
-void LLVMBackend::add(const llvm::BranchInst& br) {
-  if(llvm::Value* cond = br.getCondition()) {
-    auto* thn = new(astContext)
-        GotoStmt(blocks.at(br.getSuccessor(0)), invLoc, invLoc);
-    auto* els = new(astContext)
-        GotoStmt(blocks.at(br.getSuccessor(1)), invLoc, invLoc);
-    add(br,
-        IfStmt::Create(astContext,
-                       invLoc,
-                       false,
-                       nullptr,
-                       nullptr,
-                       &get<Expr>(cond),
-                       thn,
-                       invLoc,
-                       els));
-  } else {
-    add(br,
-        new(astContext)
-            GotoStmt(blocks.at(br.getSuccessor(0)), invLoc, invLoc));
-  }
-  stmts.push_back(&get(br));
-}
+UNIMPLEMENTED(AtomicCmpXchgInst)
+UNIMPLEMENTED(AtomicRMWInst)
 
 void LLVMBackend::add(const llvm::BinaryOperator& inst) {
   BinaryOperator::Opcode opc = (BinaryOperator::Opcode)-1;
@@ -135,6 +119,65 @@ void LLVMBackend::add(const llvm::BinaryOperator& inst) {
                                      FPOptions()));
 }
 
+void LLVMBackend::add(const llvm::BranchInst& br) {
+  if(llvm::Value* cond = br.getCondition()) {
+    auto* thn = new(astContext)
+        GotoStmt(blocks.at(br.getSuccessor(0)), invLoc, invLoc);
+    auto* els = new(astContext)
+        GotoStmt(blocks.at(br.getSuccessor(1)), invLoc, invLoc);
+    add(br,
+        IfStmt::Create(astContext,
+                       invLoc,
+                       false,
+                       nullptr,
+                       nullptr,
+                       &get<Expr>(cond),
+                       thn,
+                       invLoc,
+                       els));
+  } else {
+    add(br,
+        new(astContext)
+            GotoStmt(blocks.at(br.getSuccessor(0)), invLoc, invLoc));
+  }
+  stmts.push_back(&get(br));
+}
+
+void LLVMBackend::add(const llvm::CastInst& cst) {
+  add(cst,
+      CStyleCastExpr::Create(astContext,
+                             get(cst.getType()),
+                             VK_RValue,
+                             CastKind::CK_BitCast,
+                             &get<Expr>(cst.getOperand(0)),
+                             nullptr,
+                             nullptr,
+                             invLoc,
+                             invLoc));
+}
+
+UNIMPLEMENTED(InvokeInst)
+
+void LLVMBackend::add(const llvm::CallInst& call) {
+  std::vector<Expr*> exprs;
+  for(const llvm::Value* arg : call.arg_operands())
+    exprs.push_back(&get<Expr>(arg));
+
+  add(call,
+      CallExpr::Create(astContext,
+                       &get<Expr>(call.getCalledValue()),
+                       llvm::ArrayRef<Expr*>(exprs),
+                       get(call.getType()),
+                       VK_RValue,
+                       invLoc));
+  if(call.getType()->isVoidTy())
+    stmts.push_back(&get<CallExpr>(call));
+}
+
+UNIMPLEMENTED(CatchReturnInst)
+UNIMPLEMENTED(CatchSwitchInst)
+UNIMPLEMENTED(CleanupReturnInst)
+
 void LLVMBackend::add(const llvm::CmpInst& cmp) {
   BinaryOperator::Opcode opc = (BinaryOperator::Opcode)-1;
   switch(cmp.getPredicate()) {
@@ -188,42 +231,10 @@ void LLVMBackend::add(const llvm::CmpInst& cmp) {
                                      FPOptions()));
 }
 
-void LLVMBackend::add(const llvm::UnaryOperator& inst) {
-  UnaryOperator::Opcode opc = (UnaryOperator::Opcode)-1;
-  switch(inst.getOpcode()) {
-  case llvm::UnaryOperator::FNeg:
-    opc = UO_Minus;
-    break;
-  default:
-    fatal(error() << "Unknown unary operator: " << inst);
-    break;
-  }
-
-  add(inst,
-      new(astContext) UnaryOperator(&get<Expr>(inst.getOperand(0)),
-                                    opc,
-                                    get(inst.getType()),
-                                    VK_LValue,
-                                    OK_Ordinary,
-                                    invLoc,
-                                    false));
-}
-
-void LLVMBackend::add(const llvm::CallInst& call) {
-  std::vector<Expr*> exprs;
-  for(const llvm::Value* arg : call.arg_operands())
-    exprs.push_back(&get<Expr>(arg));
-
-  add(call,
-      CallExpr::Create(astContext,
-                       &get<Expr>(call.getCalledValue()),
-                       llvm::ArrayRef<Expr*>(exprs),
-                       get(call.getType()),
-                       VK_RValue,
-                       invLoc));
-  if(call.getType()->isVoidTy())
-    stmts.push_back(&get<CallExpr>(call));
-}
+UNIMPLEMENTED(ExtractElementInst)
+UNIMPLEMENTED(ExtractValueInst)
+UNIMPLEMENTED(FenceInst)
+UNIMPLEMENTED(CatchPadInst)
 
 void LLVMBackend::handleIndices(llvm::Type* ty,
                                 unsigned idx,
@@ -264,6 +275,11 @@ void LLVMBackend::add(const llvm::GetElementPtrInst& gep) {
   fatal(error() << "NOT IMPLEMENTED: " << gep);
 }
 
+UNIMPLEMENTED(IndirectBrInst)
+UNIMPLEMENTED(InsertElementInst)
+UNIMPLEMENTED(InsertValueInst)
+UNIMPLEMENTED(LandingPadInst)
+
 void LLVMBackend::add(const llvm::LoadInst& load) {
   add(load,
       new(astContext) UnaryOperator(&get<Expr>(load.getPointerOperand()),
@@ -274,6 +290,35 @@ void LLVMBackend::add(const llvm::LoadInst& load) {
                                     invLoc,
                                     false));
 }
+
+void LLVMBackend::add(const llvm::PHINode& phi, const std::string& name) {
+  fatal(error() << "NOT IMPLEMENTED: " << phi);
+}
+
+UNIMPLEMENTED(ResumeInst)
+
+void LLVMBackend::add(const llvm::ReturnInst& ret) {
+  if(const llvm::Value* val = ret.getReturnValue()) {
+    add(ret, ReturnStmt::Create(astContext, invLoc, &get<Expr>(val), nullptr));
+  } else {
+    add(ret, ReturnStmt::CreateEmpty(astContext, false));
+  }
+  stmts.push_back(&get(ret));
+}
+
+void LLVMBackend::add(const llvm::SelectInst& select) {
+  add(select,
+      new(astContext) ConditionalOperator(&get<Expr>(select.getCondition()),
+                                          invLoc,
+                                          &get<Expr>(select.getTrueValue()),
+                                          invLoc,
+                                          &get<Expr>(select.getFalseValue()),
+                                          get(select.getType()),
+                                          VK_LValue,
+                                          OK_Ordinary));
+}
+
+UNIMPLEMENTED(ShuffleVectorInst)
 
 void LLVMBackend::add(const llvm::StoreInst& store) {
   const llvm::Value* ptr = store.getPointerOperand();
@@ -290,43 +335,28 @@ void LLVMBackend::add(const llvm::StoreInst& store) {
   add(store, assign);
 }
 
-void LLVMBackend::add(const llvm::CastInst& cst) {
-  add(cst,
-      CStyleCastExpr::Create(astContext,
-                             get(cst.getType()),
-                             VK_RValue,
-                             CastKind::CK_BitCast,
-                             &get<Expr>(cst.getOperand(0)),
-                             nullptr,
-                             nullptr,
-                             invLoc,
-                             invLoc));
-}
-
-void LLVMBackend::add(const llvm::SelectInst& select) {
-  add(select,
-      new(astContext) ConditionalOperator(&get<Expr>(select.getCondition()),
-                                          invLoc,
-                                          &get<Expr>(select.getTrueValue()),
-                                          invLoc,
-                                          &get<Expr>(select.getFalseValue()),
-                                          get(select.getType()),
-                                          VK_LValue,
-                                          OK_Ordinary));
-}
-
-void LLVMBackend::add(const llvm::ReturnInst& ret) {
-  if(const llvm::Value* val = ret.getReturnValue()) {
-    add(ret, ReturnStmt::Create(astContext, invLoc, &get<Expr>(val), nullptr));
-  } else {
-    add(ret, ReturnStmt::CreateEmpty(astContext, false));
+void LLVMBackend::add(const llvm::UnaryOperator& inst) {
+  UnaryOperator::Opcode opc = (UnaryOperator::Opcode)-1;
+  switch(inst.getOpcode()) {
+  case llvm::UnaryOperator::FNeg:
+    opc = UO_Minus;
+    break;
+  default:
+    fatal(error() << "Unknown unary operator: " << inst);
+    break;
   }
-  stmts.push_back(&get(ret));
+
+  add(inst,
+      new(astContext) UnaryOperator(&get<Expr>(inst.getOperand(0)),
+                                    opc,
+                                    get(inst.getType()),
+                                    VK_LValue,
+                                    OK_Ordinary,
+                                    invLoc,
+                                    false));
 }
 
-void LLVMBackend::add(const llvm::PHINode& phi, const std::string& name) {
-  fatal(error() << "NOT IMPLEMENTED: " << phi);
-}
+UNIMPLEMENTED(UnreachableInst)
 
 void LLVMBackend::add(const llvm::Argument& arg, const std::string& name) {
   // We could look for dereferenceable bytes in the argument and then display
@@ -399,6 +429,10 @@ void LLVMBackend::add(const llvm::Function& f,
                           type,
                           VK_LValue,
                           funcs.at(&f)));
+}
+
+void LLVMBackend::add(const llvm::GlobalAlias& alias, const std::string& name) {
+  fatal(error() << "NOT IMPLEMENTED: " << alias);
 }
 
 void LLVMBackend::add(const llvm::GlobalVariable& g, const std::string& name) {
@@ -507,29 +541,29 @@ void LLVMBackend::add(const llvm::ConstantExpr& cexpr, const llvm::Value& val) {
   exprs[&cexpr] = &get(val);
 }
 
-void LLVMBackend::add(const llvm::ConstantDataArray& cda) {
-  if(cda.isCString()) {
-    add(cda,
+void LLVMBackend::add(const llvm::ConstantDataSequential& cseq) {
+  if(cseq.isCString()) {
+    add(cseq,
         StringLiteral::Create(astContext,
-                              cda.getAsString(),
+                              cseq.getAsString(),
                               StringLiteral::Ascii,
                               false,
-                              get(cda.getType()),
+                              get(cseq.getType()),
                               invLoc));
-  } else if(cda.isString()) {
-    add(cda,
+  } else if(cseq.isString()) {
+    add(cseq,
         StringLiteral::Create(astContext,
-                              cda.getAsString(),
+                              cseq.getAsString(),
                               StringLiteral::Ascii,
                               false,
-                              get(cda.getType()),
+                              get(cseq.getType()),
                               invLoc));
   } else {
     std::vector<Expr*> exprs;
     llvm::ArrayRef<Expr*> aref(exprs);
-    for(unsigned i = 0; i < cda.getNumElements(); i++)
-      exprs.push_back(&get<Expr>(cda.getElementAsConstant(i)));
-    add(cda, new(astContext) InitListExpr(astContext, invLoc, exprs, invLoc));
+    for(unsigned i = 0; i < cseq.getNumElements(); i++)
+      exprs.push_back(&get<Expr>(cseq.getElementAsConstant(i)));
+    add(cseq, new(astContext) InitListExpr(astContext, invLoc, exprs, invLoc));
   }
 }
 

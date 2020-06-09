@@ -19,6 +19,11 @@ using namespace llvm;
 
 namespace cish {
 
+#define UNIMPLEMENTED(TYPE)                         \
+  void LLVMParser::handle(const TYPE& inst) {       \
+    fatal(error() << "NOT IMPLEMENTED: " << inst); \
+  }
+
 LLVMParser::LLVMParser(CishContext& context) : context(context), cg(context) {
   ;
 }
@@ -98,12 +103,12 @@ void LLVMParser::handle(const ConstantArray& carray) {
   cg.add(carray);
 }
 
-void LLVMParser::handle(const ConstantDataArray& cda) {
-  handle(cda.getType());
-  if(not(cda.isCString() or cda.isString()))
-    for(unsigned i = 0; i < cda.getNumElements(); i++)
-      handle(cda.getElementAsConstant(i));
-  cg.add(cda);
+void LLVMParser::handle(const ConstantDataSequential& cseq) {
+  handle(cseq.getType());
+  if(not(cseq.isCString() or cseq.isString()))
+    for(unsigned i = 0; i < cseq.getNumElements(); i++)
+      handle(cseq.getElementAsConstant(i));
+  cg.add(cseq);
 }
 
 void LLVMParser::handle(const ConstantStruct& cstruct) {
@@ -143,10 +148,14 @@ void LLVMParser::handle(const AllocaInst& alloca) {
   cg.add(alloca, getName(alloca, "local"));
 }
 
-void LLVMParser::handle(const CastInst& cst) {
-  handle(cst.getDestTy());
-  handle(cst.getOperand(0));
-  cg.add(cst);
+UNIMPLEMENTED(AtomicCmpXchgInst)
+UNIMPLEMENTED(AtomicRMWInst)
+
+void LLVMParser::handle(const BinaryOperator& inst) {
+  handle(inst.getOperand(0));
+  handle(inst.getOperand(1));
+
+  cg.add(inst);
 }
 
 void LLVMParser::handle(const BranchInst& br) {
@@ -157,29 +166,13 @@ void LLVMParser::handle(const BranchInst& br) {
   cg.add(br);
 }
 
-void LLVMParser::handle(const LoadInst& load) {
-  handle(load.getPointerOperand());
-  cg.add(load);
+void LLVMParser::handle(const CastInst& cst) {
+  handle(cst.getDestTy());
+  handle(cst.getOperand(0));
+  cg.add(cst);
 }
 
-void LLVMParser::handle(const StoreInst& store) {
-  handle(store.getPointerOperand());
-  handle(store.getValueOperand());
-  cg.add(store);
-}
-
-void LLVMParser::handle(const GetElementPtrInst& gep) {
-  handle(gep.getPointerOperand());
-  for(const Value* op : gep.indices())
-    handle(op);
-  cg.add(gep);
-}
-
-void LLVMParser::handle(const PHINode& phi) {
-  // FIXME: This is not correct
-  WithColor::warning(errs()) << "PHI nodes not correctly handled\n";
-  cg.add(phi, getName(phi, "phi"));
-}
+UNIMPLEMENTED(InvokeInst)
 
 void LLVMParser::handle(const CallInst& call) {
   handle(call.getCalledValue());
@@ -188,26 +181,50 @@ void LLVMParser::handle(const CallInst& call) {
   cg.add(call);
 }
 
-void LLVMParser::handle(const InvokeInst& invoke) {
-  fatal(error() << "UNIMPLEMENTED: " << invoke);
-}
-
-void LLVMParser::handle(const BinaryOperator& inst) {
-  handle(inst.getOperand(0));
-  handle(inst.getOperand(1));
-
-  cg.add(inst);
-}
-
-void LLVMParser::handle(const UnaryOperator& inst) {
-  handle(inst.getOperand(0));
-  cg.add(inst);
-}
+UNIMPLEMENTED(CatchReturnInst)
+UNIMPLEMENTED(CatchSwitchInst)
+UNIMPLEMENTED(CleanupReturnInst)
 
 void LLVMParser::handle(const CmpInst& cmp) {
   handle(cmp.getOperand(0));
   handle(cmp.getOperand(1));
   cg.add(cmp);
+}
+
+UNIMPLEMENTED(ExtractElementInst)
+UNIMPLEMENTED(ExtractValueInst)
+UNIMPLEMENTED(FenceInst)
+UNIMPLEMENTED(CatchPadInst)
+
+void LLVMParser::handle(const GetElementPtrInst& gep) {
+  handle(gep.getPointerOperand());
+  for(const Value* op : gep.indices())
+    handle(op);
+  cg.add(gep);
+}
+
+UNIMPLEMENTED(IndirectBrInst)
+UNIMPLEMENTED(InsertElementInst)
+UNIMPLEMENTED(InsertValueInst)
+UNIMPLEMENTED(LandingPadInst)
+
+void LLVMParser::handle(const LoadInst& load) {
+  handle(load.getPointerOperand());
+  cg.add(load);
+}
+
+void LLVMParser::handle(const PHINode& phi) {
+  // FIXME: This is not correct
+  WithColor::warning(errs()) << "PHI nodes not correctly handled\n";
+  cg.add(phi, getName(phi, "phi"));
+}
+
+UNIMPLEMENTED(ResumeInst)
+
+void LLVMParser::handle(const ReturnInst& ret) {
+  if(Value* val = ret.getReturnValue())
+    handle(ret.getReturnValue());
+  cg.add(ret);
 }
 
 void LLVMParser::handle(const SelectInst& select) {
@@ -217,52 +234,86 @@ void LLVMParser::handle(const SelectInst& select) {
   cg.add(select);
 }
 
-void LLVMParser::handle(const SwitchInst& sw) {
-  fatal(error() << "UNIMPLEMENTED: " << sw);
+UNIMPLEMENTED(ShuffleVectorInst)
+
+void LLVMParser::handle(const StoreInst& store) {
+  handle(store.getPointerOperand());
+  handle(store.getValueOperand());
+  cg.add(store);
 }
 
-void LLVMParser::handle(const ReturnInst& ret) {
-  if(Value* val = ret.getReturnValue())
-    handle(ret.getReturnValue());
-  cg.add(ret);
+  UNIMPLEMENTED(SwitchInst)
+
+void LLVMParser::handle(const UnaryOperator& inst) {
+  handle(inst.getOperand(0));
+  cg.add(inst);
 }
 
-void LLVMParser::handle(const BasicBlock& bb) {
-  if(bb.hasNPredecessors(0))
-    cg.add(bb);
-  else
-    cg.add(bb, cg.getNewVar("bb"));
-}
+UNIMPLEMENTED(UnreachableInst)
 
 void LLVMParser::handle(const Instruction* inst) {
-  if(const auto* load = dyn_cast<LoadInst>(inst))
-    handle(*load);
-  else if(const auto* store = dyn_cast<StoreInst>(inst))
-    handle(*store);
-  else if(const auto* phi = dyn_cast<PHINode>(inst))
-    handle(*phi);
-  else if(const auto* call = dyn_cast<CallInst>(inst))
-    handle(*call);
-  else if(const auto* invoke = dyn_cast<InvokeInst>(inst))
-    handle(*invoke);
-  else if(const auto* gep = dyn_cast<GetElementPtrInst>(inst))
-    handle(*gep);
-  else if(const auto* cst = dyn_cast<CastInst>(inst))
-    handle(*cst);
-  else if(const auto* sw = dyn_cast<SwitchInst>(inst))
-    handle(*sw);
-  else if(const auto* select = dyn_cast<SelectInst>(inst))
-    handle(*select);
-  else if(const auto* ret = dyn_cast<ReturnInst>(inst))
-    handle(*ret);
-  else if(const auto* cmp = dyn_cast<CmpInst>(inst))
-    handle(*cmp);
-  else if(const auto* alloca = dyn_cast<AllocaInst>(inst))
+  if(const auto* alloca = dyn_cast<AllocaInst>(inst))
     handle(*alloca);
+  else if(const auto* axchg = dyn_cast<AtomicCmpXchgInst>(inst))
+    handle(*axchg);
+  else if(const auto* rmw = dyn_cast<AtomicRMWInst>(inst))
+    handle(*rmw);
   else if(const auto* binop = dyn_cast<BinaryOperator>(inst))
     handle(*binop);
+  else if(const auto* br = dyn_cast<BranchInst>(inst))
+    handle(*br);
+  else if(const auto* cst = dyn_cast<CastInst>(inst))
+    handle(*cst);
+  else if(const auto* invoke = dyn_cast<InvokeInst>(inst))
+    handle(*invoke);
+  else if(const auto* call = dyn_cast<CallInst>(inst))
+    handle(*call);
+  else if(const auto* catchReturn = dyn_cast<CatchReturnInst>(inst))
+    handle(*catchReturn);
+  else if(const auto* catchSwitch = dyn_cast<CatchSwitchInst>(inst))
+    handle(*catchSwitch);
+  else if(const auto* cleanupReturn = dyn_cast<CleanupReturnInst>(inst))
+    handle(*cleanupReturn);
+  else if(const auto* cmp = dyn_cast<CmpInst>(inst))
+    handle(*cmp);
+  else if(const auto* extractElem = dyn_cast<ExtractElementInst>(inst))
+    handle(*extractElem);
+  else if(const auto* extractVal = dyn_cast<ExtractValueInst>(inst))
+    handle(*extractVal);
+  else if(const auto* fence = dyn_cast<FenceInst>(inst))
+    handle(*fence);
+  else if(const auto* catchPad = dyn_cast<CatchPadInst>(inst))
+    handle(*catchPad);
+  else if(const auto* gep = dyn_cast<GetElementPtrInst>(inst))
+    handle(*gep);
+  else if(const auto* indirectBr = dyn_cast<IndirectBrInst>(inst))
+    handle(*indirectBr);
+  else if(const auto* insertElem = dyn_cast<InsertElementInst>(inst))
+    handle(*insertElem);
+  else if(const auto* insertVal = dyn_cast<InsertValueInst>(inst))
+    handle(*insertVal);
+  else if(const auto* landingPad = dyn_cast<LandingPadInst>(inst))
+    handle(*landingPad);
+  else if(const auto* load = dyn_cast<LoadInst>(inst))
+    handle(*load);
+  else if(const auto* phi = dyn_cast<PHINode>(inst))
+    handle(*phi);
+  else if(const auto* resume = dyn_cast<ResumeInst>(inst))
+    handle(*resume);
+  else if(const auto* returnInst = dyn_cast<ReturnInst>(inst))
+    handle(*returnInst);
+  else if(const auto* select = dyn_cast<SelectInst>(inst))
+    handle(*select);
+  else if(const auto* shuffle = dyn_cast<ShuffleVectorInst>(inst))
+    handle(*shuffle);
+  else if(const auto* store = dyn_cast<StoreInst>(inst))
+    handle(*store);
+  else if(const auto* sw = dyn_cast<SwitchInst>(inst))
+    handle(*sw);
   else if(const auto* unop = dyn_cast<UnaryOperator>(inst))
     handle(*unop);
+  else if(const auto* unreachable = dyn_cast<UnreachableInst>(inst))
+    handle(*unreachable);
   else
     fatal(error() << "UNKNOWN INSTRUCTION: " << *inst);
 
@@ -286,7 +337,10 @@ void LLVMParser::handle(const Instruction* inst) {
 }
 
 void LLVMParser::handle(const GlobalValue* gv) {
-  fatal(error() << "UNKNOWN GLOBAL: " << *gv);
+  if(const auto* ga = dyn_cast<GlobalAlias>(gv))
+    handle(*ga);
+  else
+    fatal(error() << "UNKNOWN GLOBAL: " << *gv);
 }
 
 void LLVMParser::handle(const Constant* c) {
@@ -332,6 +386,15 @@ void LLVMParser::handle(const Value* v) {
   else
     fatal(error() << "UNHANDLED: " << *v);
 }
+
+void LLVMParser::handle(const BasicBlock& bb) {
+  if(bb.hasNPredecessors(0))
+    cg.add(bb);
+  else
+    cg.add(bb, cg.getNewVar("bb"));
+}
+
+UNIMPLEMENTED(GlobalAlias)
 
 void LLVMParser::handle(PointerType* pty) {
   handle(pty->getElementType());
@@ -428,6 +491,10 @@ void LLVMParser::runOnStruct(StructType* sty) {
       fields.push_back("elem_" + std::to_string(i));
   }
   cg.add(sty, fields);
+}
+
+void LLVMParser::runOnAlias(const GlobalAlias& alias) {
+  fatal(error() << "NOT IMPLEMENTED: " << alias);
 }
 
 void LLVMParser::runOnGlobal(const GlobalVariable& g) {
@@ -555,6 +622,8 @@ void LLVMParser::runOnModule(const Module& m) {
 
   for(const GlobalVariable& g : m.globals())
     runOnGlobal(g);
+  for(const GlobalAlias& a : m.aliases())
+    runOnAlias(a);
   for(const Function& f : m.functions())
     if(f.size())
       runOnFunction(f);
