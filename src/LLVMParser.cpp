@@ -144,6 +144,7 @@ void LLVMParser::handle(const ConstantExpr& cexpr) {
 }
 
 void LLVMParser::handle(const AllocaInst& alloca) {
+  handle(alloca.getType());
   handle(alloca.getAllocatedType());
   cg.add(alloca, getName(alloca, "local"));
 }
@@ -159,10 +160,10 @@ void LLVMParser::handle(const BinaryOperator& inst) {
 }
 
 void LLVMParser::handle(const BranchInst& br) {
-  if(const Value* cond = br.getCondition())
-    handle(cond);
-  for(const llvm::BasicBlock* bb : br.successors())
-    handle(bb);
+  // Don't need to handle the successors because all blocks will be handled
+  // separately
+  if(br.isConditional())
+    handle(br.getCondition());
   cg.add(br);
 }
 
@@ -215,6 +216,11 @@ void LLVMParser::handle(const LoadInst& load) {
 
 void LLVMParser::handle(const PHINode& phi) {
   // FIXME: This is not correct
+  // Cannot handle any incoming values here because if this is a loop, then
+  // the value will not have been handled yet and we don't want to handle
+  // it either. The problems occur because the incoming values may involve
+  // setting this PHI variable, so all sorts of missing variables in that
+  // situation
   WithColor::warning(errs()) << "PHI nodes not correctly handled\n";
   cg.add(phi, getName(phi, "phi"));
 }
@@ -250,6 +256,27 @@ void LLVMParser::handle(const UnaryOperator& inst) {
 }
 
 UNIMPLEMENTED(UnreachableInst)
+
+bool LLVMParser::shouldUseTemporary(const Instruction& inst) const {
+  // If there is zero or more than one use of the instruction, then create a
+  // temporary variable for it. This is particularly important in the case
+  // of function calls because if we don't do it this way and the result of
+  // a call is used more than once, the call will appear to be made multiple
+  // times, and if it is never used, then it will appear as if the call is
+  // never made. But if we always use a temporary, the result will never
+  // look remotely reasonable and we might as well just read LLVM.
+  size_t uses = inst.getNumUses();
+  if(phiValues.contains(&inst))
+    return true;
+  else if((isa<CallInst>(inst) or isa<InvokeInst>(inst))
+     and (not inst.getType()->isVoidTy()) and ((uses == 0) or (uses > 1)))
+    return true;
+  else if(isa<GetElementPtrInst>(inst) or isa<CastInst>(inst))
+    return false;
+  else if(not isa<AllocaInst>(inst) and (uses > 1))
+    return true;
+  return false;
+}
 
 void LLVMParser::handle(const Instruction* inst) {
   if(const auto* alloca = dyn_cast<AllocaInst>(inst))
@@ -317,22 +344,7 @@ void LLVMParser::handle(const Instruction* inst) {
   else
     fatal(error() << "UNKNOWN INSTRUCTION: " << *inst);
 
-  // If there is zero or more than one use of the instruction, then create a
-  // temporary variable for it. This is particularly important in the case
-  // of function calls because if we don't do it this way and the result of
-  // a call is used more than once, the call will appear to be made multiple
-  // times, and if it is never used, then it will appear as if the call is
-  // never made. But if we always use a temporary, the result will never
-  // look remotely reasonable and we might as well just read LLVM.
-  bool useTemp = false;
-  size_t uses = inst->getNumUses();
-  if((isa<CallInst>(inst) or isa<InvokeInst>(inst))
-     and (not inst->getType()->isVoidTy()) and ((uses == 0) or (uses > 1)))
-    useTemp = true;
-  else if(not isa<AllocaInst>(inst) and (uses > 1))
-    useTemp = true;
-
-  if(useTemp)
+  if(shouldUseTemporary(*inst))
     cg.addTemp(*inst, getName(inst));
 }
 
@@ -545,6 +557,8 @@ void LLVMParser::runOnFunction(const Function& f) {
     for(const Instruction& inst : bb) {
       if(ignoreValues.contains(&inst)) {
         continue;
+      } else if(phiValues.contains(&inst)) {
+        handle(&inst);
       } else if(const auto* alloca = dyn_cast<AllocaInst>(&inst)) {
         handle(*alloca);
       } else if(const auto* call = dyn_cast<CallInst>(&inst)) {
@@ -581,6 +595,12 @@ static bool isMetadataFunction(const Function& f) {
 
 void LLVMParser::runOnModule(const Module& m) {
   di.runOnModule(m);
+
+  for(const Function& f : m.functions())
+    for(const Instruction& inst : instructions(f))
+      if(const PHINode* phi = dyn_cast<PHINode>(&inst))
+        for(const llvm::Value* v : phi->incoming_values())
+          phiValues.insert(v);
 
   // First find anything that we know are never going to be
   // converted. These would be any LLVM debug and lifetime intrinsics but

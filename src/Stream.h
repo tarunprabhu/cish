@@ -21,8 +21,19 @@ protected:
 
 protected:
   bool shouldPrintCast(const clang::Type*) const;
+  bool shouldPrintCast(clang::QualType type) const;
 
   Stream& parenthetize(const clang::Stmt*);
+
+  bool isVoidTy(const clang::Type*) const;
+  bool isBoolTy(const clang::Type*) const;
+  bool isCharTy(const clang::Type*) const;
+  bool isShortTy(const clang::Type*) const;
+  bool isIntTy(const clang::Type*) const;
+  bool isLongTy(const clang::Type*) const;
+  bool isFloatTy(const clang::Type*) const;
+  bool isDoubleTy(const clang::Type*) const;
+  bool isLongDoubleTy(const clang::Type*) const;
 
 public:
   Stream(const clang::ASTContext& astContext,
@@ -69,6 +80,7 @@ public:
   Stream& operator<<(clang::QualType);
 
   Stream& operator<<(const clang::Stmt*);
+  Stream& operator<<(const clang::DeclStmt*);
   Stream& operator<<(const clang::CompoundStmt*);
   Stream& operator<<(const clang::LabelStmt*);
   Stream& operator<<(const clang::GotoStmt*);
@@ -79,6 +91,7 @@ public:
   Stream& operator<<(const clang::ConditionalOperator*);
   Stream& operator<<(const clang::CallExpr*);
   Stream& operator<<(const clang::CStyleCastExpr*);
+  Stream& operator<<(const clang::ArraySubscriptExpr*);
   Stream& operator<<(const clang::ForStmt*);
   Stream& operator<<(const clang::WhileStmt*);
 

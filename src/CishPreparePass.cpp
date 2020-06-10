@@ -1,7 +1,7 @@
-#include <llvm/Pass.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/Pass.h>
 
 #include <vector>
 
@@ -54,7 +54,5 @@ bool CishPreparePass::runOnFunction(Function& f) {
 
 char CishPreparePass::ID = 0;
 
-static RegisterPass<CishPreparePass> X("cish-prepare",
-                                       "Prepare code for cish",
-                                       false,
-                                       false);
+static RegisterPass<CishPreparePass>
+    X("cish-prepare", "Prepare code for cish", false, false);

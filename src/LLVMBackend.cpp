@@ -1,4 +1,5 @@
 #include "LLVMBackend.h"
+#include "ClangUtils.h"
 #include "Diagnostics.h"
 #include "LLVMUtils.h"
 
@@ -12,9 +13,9 @@ using namespace clang;
 
 namespace cish {
 
-#define UNIMPLEMENTED(TYPE)                          \
-  void LLVMBackend::add(const llvm::TYPE& inst) { \
-    fatal(error() << "NOT IMPLEMENTED: " << inst);   \
+#define UNIMPLEMENTED(TYPE)                        \
+  void LLVMBackend::add(const llvm::TYPE& inst) {  \
+    fatal(error() << "NOT IMPLEMENTED: " << inst); \
   }
 
 LLVMBackend::LLVMBackend(CishContext& context) : BackendBase(context) {
@@ -37,26 +38,77 @@ void LLVMBackend::endBlock(const llvm::BasicBlock& bb) {
   BackendBase::endBlock(blocks.at(&bb));
 }
 
+DeclRefExpr* LLVMBackend::createVariable(const std::string& name,
+                                         QualType type,
+                                         DeclContext* parent) {
+  auto* var = VarDecl::Create(astContext,
+                              parent,
+                              invLoc,
+                              invLoc,
+                              &astContext.Idents.get(name),
+                              type,
+                              nullptr,
+                              SC_None);
+
+  return DeclRefExpr::Create(astContext,
+                             NestedNameSpecifierLoc(),
+                             invLoc,
+                             var,
+                             false,
+                             invLoc,
+                             type,
+                             VK_LValue,
+                             var);
+}
+
+BinaryOperator* LLVMBackend::createBinaryOperator(Expr& lhs,
+                                                  Expr& rhs,
+                                                  BinaryOperator::Opcode opc,
+                                                  QualType type) {
+  return new(astContext) BinaryOperator(
+      &lhs, &rhs, opc, type, VK_RValue, OK_Ordinary, invLoc, FPOptions());
+}
+
+UnaryOperator* LLVMBackend::createUnaryOperator(Expr& lhs,
+                                                UnaryOperator::Opcode opc,
+                                                QualType type) {
+  return new(astContext)
+      UnaryOperator(&lhs, opc, type, VK_RValue, OK_Ordinary, invLoc, false);
+}
+
+ArraySubscriptExpr*
+LLVMBackend::createArraySubscriptExpr(Expr& base, Expr& idx, QualType type) {
+  return new(astContext)
+      ArraySubscriptExpr(&base, &idx, type, VK_RValue, OK_Ordinary, invLoc);
+}
+
 void LLVMBackend::add(const llvm::AllocaInst& alloca, const std::string& name) {
-  QualType type = get(alloca.getAllocatedType());
-  VarDecl* var = VarDecl::Create(astContext,
-                                 funcs.at(&getFunction(alloca)),
-                                 invLoc,
-                                 invLoc,
-                                 &astContext.Idents.get(name),
-                                 type,
-                                 nullptr,
-                                 SC_None);
-  add(alloca,
-      DeclRefExpr::Create(astContext,
-                          NestedNameSpecifierLoc(),
-                          invLoc,
-                          var,
-                          false,
-                          invLoc,
-                          type,
-                          VK_LValue,
-                          var));
+  FunctionDecl* f = funcs.at(&getFunction(alloca));
+
+  DeclRefExpr* ref = createVariable(name, get(alloca.getAllocatedType()), f);
+  f->addDecl(ref->getDecl());
+
+  // The statement to declare the variable in the function
+  auto* group = new(astContext) DeclGroupRef(ref->getDecl());
+  auto* stmt = new(astContext) DeclStmt(*group, invLoc, invLoc);
+  stmts.push_back(stmt);
+
+  // The alloca statement in LLVM is always a pointer type, so where the
+  // variable will be used, we actually need the pointer to it to be
+  // consisten
+  add(alloca, createUnaryOperator(*ref, UO_AddrOf, get(alloca.getType())));
+}
+
+CStyleCastExpr* LLVMBackend::createCastExpr(clang::Expr& expr, QualType type) {
+  return CStyleCastExpr::Create(astContext,
+                                type,
+                                VK_RValue,
+                                CastKind::CK_BitCast,
+                                &expr,
+                                nullptr,
+                                nullptr,
+                                invLoc,
+                                invLoc);
 }
 
 UNIMPLEMENTED(AtomicCmpXchgInst)
@@ -104,27 +156,28 @@ void LLVMBackend::add(const llvm::BinaryOperator& inst) {
     opc = BO_Xor;
     break;
   default:
-    fatal(llvm::errs() << "Unknown binary operator: " << inst);
+    fatal(error() << "Unknown binary operator: " << inst);
     break;
   }
 
   add(inst,
-      new(astContext) BinaryOperator(&get<Expr>(inst.getOperand(0)),
-                                     &get<Expr>(inst.getOperand(1)),
-                                     opc,
-                                     get(inst.getType()),
-                                     VK_LValue,
-                                     OK_Ordinary,
-                                     invLoc,
-                                     FPOptions()));
+      createBinaryOperator(get<Expr>(inst.getOperand(0)),
+                           get<Expr>(inst.getOperand(1)),
+                           opc,
+                           get(inst.getType())));
 }
 
 void LLVMBackend::add(const llvm::BranchInst& br) {
-  if(llvm::Value* cond = br.getCondition()) {
+  if(br.isConditional()) {
+    llvm::Value* cond = br.getCondition();
     auto* thn = new(astContext)
         GotoStmt(blocks.at(br.getSuccessor(0)), invLoc, invLoc);
+    auto* thns = CompoundStmt::Create(
+        astContext, llvm::ArrayRef<Stmt*>(thn), invLoc, invLoc);
     auto* els = new(astContext)
         GotoStmt(blocks.at(br.getSuccessor(1)), invLoc, invLoc);
+    auto* elss = CompoundStmt::Create(
+        astContext, llvm::ArrayRef<Stmt*>(els), invLoc, invLoc);
     add(br,
         IfStmt::Create(astContext,
                        invLoc,
@@ -132,9 +185,9 @@ void LLVMBackend::add(const llvm::BranchInst& br) {
                        nullptr,
                        nullptr,
                        &get<Expr>(cond),
-                       thn,
+                       thns,
                        invLoc,
-                       els));
+                       elss));
   } else {
     add(br,
         new(astContext)
@@ -144,16 +197,7 @@ void LLVMBackend::add(const llvm::BranchInst& br) {
 }
 
 void LLVMBackend::add(const llvm::CastInst& cst) {
-  add(cst,
-      CStyleCastExpr::Create(astContext,
-                             get(cst.getType()),
-                             VK_RValue,
-                             CastKind::CK_BitCast,
-                             &get<Expr>(cst.getOperand(0)),
-                             nullptr,
-                             nullptr,
-                             invLoc,
-                             invLoc));
+  add(cst, createCastExpr(get<Expr>(cst.getOperand(0)), get(cst.getType())));
 }
 
 UNIMPLEMENTED(InvokeInst)
@@ -221,14 +265,10 @@ void LLVMBackend::add(const llvm::CmpInst& cmp) {
   }
 
   add(cmp,
-      new(astContext) BinaryOperator(&get<Expr>(cmp.getOperand(0)),
-                                     &get<Expr>(cmp.getOperand(1)),
-                                     opc,
-                                     get(cmp.getType()),
-                                     VK_LValue,
-                                     OK_Ordinary,
-                                     invLoc,
-                                     FPOptions()));
+      createBinaryOperator(get<Expr>(cmp.getOperand(0)),
+                           get<Expr>(cmp.getOperand(1)),
+                           opc,
+                           get(cmp.getType())));
 }
 
 UNIMPLEMENTED(ExtractElementInst)
@@ -236,43 +276,95 @@ UNIMPLEMENTED(ExtractValueInst)
 UNIMPLEMENTED(FenceInst)
 UNIMPLEMENTED(CatchPadInst)
 
-void LLVMBackend::handleIndices(llvm::Type* ty,
+static ArraySubscriptExpr* getAsArraySubscriptExpr(clang::Expr* expr) {
+  if(auto* un = dyn_cast<UnaryOperator>(stripCasts(expr)))
+    return dyn_cast<ArraySubscriptExpr>(un->getSubExpr());
+  return nullptr;
+}
+
+clang::Expr*
+LLVMBackend::handleIndexOperand(llvm::PointerType* pty,
+                                clang::Expr* currExpr,
                                 unsigned idx,
                                 const Vector<const llvm::Value*>& indices,
                                 const llvm::Instruction& inst) {
   const llvm::Value* op = indices[idx];
-  llvm::Type* next = nullptr;
-  // if(auto* pty = dyn_cast<PointerType>(ty)) {
-  //   ss << "[" << handle(op) << "]";
-  //   next = pty->getElementType();
-  // } else if(auto* aty = dyn_cast<ArrayType>(ty)) {
-  //   ss << "[" << handle(op) << "]";
-  //   next = aty->getElementType();
-  // } else if(auto* sty = dyn_cast<StructType>(ty)) {
-  //   if(auto* cint = dyn_cast<ConstantInt>(op)) {
-  //     unsigned field = cint->getLimitedValue();
-  //     ss << "." << cg.getElementName(sty, field);
-  //     next = sty->getElementType(field);
-  //   } else {
-  //     WithColor::error(errs()) << "Expected constant index in GEP\n"
-  //                              << "          idx: " << idx << "\n"
-  //                              << "           op: " << *op << "\n"
-  //                              << "         type: " << *ty << "\n"
-  //                              << "         inst: " << inst << "\n";
-  //     exit(1);
-  //   }
-  // } else {
-  //   WithColor::error(errs())
-  //       << "GEP Indices not implemented for type: " << *ty << "\n";
-  //   exit(1);
-  // }
+  if(idx == 0) {
+    if(auto* arrExpr = getAsArraySubscriptExpr(currExpr)) {
+      Expr* idxExpr = arrExpr->getIdx();
+      Expr* newIdx = createBinaryOperator(
+          *idxExpr, get<Expr>(op), BO_Add, idxExpr->getType());
+      Expr* newArr = createArraySubscriptExpr(
+          *arrExpr->getBase(), *newIdx, arrExpr->getType());
+      Expr* addrOf = createUnaryOperator(*newArr, UO_AddrOf, get(pty));
+      if(auto* cst = dyn_cast<CStyleCastExpr>(currExpr))
+        return createCastExpr(*addrOf, cst->getType());
+      else
+        return addrOf;
+    }
+  } else if(const auto* cint = dyn_cast<llvm::ConstantInt>(op)) {
+    if(cint->getLimitedValue() == 0)
+      return currExpr;
+  }
+  return createArraySubscriptExpr(*currExpr, get<Expr>(op), get(pty));
+}
 
-  if((idx + 1) < indices.size())
-    handleIndices(next, idx + 1, indices, inst);
+clang::Expr*
+LLVMBackend::handleIndexOperand(llvm::ArrayType* aty,
+                                clang::Expr* currExpr,
+                                unsigned idx,
+                                const Vector<const llvm::Value*>& indices,
+                                const llvm::Instruction& inst) {
+  return createArraySubscriptExpr(
+      *currExpr, get<Expr>(indices.at(idx)), get(aty));
+}
+
+clang::Expr* LLVMBackend::handleIndexOperand(llvm::StructType* sty,
+                                             clang::Expr* currExpr,
+                                             unsigned field,
+                                             const llvm::Instruction& inst) {
+
+  return createBinaryOperator(*currExpr,
+                              *fields.at(sty)[field],
+                              BO_PtrMemD,
+                              get(sty->getElementType(field)));
 }
 
 void LLVMBackend::add(const llvm::GetElementPtrInst& gep) {
-  fatal(error() << "NOT IMPLEMENTED: " << gep);
+  const llvm::Value* ptr = gep.getPointerOperand();
+  llvm::Type* type = ptr->getType();
+  clang::Expr* expr = &get<Expr>(ptr);
+  Vector<const llvm::Value*> indices(gep.idx_begin(), gep.idx_end());
+  for(unsigned i = 0; i < indices.size(); i++) {
+    if(auto* pty = dyn_cast<llvm::PointerType>(type)) {
+      expr = handleIndexOperand(pty, expr, i, indices, gep);
+      type = pty->getElementType();
+    } else if(auto* aty = dyn_cast<llvm::ArrayType>(type)) {
+      expr = handleIndexOperand(aty, expr, i, indices, gep);
+      type = aty->getElementType();
+    } else if(auto* sty = dyn_cast<llvm::StructType>(type)) {
+      if(auto* cint = dyn_cast<llvm::ConstantInt>(indices[i])) {
+        unsigned field = cint->getLimitedValue();
+        expr = handleIndexOperand(sty, expr, field, gep);
+        type = sty->getElementType(field);
+      } else {
+        fatal(error() << "Expected constant index in GEP\n"
+                      << "           op: " << *indices.at(i) << "\n"
+                      << "         type: " << *type << "\n"
+                      << "         inst: " << gep);
+      }
+    } else {
+      fatal(error() << "GEP Indices not implemented for type: " << *type);
+      exit(1);
+    }
+  }
+
+  // If the operand to the GEP is itself a GEP, then the AddrOf operator
+  // will already be present
+  if(isa<llvm::GetElementPtrInst>(stripCasts(gep.getPointerOperand())))
+    add(gep, expr);
+  else
+    add(gep, createUnaryOperator(*expr, UO_AddrOf, get(gep.getType())));
 }
 
 UNIMPLEMENTED(IndirectBrInst)
@@ -282,28 +374,29 @@ UNIMPLEMENTED(LandingPadInst)
 
 void LLVMBackend::add(const llvm::LoadInst& load) {
   add(load,
-      new(astContext) UnaryOperator(&get<Expr>(load.getPointerOperand()),
-                                    UO_Deref,
-                                    get(load.getType()),
-                                    VK_RValue,
-                                    OK_Ordinary,
-                                    invLoc,
-                                    false));
+      createUnaryOperator(
+          get<Expr>(load.getPointerOperand()), UO_Deref, get(load.getType())));
 }
 
 void LLVMBackend::add(const llvm::PHINode& phi, const std::string& name) {
-  fatal(error() << "NOT IMPLEMENTED: " << phi);
+  warning() << "PHI nodes not correctly implemented\n";
+  QualType type = get(phi.getType());
+  FunctionDecl* f = funcs.at(&getFunction(phi));
+  DeclRefExpr* var = createVariable(name, type, f);
+  stmts.push_back(createBinaryOperator(
+      *var, *createVariable("PHI", type, f), BO_Assign, type));
+  add(phi, var);
 }
 
 UNIMPLEMENTED(ResumeInst)
 
 void LLVMBackend::add(const llvm::ReturnInst& ret) {
-  if(const llvm::Value* val = ret.getReturnValue()) {
-    add(ret, ReturnStmt::Create(astContext, invLoc, &get<Expr>(val), nullptr));
-  } else {
-    add(ret, ReturnStmt::CreateEmpty(astContext, false));
-  }
-  stmts.push_back(&get(ret));
+  Expr* retExpr = nullptr;
+  if(const llvm::Value* val = ret.getReturnValue())
+    retExpr = &get<Expr>(val);
+
+  stmts.push_back(ReturnStmt::Create(astContext, invLoc, retExpr, nullptr));
+  add(ret, stmts.back());
 }
 
 void LLVMBackend::add(const llvm::SelectInst& select) {
@@ -321,16 +414,11 @@ void LLVMBackend::add(const llvm::SelectInst& select) {
 UNIMPLEMENTED(ShuffleVectorInst)
 
 void LLVMBackend::add(const llvm::StoreInst& store) {
-  const llvm::Value* ptr = store.getPointerOperand();
   const llvm::Value* val = store.getValueOperand();
-  auto* assign = new(astContext) BinaryOperator(&get<Expr>(ptr),
-                                                &get<Expr>(val),
-                                                BO_Assign,
-                                                get(val->getType()),
-                                                VK_LValue,
-                                                OK_Ordinary,
-                                                invLoc,
-                                                FPOptions());
+  QualType type = get(val->getType());
+  Expr* ptr = createUnaryOperator(
+      get<Expr>(store.getPointerOperand()), UO_Deref, type);
+  auto* assign = createBinaryOperator(*ptr, get<Expr>(val), BO_Assign, type);
   stmts.push_back(assign);
   add(store, assign);
 }
@@ -347,13 +435,8 @@ void LLVMBackend::add(const llvm::UnaryOperator& inst) {
   }
 
   add(inst,
-      new(astContext) UnaryOperator(&get<Expr>(inst.getOperand(0)),
-                                    opc,
-                                    get(inst.getType()),
-                                    VK_LValue,
-                                    OK_Ordinary,
-                                    invLoc,
-                                    false));
+      createUnaryOperator(
+          get<Expr>(inst.getOperand(0)), opc, get(inst.getType())));
 }
 
 UNIMPLEMENTED(UnreachableInst)
@@ -440,27 +523,12 @@ void LLVMBackend::add(const llvm::GlobalVariable& g, const std::string& name) {
   QualType type = get(g.getType()->getElementType());
   if(g.isConstant())
     type.addConst();
-  VarDecl* decl = VarDecl::Create(astContext,
-                                  tu,
-                                  invLoc,
-                                  invLoc,
-                                  &astContext.Idents.get(name),
-                                  type,
-                                  nullptr,
-                                  SC_None);
+  DeclRefExpr* ref = createVariable(name, type, tu);
+  VarDecl* decl = dyn_cast<VarDecl>(ref->getDecl());
   tu->addDecl(decl);
   if(const llvm::Constant* init = g.getInitializer())
     decl->setInit(&get<Expr>(init));
-  add(g,
-      DeclRefExpr::Create(astContext,
-                          NestedNameSpecifierLoc(),
-                          invLoc,
-                          decl,
-                          false,
-                          invLoc,
-                          type,
-                          VK_LValue,
-                          decl));
+  add(g, ref);
 }
 
 void LLVMBackend::add(const llvm::BasicBlock& bb, const std::string& name) {
@@ -498,6 +566,15 @@ void LLVMBackend::add(llvm::StructType* sty,
                                          true,
                                          ICIS_NoInit);
     record->addDecl(field);
+    fields[sty].push_back(DeclRefExpr::Create(astContext,
+                                              NestedNameSpecifierLoc(),
+                                              invLoc,
+                                              field,
+                                              false,
+                                              invLoc,
+                                              get(sty->getElementType(i)),
+                                              VK_RValue,
+                                              field));
   }
 
   // Not sure if adding a body to the struct will result in the underlying
@@ -584,7 +661,10 @@ void LLVMBackend::add(const llvm::ConstantArray& carray) {
 }
 
 void LLVMBackend::add(const llvm::UndefValue& cundef) {
-  add(cundef, new(astContext) GNUNullExpr(get(cundef.getType()), invLoc));
+  add(cundef,
+      createVariable("__undefined__",
+                     get(cundef.getType()),
+                     astContext.getTranslationUnitDecl()));
 }
 
 void LLVMBackend::add(llvm::IntegerType* ity) {
@@ -638,7 +718,9 @@ void LLVMBackend::add(llvm::FunctionType* fty) {
 }
 
 void LLVMBackend::add(llvm::VectorType* vty) {
-  fatal(error() << "NOT IMPLEMENTED: " << *vty);
+  types[vty] = astContext.getVectorType(get(vty->getElementType()),
+                                        vty->getNumElements(),
+                                        VectorType::GenericVector);
 }
 
 void LLVMBackend::add(llvm::Type* type) {
@@ -669,33 +751,12 @@ void LLVMBackend::add(llvm::Type* type) {
 
 void LLVMBackend::addTemp(const llvm::Instruction& inst,
                           const std::string& name) {
-  // QualType type = get(inst.getType());
-  // auto* var = VarDecl::Create(astContext,
-  //                             funcs.at(&getFunction(inst)),
-  //                             invLoc,
-  //                             invLoc,
-  //                             &astContext.Idents.get(name),
-  //                             type,
-  //                             nullptr,
-  //                             SC_None);
-  // auto* ref = DeclRefExpr::Create(astContext,
-  //                                 NestedNameSpecifierLoc(),
-  //                                 invLoc,
-  //                                 var,
-  //                                 false,
-  //                                 invLoc,
-  //                                 type,
-  //                                 VK_LValue,
-  //                                 var);
-  // auto* temp = new(astContext) BinaryOperator(ref,
-  //                                             &get<Expr>(inst),
-  //                                             BO_Assign,
-  //                                             type,
-  //                                             VK_LValue,
-  //                                             OK_Ordinary,
-  //                                             invLoc,
-  //                                             FPOptions());
-  // return add(inst, temp);
+  QualType type = get(inst.getType());
+  DeclRefExpr* var = createVariable(name, type, funcs.at(&getFunction(inst)));
+  BinaryOperator* temp
+      = createBinaryOperator(*var, get<Expr>(inst), BO_Assign, type);
+  stmts.push_back(temp);
+  add(inst, var);
 }
 
 bool LLVMBackend::has(llvm::Type* type) const {

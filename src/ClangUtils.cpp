@@ -8,3 +8,9 @@ const Type* getBaseType(const ArrayType* aty) {
     return getBaseType(bty);
   return ety;
 }
+
+clang::Expr* stripCasts(clang::Expr* expr) {
+  if(auto* cst = dyn_cast<CastExpr>(expr))
+    return stripCasts(cst->getSubExpr());
+  return expr;
+}

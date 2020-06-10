@@ -34,19 +34,64 @@ Stream::Stream(const clang::ASTContext& astContext,
       tabStr.append(" ");
 }
 
+bool Stream::isVoidTy(const Type* type) const {
+  return type == astContext.VoidTy.getTypePtr();
+}
+
+bool Stream::isBoolTy(const Type* type) const {
+  return type == astContext.BoolTy.getTypePtr();
+}
+
+bool Stream::isCharTy(const Type* type) const {
+  return type == astContext.CharTy.getTypePtr();
+}
+
+bool Stream::isShortTy(const Type* type) const {
+  return type == astContext.ShortTy.getTypePtr();
+}
+
+bool Stream::isIntTy(const Type* type) const {
+  return type == astContext.IntTy.getTypePtr();
+}
+
+bool Stream::isLongTy(const Type* type) const {
+  return type == astContext.LongTy.getTypePtr();
+}
+
+bool Stream::isFloatTy(const Type* type) const {
+  return type == astContext.FloatTy.getTypePtr();
+}
+
+bool Stream::isDoubleTy(const Type* type) const {
+  return type == astContext.DoubleTy.getTypePtr();
+}
+
+bool Stream::isLongDoubleTy(const Type* type) const {
+  return type == astContext.LongDoubleTy.getTypePtr();
+}
+
 bool Stream::shouldPrintCast(const Type* type) const {
-  const Set<IgnoreCasts>& ignore = fmtOpts.ignoreCasts;
-  if(ignore.contains(IgnoreCasts::All)) {
+  if(fmtOpts.has(StripCasts::All)) {
     return false;
-  } else if(ignore.contains(IgnoreCasts::None)) {
+  } else if(fmtOpts.has(StripCasts::Never)) {
     return true;
   } else if(const auto* pty = dyn_cast<PointerType>(type)) {
     if(isa<FunctionProtoType>(pty->getPointeeType()))
-      return not ignore.contains(IgnoreCasts::Function);
+      return not fmtOpts.has(StripCasts::Function);
+    else if(isa<VectorType>(pty->getPointeeType()))
+      return not fmtOpts.has(StripCasts::Vector);
+    else
+      return not fmtOpts.has(StripCasts::Pointer);
+  } else if(type->isScalarType()) {
+    return not fmtOpts.has(StripCasts::Scalar);
   } else if(isa<VectorType>(type)) {
-    return not ignore.contains(IgnoreCasts::Vector);
+    return not fmtOpts.has(StripCasts::Vector);
   }
   return true;
+}
+
+bool Stream::shouldPrintCast(QualType type) const {
+  return shouldPrintCast(type.getTypePtr());
 }
 
 Stream& Stream::parenthetize(const Stmt* stmt) {
@@ -87,11 +132,11 @@ Stream& Stream::endst(bool newl) {
 
 Stream& Stream::beginBlock(const std::string& label) {
   switch(fmtOpts.indentation) {
-  case Indentation::KR:
-  case Indentation::Stroustrup:
+  case IndentStyle::KR:
+  case IndentStyle::Stroustrup:
     space();
     break;
-  case Indentation::Allman:
+  case IndentStyle::Allman:
     endl() << tab();
     break;
   }
@@ -102,10 +147,10 @@ Stream& Stream::beginBlock(const std::string& label) {
 }
 
 Stream& Stream::endBlock(bool semicolon) {
-  *this << "}";
+  ilevel -= 1;
+  tab() << "}";
   if(semicolon)
     endst(false);
-  ilevel -= 1;
 
   return *this;
 }
@@ -136,12 +181,17 @@ Stream& Stream::operator<<(uint32_t i) {
 }
 
 Stream& Stream::operator<<(int64_t i) {
-  os << i << "L";
+  os << i;
+  if(((i > 0) and (i >= std::numeric_limits<int32_t>::max()))
+     or ((i < 0) and (i <= std::numeric_limits<int32_t>::min())))
+    os << "L";
   return *this;
 }
 
 Stream& Stream::operator<<(uint64_t i) {
   os << i;
+  if(i >= std::numeric_limits<int32_t>::max())
+    os << "L";
   return *this;
 }
 
@@ -151,7 +201,10 @@ Stream& Stream::operator<<(float f) {
 }
 
 Stream& Stream::operator<<(double g) {
-  os << g << "L";
+  os << g;
+  if(((g > 0) and (g >= std::numeric_limits<float>::max()))
+     or ((g < 0) and (g <= std::numeric_limits<float>::min())))
+    os << "L";
   return *this;
 }
 
@@ -222,25 +275,25 @@ Stream& Stream::operator<<(const VectorType* vty) {
 }
 
 Stream& Stream::operator<<(const Type* type) {
-  if(type == astContext.VoidTy.getTypePtr())
+  if(isVoidTy(type))
     return *this << "void";
-  else if(type == astContext.BoolTy.getTypePtr())
+  else if(isBoolTy(type))
     return *this << "bool";
-  else if(type == astContext.CharTy.getTypePtr())
+  else if(isCharTy(type))
     return *this << "char";
-  else if(type == astContext.ShortTy.getTypePtr())
+  else if(isShortTy(type))
     return *this << "short";
-  else if(type == astContext.IntTy.getTypePtr())
+  else if(isIntTy(type))
     return *this << "int";
-  else if(type == astContext.LongTy.getTypePtr())
+  else if(isLongTy(type))
     return *this << "long";
   else if(type == astContext.Int128Ty.getTypePtr())
     return *this << "__int128";
-  else if(type == astContext.FloatTy.getTypePtr())
+  else if(isFloatTy(type))
     return *this << "float";
-  else if(type == astContext.DoubleTy.getTypePtr())
+  else if(isDoubleTy(type))
     return *this << "double";
-  else if(type == astContext.LongDoubleTy.getTypePtr())
+  else if(isLongDoubleTy(type))
     return *this << "long double";
   else if(auto* pty = dyn_cast<PointerType>(type))
     *this << pty;
@@ -280,17 +333,16 @@ Stream& Stream::operator<<(const CXXBoolLiteralExpr* b) {
 }
 
 Stream& Stream::operator<<(const CharacterLiteral* c) {
-  llvm::WithColor::warning(llvm::errs()) << "UNIMPLEMENTED: CharacterLiteral\n";
+  fatal(error() << "UNIMPLEMENTED: CharacterLiteral");
   return *this;
 }
 
 Stream& Stream::operator<<(const IntegerLiteral* i) {
   llvm::APInt ival = i->getValue();
   if(ival.isNegative())
-    *this << "-";
-  *this << ival.abs().getLimitedValue();
-  if(ival.getBitWidth() >= 64)
-    *this << "L";
+    *this << "-" << (int64_t)ival.abs().getLimitedValue();
+  else
+    *this << ival.getLimitedValue();
   return *this;
 }
 
@@ -298,16 +350,25 @@ Stream& Stream::operator<<(const FloatingLiteral* f) {
   // Printing from an APFloat adds a newline at the end. Obviously, we don't
   // want that
   llvm::APFloat fval = f->getValue();
-  std::string buf;
-  llvm::raw_string_ostream ss(buf);
-  fval.print(ss);
-  ss.flush();
-  if(buf.back() == '\n')
-    *this << buf.substr(0, buf.length() - 1);
-  else
-    *this << buf;
-  if(f->getType().getTypePtr() == astContext.LongDoubleTy.getTypePtr())
+  const Type* type = f->getType().getTypePtr();
+  if(isFloatTy(type)) {
+    *this << fval.convertToFloat();
+  } else if(isDoubleTy(type)) {
+    *this << fval.convertToDouble();
+  } else if(isLongDoubleTy(type)) {
+    std::string buf;
+    llvm::raw_string_ostream ss(buf);
+    fval.print(ss);
+    ss.flush();
+    if(buf.back() == '\n')
+      *this << buf.substr(0, buf.length() - 1);
+    else
+      *this << buf;
     *this << "L";
+  } else {
+    fatal(error() << "Unknown floating literal type: "
+                  << type->getTypeClassName());
+  }
   return *this;
 }
 
@@ -350,6 +411,8 @@ Stream& Stream::operator<<(const Stmt* stmt) {
     *this << initList;
   else if(const auto* declRefExpr = dyn_cast<DeclRefExpr>(stmt))
     *this << declRefExpr;
+  else if(const auto* declStmt = dyn_cast<DeclStmt>(stmt))
+    *this << declStmt;
   else if(const auto* compoundStmt = dyn_cast<CompoundStmt>(stmt))
     *this << compoundStmt;
   else if(const auto* retStmt = dyn_cast<ReturnStmt>(stmt))
@@ -370,6 +433,8 @@ Stream& Stream::operator<<(const Stmt* stmt) {
     *this << callExpr;
   else if(const auto* castExpr = dyn_cast<CStyleCastExpr>(stmt))
     *this << castExpr;
+  else if(const auto* arrExpr = dyn_cast<ArraySubscriptExpr>(stmt))
+    *this << arrExpr;
   else
     fatal(error() << "UNKNOWN STMT: " << stmt->getStmtClassName());
   return *this;
@@ -379,7 +444,7 @@ Stream& Stream::operator<<(const VarDecl* var) {
   *this << cast<DeclaratorDecl>(var);
   if(const Expr* init = var->getInit())
     *this << " = " << init;
-  *this << endst();
+  *this << endst(false);
 
   return *this;
 }
@@ -504,18 +569,60 @@ Stream& Stream::operator<<(BinaryOperator::Opcode opc) {
     return *this << ".";
   case BO_PtrMemI:
     return *this << "->";
+  case BO_Comma:
+    return *this << ", ";
   default:
     return *this << "<<UNKNOWN BINARY OPERATOR>>";
   }
 }
 
 Stream& Stream::operator<<(const BinaryOperator* binOp) {
-  return *this << parenthetize(binOp->getLHS()) << " " << binOp->getOpcode()
-               << " " << parenthetize(binOp->getRHS());
+  const Expr* lhs = binOp->getLHS();
+  const Expr* rhs = binOp->getRHS();
+  BinaryOperator::Opcode opc = binOp->getOpcode();
+  switch(opc) {
+  case BO_Assign:
+    return *this << lhs << " " << opc << " " << rhs;
+    break;
+  case BO_PtrMemI:
+  case BO_PtrMemD:
+    return *this << lhs << opc << rhs;
+  default:
+    if(const auto* vty = dyn_cast<VectorType>(binOp->getType().getTypePtr())) {
+      unsigned num = vty->getNumElements();
+      *this << parenthetize(lhs) << " ";
+      for(unsigned i = 0; i < num / 2; i++)
+        *this << "<";
+      *this << opc;
+      for(unsigned i = 0; i < num / 2; i++)
+        *this << ">";
+      return *this << " " << parenthetize(rhs);
+    } else {
+      return *this << parenthetize(lhs) << " " << opc << " "
+                   << parenthetize(rhs);
+    }
+  }
 }
 
 Stream& Stream::operator<<(const UnaryOperator* unOp) {
-  return *this << unOp->getOpcode() << parenthetize(unOp->getSubExpr());
+  if(unOp->getOpcode() == UO_Deref) {
+    // A better way to do this would probably be to check the actual
+    // expressions that need to be serialized, but this way is quicker
+    // and although dirty, should work
+    std::string buf;
+    llvm::raw_string_ostream ss(buf);
+    Stream stream(astContext, fmtOpts, ss);
+    stream << unOp->getSubExpr();
+    ss.flush();
+    if(buf.size() and (buf[0] == '&'))
+      *this << buf.substr(1);
+    else
+      *this << unOp->getOpcode() << buf;
+  } else {
+    *this << unOp->getOpcode() << parenthetize(unOp->getSubExpr());
+  }
+
+  return *this;
 }
 
 Stream& Stream::operator<<(const ConditionalOperator* condOp) {
@@ -546,34 +653,43 @@ Stream& Stream::operator<<(const CStyleCastExpr* castExpr) {
   return *this;
 }
 
+Stream& Stream::operator<<(const ArraySubscriptExpr* arrExpr) {
+  if(not isa<DeclRefExpr>(arrExpr))
+    *this << parenthetize(arrExpr->getLHS());
+  else
+    *this << arrExpr->getLHS();
+  *this << "[" << arrExpr->getRHS() << "]";
+
+  return *this;
+}
+
 Stream& Stream::operator<<(const LabelStmt* labelStmt) {
   llvm::StringRef name = labelStmt->getName();
   if(name.size())
-    *this << labelStmt->getName() << ":" << endl();
+    endl() << labelStmt->getName() << ":";
 
   return *this;
 }
 
 Stream& Stream::operator<<(const GotoStmt* gotoStmt) {
-  tab() << "goto " << gotoStmt->getLabel()->getName() << endst();
+  *this << "goto " << gotoStmt->getLabel()->getName();
 
   return *this;
 }
 
 Stream& Stream::operator<<(const IfStmt* ifStmt) {
-  *this << "if (" << ifStmt->getCond() << ")" << beginBlock()
-        << ifStmt->getThen() << endBlock();
+  *this << "if (" << ifStmt->getCond() << ")" << ifStmt->getThen();
   if(const Stmt* then = ifStmt->getElse()) {
     switch(fmtOpts.indentation) {
-    case Indentation::KR:
+    case IndentStyle::KR:
       *this << " else";
       break;
-    case Indentation::Allman:
-    case Indentation::Stroustrup:
-      *this << endl() << tab() << "else";
+    case IndentStyle::Allman:
+    case IndentStyle::Stroustrup:
+      endl() << tab() << "else";
       break;
     }
-    *this << beginBlock() << then << endBlock();
+    *this << then;
   }
 
   return *this;
@@ -587,15 +703,27 @@ Stream& Stream::operator<<(const ReturnStmt* retStmt) {
   return *this;
 }
 
+Stream& Stream::operator<<(const DeclStmt* declStmt) {
+  *this << dyn_cast<VarDecl>(declStmt->getSingleDecl());
+
+  return *this;
+}
+
 Stream& Stream::operator<<(const CompoundStmt* compoundStmt) {
   beginBlock();
   for(Stmt* stmt : compoundStmt->body()) {
     if(not isa<LabelStmt>(stmt))
       tab();
     *this << stmt;
-    if(not(isa<IfStmt>(stmt) or isa<ForStmt>(stmt) or isa<WhileStmt>(stmt)
-           or isa<LabelStmt>(stmt)))
-      *this << endst();
+    if(isa<IfStmt>(stmt) or isa<ForStmt>(stmt) or isa<WhileStmt>(stmt)
+       or isa<DeclStmt>(stmt)) {
+      endl();
+    } else if(const auto* label = dyn_cast<LabelStmt>(stmt)) {
+      if(label->getDecl()->getName().size())
+        endl();
+    } else {
+      endst();
+    }
   }
   endBlock();
 

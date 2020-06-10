@@ -27,6 +27,11 @@ protected:
   // The values to tbe ignored when converting
   Set<const llvm::Value*> ignoreValues;
 
+  // Values used in PHI nodes. These must always be assigned to a temporary
+  // These probably will still need to be around when branches and loops
+  // are handled correctly
+  Set<const llvm::Value*> phiValues;
+
   // When processing llvm::ConstantExpr, we may end up creating an instruction
   // that implements the same operation. Those are kept here for easy cleanup.
   // Right now, we only make one pass over the function, but if that ever
@@ -38,7 +43,7 @@ protected:
 
 protected:
   bool allUsesIgnored(const llvm::Value* v) const;
-  bool shouldUseTemporary(const llvm::Instruction& inst);
+  bool shouldUseTemporary(const llvm::Instruction& inst) const;
   const llvm::Instruction&
   getInstructionForConstantExpr(const llvm::ConstantExpr& cexpr);
   const llvm::ConstantDataArray*

@@ -48,6 +48,7 @@ private:
 
   // Decls
   Map<llvm::StructType*, clang::RecordDecl*> udts;
+  Map<llvm::StructType*, Vector<clang::DeclRefExpr*>> fields;
   Map<const llvm::Function*, clang::FunctionDecl*> funcs;
   Map<const llvm::BasicBlock*, clang::LabelDecl*> blocks;
 
@@ -60,10 +61,42 @@ protected:
     return *llvm::dyn_cast<ClassT>(exprs[&val] = ast);
   }
 
-  void handleIndices(llvm::Type* ty,
-                     unsigned idx,
-                     const Vector<const llvm::Value*>& indices,
-                     const llvm::Instruction& inst);
+  clang::Expr* handleIndexOperand(llvm::PointerType* ty,
+                                  clang::Expr* curr,
+                                  unsigned idx,
+                                  const Vector<const llvm::Value*>& op,
+                                  const llvm::Instruction& inst);
+
+  clang::Expr* handleIndexOperand(llvm::ArrayType* ty,
+                                  clang::Expr* curr,
+                                  unsigned idx,
+                                  const Vector<const llvm::Value*>& op,
+                                  const llvm::Instruction& inst);
+
+  clang::Expr* handleIndexOperand(llvm::StructType* ty,
+                                  clang::Expr* curr,
+                                  unsigned field,
+                                  const llvm::Instruction& inst);
+
+  clang::DeclRefExpr* createVariable(const std::string& name,
+                                     clang::QualType type,
+                                     clang::DeclContext* parent);
+
+  clang::BinaryOperator* createBinaryOperator(clang::Expr& lhs,
+                                              clang::Expr& rhs,
+                                              clang::BinaryOperator::Opcode op,
+                                              clang::QualType type);
+
+  clang::UnaryOperator* createUnaryOperator(clang::Expr& lhs,
+                                            clang::UnaryOperator::Opcode op,
+                                            clang::QualType type);
+
+  clang::ArraySubscriptExpr* createArraySubscriptExpr(clang::Expr& arr,
+                                                      clang::Expr& idx,
+                                                      clang::QualType type);
+
+  clang::CStyleCastExpr* createCastExpr(clang::Expr& expr,
+                                        clang::QualType type);
 
 public:
   /// @param prefix The prefix to use when generating names

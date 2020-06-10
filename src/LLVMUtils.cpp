@@ -1,6 +1,8 @@
 #include "LLVMUtils.h"
 #include "Diagnostics.h"
 
+#include <llvm/IR/Instructions.h>
+
 using namespace llvm;
 
 const Argument& getArg(const Function& f, unsigned i) {
@@ -24,4 +26,10 @@ llvm::Type* getBaseType(ArrayType* aty) {
   if(auto* bty = dyn_cast<ArrayType>(ety))
     return getBaseType(bty);
   return ety;
+}
+
+const Value* stripCasts(const Value* v) {
+  if(const auto* cst = dyn_cast<CastInst>(v))
+    return stripCasts(cst->getOperand(0));
+  return v;
 }

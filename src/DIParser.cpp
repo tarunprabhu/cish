@@ -1,5 +1,6 @@
 #include "DIParser.h"
 #include "Diagnostics.h"
+#include "LLVMUtils.h"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/DataLayout.h>
@@ -8,37 +9,32 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include "LLVMUtils.h"
-
 using namespace llvm;
 
 namespace cish {
 
-static bool mdHasName(const Metadata* md) {
-  return isa<DILocalVariable>(md) or isa<DISubprogram>(md)
-         or isa<DICompositeType>(md) or isa<DIGlobalVariable>(md);
-}
-
-static std::string mdGetName(const Metadata* md) {
-  if(const auto* lv = dyn_cast<DILocalVariable>(md))
-    return lv->getName();
-  else if(const auto* gv = dyn_cast<DIGlobalVariable>(md))
-    return gv->getName();
-
-  fatal(error() << "Name not found in Metadata");
-}
-
 void DIParser::runOnFunction(const Function& f) {
   for(const Instruction& inst : instructions(f)) {
     if(const auto* call = dyn_cast<CallInst>(&inst)) {
-      if(const Function* f = call->getCalledFunction()) {
-        if(f->getName() == "llvm.dbg.value") {
+      if(const Function* callee = call->getCalledFunction()) {
+        if((callee->getName() == "llvm.dbg.value")
+           or (callee->getName() == "llvm.dbg.declare")) {
           const auto* mdv = dyn_cast<MetadataAsValue>(call->getArgOperand(0));
           const auto* vdm = dyn_cast<ValueAsMetadata>(mdv->getMetadata());
           const auto* md = dyn_cast<MetadataAsValue>(call->getArgOperand(1))
                                ->getMetadata();
-          if((not valueNames.contains(vdm->getValue())) and mdHasName(md))
-            valueNames[vdm->getValue()] = mdGetName(md);
+          if(not valueNames.contains(vdm->getValue())) {
+            if(const auto* di = dyn_cast<DILocalVariable>(md)) {
+              valueNames[vdm->getValue()] = di->getName();
+              if(unsigned argNo = di->getArg()) {
+                const Argument& arg = getArg(f, argNo - 1);
+                if(not valueNames.contains(&arg)) {
+                  valueNames[&arg] = di->getName();
+                  valueNames[vdm->getValue()] += "_l";
+                }
+              }
+            }
+          }
         }
       }
     }

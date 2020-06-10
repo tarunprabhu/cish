@@ -57,7 +57,7 @@ void Printer::run(llvm::raw_ostream& os) {
 
   // Function definitions
   for(const FunctionDecl* f : funcs)
-    stream << f << stream.endl();
+    stream << f << stream.endl() << stream.endl();
 }
 
 } // namespace cish

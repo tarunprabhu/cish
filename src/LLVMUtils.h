@@ -32,4 +32,6 @@ bool isPointerToType(llvm::Type* ty) {
 /// @returns The innermost non-array type within @aty
 llvm::Type* getBaseType(llvm::ArrayType* aty);
 
+const llvm::Value* stripCasts(const llvm::Value* v);
+
 #endif // CISH_LLVM_UTILS_H
