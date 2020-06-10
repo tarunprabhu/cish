@@ -75,3 +75,7 @@ bool return_gt(short a, short b) {
 bool return_ge(int a, int b) {
   return a >= b;
 }
+
+int return_neg(int a) {
+  return -a;
+}

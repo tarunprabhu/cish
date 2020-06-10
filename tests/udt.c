@@ -47,6 +47,14 @@ bool get_param_field(struct Struct* s) {
   return s->inner.x;
 }
 
+long* get_param_ptr_field(struct Struct* s) {
+  return s->b;
+}
+
+long get_param_deref_field(struct Struct* s) {
+  return *s->b;
+}
+
 void set_param_field(struct Struct* s) {
   s->inner.g = 3E+9;
 }
@@ -70,9 +78,18 @@ long anon_union(int a, int b, short c) {
   if(a)
     local.i = c;
   else if(b)
-    local .l = c;
+    local.l = c;
   else
     local.c = 'a';
 
   return local.l;
+}
+
+struct Struct2 {
+  int a;
+  struct Struct* s;
+};
+
+long array_deref(struct Struct2* ptr, int m, int n) {
+  return ptr[m].s[0].b[0];
 }
