@@ -1,4 +1,4 @@
-#include "DIParser.h"
+#include "SourceInfo.h"
 #include "Diagnostics.h"
 #include "LLVMUtils.h"
 
@@ -13,25 +13,117 @@ using namespace llvm;
 
 namespace cish {
 
-void DIParser::runOnFunction(const Function& f) {
+static bool isChar(const Metadata* md) {
+  if(const auto* diBasic = dyn_cast_or_null<DIBasicType>(md))
+    return diBasic->getEncoding() == dwarf::DW_ATE_signed_char;
+  return false;
+}
+
+static bool isConstChar(const Metadata* md) {
+  if(const auto* diConst = dyn_cast_or_null<DIDerivedType>(md))
+    if(diConst->getTag() == dwarf::DW_TAG_const_type)
+      return isChar(diConst->getBaseType());
+  return false;
+}
+
+static bool isCString(const Metadata* md) {
+  if(const auto* diPtr = dyn_cast_or_null<DIDerivedType>(md))
+    if(diPtr->getTag() == dwarf::DW_TAG_pointer_type)
+      return isConstChar(diPtr->getBaseType());
+  return false;
+}
+
+static bool isStringLiteral(const llvm::GlobalVariable& g) {
+  if(const auto* init = dyn_cast_or_null<ConstantDataArray>(g.getInitializer()))
+    if(init->getType()->getElementType()->isIntegerTy(8))
+      if(g.hasGlobalUnnamedAddr() and g.hasPrivateLinkage())
+        return true;
+  return false;
+}
+
+SourceInfo::SourceInfo(const llvm::Module& m) {
+  runOnModule(m);
+}
+
+bool SourceInfo::isCString(const llvm::Value* val) const {
+  return cstrings.contains(val);
+}
+
+bool SourceInfo::isCString(const llvm::Value& val) const {
+  return isCString(&val);
+}
+
+bool SourceInfo::isStringLiteral(const llvm::Value* val) const {
+  return stringLiterals.contains(val);
+}
+
+bool SourceInfo::isStringLiteral(const llvm::Value& val) const {
+  return stringLiterals.contains(&val);
+}
+
+bool SourceInfo::hasName(const llvm::Value* val) const {
+  return valueNames.contains(val);
+}
+
+bool SourceInfo::hasName(const llvm::Value& val) const {
+  return hasName(&val);
+}
+
+bool SourceInfo::hasName(llvm::StructType* sty) const {
+  return structNames.contains(sty);
+}
+
+bool SourceInfo::hasElementName(llvm::StructType* sty, unsigned i) const {
+  if(structNames.contains(sty))
+    return structNames.at(sty).size() > i;
+  return false;
+}
+
+const std::string& SourceInfo::getName(const llvm::Value* v) const {
+  return valueNames.at(v);
+}
+
+const std::string& SourceInfo::getName(const llvm::Value& v) const {
+  return getName(&v);
+}
+
+const std::string& SourceInfo::getName(llvm::StructType* sty) const {
+  return structNames.at(sty);
+}
+
+const std::string& SourceInfo::getElementName(llvm::StructType* sty,
+                                              unsigned i) const {
+  return elemNames.at(sty).at(i);
+}
+
+void SourceInfo::runOnFunction(const Function& f) {
   for(const Instruction& inst : instructions(f)) {
     if(const auto* call = dyn_cast<CallInst>(&inst)) {
       if(const Function* callee = call->getCalledFunction()) {
         if((callee->getName() == "llvm.dbg.value")
            or (callee->getName() == "llvm.dbg.declare")) {
+          // llvm.dbg.declare and llvm.dbg.value seem to be mutually exclusive
+          // but that may not necessarily be the case. The former only seems to
+          // appear for -O0 and the latter whenever optimizations are applied.
+          // When compiling without optimizations, a local variable is created
+          // for each function argument and the argument is copied into it
+          // as soon as the function is called. In these cases, llvm.dbg.declare
+          // associates that alloca with the source name of the argument.
+          // That is obviously not correct, so also check if the
+          // debug info node has an arg parameter, and if so, rename the
+          // local variable and associate the name with the argument instead.
           const auto* mdv = dyn_cast<MetadataAsValue>(call->getArgOperand(0));
           const auto* vdm = dyn_cast<ValueAsMetadata>(mdv->getMetadata());
           const auto* md = dyn_cast<MetadataAsValue>(call->getArgOperand(1))
                                ->getMetadata();
           if(not valueNames.contains(vdm->getValue())) {
-            if(const auto* di = dyn_cast<DILocalVariable>(md)) {
-              valueNames[vdm->getValue()] = di->getName();
-              if(unsigned argNo = di->getArg()) {
-                const Argument& arg = getArg(f, argNo - 1);
-                if(not valueNames.contains(&arg)) {
-                  valueNames[&arg] = di->getName();
-                  valueNames[vdm->getValue()] += "_l";
-                }
+            const auto* di = dyn_cast<DILocalVariable>(md);
+            valueNames[vdm->getValue()] = di->getName();
+            if(unsigned argNo = di->getArg()) {
+              const Argument& arg = getArg(f, argNo - 1);
+              if(not valueNames.contains(&arg)) {
+                valueNames[&arg] = di->getName();
+                valueNames[vdm->getValue()] += "_l";
               }
             }
           }
@@ -63,35 +155,7 @@ void DIParser::runOnFunction(const Function& f) {
   }
 }
 
-static bool isChar(const Metadata* md) {
-  if(const auto* diBasic = dyn_cast_or_null<DIBasicType>(md))
-    return diBasic->getEncoding() == dwarf::DW_ATE_signed_char;
-  return false;
-}
-
-static bool isConstChar(const Metadata* md) {
-  if(const auto* diConst = dyn_cast_or_null<DIDerivedType>(md))
-    if(diConst->getTag() == dwarf::DW_TAG_const_type)
-      return isChar(diConst->getBaseType());
-  return false;
-}
-
-static bool isCString(const Metadata* md) {
-  if(const auto* diPtr = dyn_cast_or_null<DIDerivedType>(md))
-    if(diPtr->getTag() == dwarf::DW_TAG_pointer_type)
-      return isConstChar(diPtr->getBaseType());
-  return false;
-}
-
-static bool isStringLiteral(const llvm::GlobalVariable& g) {
-  if(const auto* init = dyn_cast_or_null<ConstantDataArray>(g.getInitializer()))
-    if(init->getType()->getElementType()->isIntegerTy(8))
-      if(g.hasGlobalUnnamedAddr() and g.hasPrivateLinkage())
-        return true;
-  return false;
-}
-
-void DIParser::runOnGlobal(const GlobalVariable& g) {
+void SourceInfo::runOnGlobal(const GlobalVariable& g) {
   SmallVector<DIGlobalVariableExpression*, 4> gexprs;
   g.getDebugInfo(gexprs);
   if(gexprs.size()) {
@@ -101,8 +165,7 @@ void DIParser::runOnGlobal(const GlobalVariable& g) {
       if(cish::isCString(di->getType()))
         cstrings.insert(&g);
     } else {
-      WithColor::warning(errs())
-          << "Got more than one expression for global: " << g << "\n";
+      warning() << "Got more than one expression for global: " << g << "\n";
     }
   }
   // Irrespective of whether or not there is debug info associated with a global
@@ -111,9 +174,9 @@ void DIParser::runOnGlobal(const GlobalVariable& g) {
     stringLiterals.insert(&g);
 }
 
-void DIParser::runOnStruct(StructType* sty,
-                           const DICompositeType* di,
-                           const StructLayout& sl) {
+void SourceInfo::runOnStruct(StructType* sty,
+                             const DICompositeType* di,
+                             const StructLayout& sl) {
   // Don't need to check if the number of operands and the number of
   // elements or the offsets of the elements match up correctly because they
   // will have been checked when associating the types and if they didn't
@@ -122,24 +185,23 @@ void DIParser::runOnStruct(StructType* sty,
     elemNames[sty].push_back(dyn_cast<DIDerivedType>(op)->getName());
 }
 
-void DIParser::runOnClass(StructType* sty,
-                          const DICompositeType* di,
-                          const StructLayout& sl) {
+void SourceInfo::runOnClass(StructType* sty,
+                            const DICompositeType* di,
+                            const StructLayout& sl) {
   // FIXME: Support for classes
-  WithColor::warning(errs()) << "UNIMPLEMENTED:  information for classes\n";
+  warning() << "UNIMPLEMENTED:  information for classes\n";
 }
 
-void DIParser::runOnUnion(StructType* sty,
-                          const DICompositeType* di,
-                          const StructLayout& sl) {
+void SourceInfo::runOnUnion(StructType* sty,
+                            const DICompositeType* di,
+                            const StructLayout& sl) {
   // Nothing to do here for now, but the function is here in case that
   // ever changes
 }
 
 static void
 diWarning(Type* type, const Metadata* md, const std::string& expected) {
-  WithColor::warning(errs())
-      << "Expected " << expected << " debug info node. Got ";
+  warning() << "Expected " << expected << " debug info node. Got ";
   md->print(errs());
   errs() << " for type " << *type << "\n";
 }
@@ -164,8 +226,7 @@ static void collectStructs(PointerType* pty,
     }
     return diWarning(pty, derived, "Derived");
   }
-  WithColor::warning(errs())
-      << "Expected derived DI node for " << *pty << ". Got null\n";
+  warning() << "Expected derived DI node for " << *pty << ". Got null\n";
 }
 
 static void collectStructs(ArrayType* aty,
@@ -177,15 +238,14 @@ static void collectStructs(ArrayType* aty,
       return collectStructs(getBaseType(aty), comp->getBaseType(), dl, types);
     return diWarning(aty, comp, "Composite");
   }
-  WithColor::warning(errs())
-      << "Expected composite DI node for " << *aty << ". Got null\n";
+  warning() << "Expected composite DI node for " << *aty << ". Got null\n";
 }
 
 static void collectStructs(FunctionType* fty,
                            const DIDerivedType* md,
                            const DataLayout& dl,
                            Map<StructType*, const DICompositeType*>& types) {
-  WithColor::warning(errs()) << "UNIMPLEMENTED: Associating function types\n";
+  warning() << "UNIMPLEMENTED: Associating function types\n";
 }
 
 static void
@@ -206,14 +266,14 @@ collectStructsFromStruct(StructType* sty,
         collectStructs(
             sty->getElementType(i), derived->getBaseType(), dl, types);
       } else {
-        WithColor::warning(errs()) << "Mismatched offsets of field " << i
-                                   << " for struct " << *sty << "\n";
+        warning() << "Mismatched offsets of field " << i << " for struct "
+                  << *sty << "\n";
         goto fail;
       }
     }
   } else {
-    WithColor::warning(errs()) << "Mismatch in number of fields of struct "
-                               << comp->getName() << " => " << *sty << "\n";
+    warning() << "Mismatch in number of fields of struct " << comp->getName()
+              << " => " << *sty << "\n";
     goto fail;
   }
 
@@ -239,7 +299,7 @@ collectStructsFromClass(StructType* sty,
                         const DICompositeType* md,
                         const DataLayout& dl,
                         Map<StructType*, const DICompositeType*>& types) {
-  WithColor::warning(errs()) << "UNIMPLEMENTED: Associating class types\n";
+  warning() << "UNIMPLEMENTED: Associating class types\n";
   types[sty] = nullptr;
 }
 
@@ -305,12 +365,10 @@ collectStructs(const Module& m) {
       }
 
       if((types->getNumOperands() - 1) != (fty->getNumParams() - start)) {
-        WithColor::warning(errs())
-            << "Mismatch in number of arguments for function " << f.getName()
-            << "\n";
-        WithColor::warning(errs())
-            << "Skipping type association for function: " << f.getName()
-            << "\n";
+        warning() << "Mismatch in number of arguments for function "
+                  << f.getName() << "\n";
+        warning() << "Skipping type association for function: " << f.getName()
+                  << "\n";
         continue;
       }
 
@@ -354,7 +412,7 @@ collectStructs(const Module& m) {
   return structs;
 }
 
-void DIParser::runOnModule(const Module& m) {
+void SourceInfo::runOnModule(const Module& m) {
   for(const Function& f : m.functions())
     runOnFunction(f);
   for(const GlobalVariable& g : m.globals())
@@ -373,63 +431,12 @@ void DIParser::runOnModule(const Module& m) {
     else if(di->getTag() == dwarf::DW_TAG_union_type)
       runOnUnion(sty, di, sl);
     else
-      WithColor::warning(errs()) << "Unexpected DI tag\n";
+      warning() << "Unexpected DI tag\n";
 
     // FIXME: There might be namespace and/or parent information in the struct
     // name. Make use of it
     structNames[sty] = di->getName();
   }
-}
-
-bool DIParser::isCString(const llvm::Value* val) const {
-  return cstrings.contains(val);
-}
-
-bool DIParser::isCString(const llvm::Value& val) const {
-  return isCString(&val);
-}
-
-bool DIParser::isStringLiteral(const llvm::Value* val) const {
-  return stringLiterals.contains(val);
-}
-
-bool DIParser::isStringLiteral(const llvm::Value& val) const {
-  return stringLiterals.contains(&val);
-}
-
-bool DIParser::hasName(const llvm::Value* val) const {
-  return valueNames.contains(val);
-}
-
-bool DIParser::hasName(const llvm::Value& val) const {
-  return hasName(&val);
-}
-
-bool DIParser::hasName(llvm::StructType* sty) const {
-  return structNames.contains(sty);
-}
-
-bool DIParser::hasElementName(llvm::StructType* sty, unsigned i) const {
-  if(structNames.contains(sty))
-    return structNames.at(sty).size() > i;
-  return false;
-}
-
-const std::string& DIParser::getName(const llvm::Value* v) const {
-  return valueNames.at(v);
-}
-
-const std::string& DIParser::getName(const llvm::Value& v) const {
-  return getName(&v);
-}
-
-const std::string& DIParser::getName(llvm::StructType* sty) const {
-  return structNames.at(sty);
-}
-
-const std::string& DIParser::getElementName(llvm::StructType* sty,
-                                            unsigned i) const {
-  return elemNames.at(sty).at(i);
 }
 
 } // namespace cish

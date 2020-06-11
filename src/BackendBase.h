@@ -1,11 +1,11 @@
 #ifndef CISH_BACKEND_BASE_H
 #define CISH_BACKEND_BASE_H
 
-#include "CishContext.h"
-
 #include <clang/AST/ExprCXX.h>
 
 namespace cish {
+
+class CishContext;
 
 class BackendBase {
 protected:

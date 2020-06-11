@@ -1,5 +1,5 @@
-#ifndef CISH_CONTEXT_H
-#define CISH_CONTEXT_H
+#ifndef CISH_LLVM_BACKEND_H
+#define CISH_LLVM_BACKEND_H
 
 #include "BackendBase.h"
 #include "Map.h"
@@ -268,4 +268,4 @@ public:
 
 } // namespace cish
 
-#endif // CISH_CONTEXT_H
+#endif // CISH_LLVM_BACKEND_H

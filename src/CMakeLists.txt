@@ -2,13 +2,15 @@ set(SOURCES
   cish.cpp
   BackendBase.cpp
   CishContext.cpp
+  CishFunctionPass.cpp
+  CishModulePass.cpp
   ClangUtils.cpp
   # CishPreparePass.cpp
   Diagnostics.cpp
-  DIParser.cpp
+  SourceInfo.cpp
   FormatOptions.cpp
   LLVMBackend.cpp
-  LLVMParser.cpp
+  LLVMFrontend.cpp
   LLVMUtils.cpp
   Printer.cpp
   Stream.cpp)

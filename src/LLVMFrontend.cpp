@@ -1,17 +1,18 @@
-#include "LLVMParser.h"
+#include "LLVMFrontend.h"
 #include "CishContext.h"
-#include "DIParser.h"
 #include "Diagnostics.h"
+#include "LLVMBackend.h"
 #include "LLVMUtils.h"
+#include "SourceInfo.h"
 #include "Vector.h"
 
 #include <llvm/ADT/SmallVector.h>
-// #include <llvm/Analysis/LoopInfo.h>
-// #include <llvm/Analysis/LoopPass.h>
-// #include <llvm/Analysis/Passes.h>
-// #include <llvm/Analysis/ScalarEvolution.h>
-// #include <llvm/IR/Dominators.h>
+#include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/LoopPass.h>
+#include <llvm/Analysis/ScalarEvolution.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/Support/WithColor.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -19,24 +20,35 @@ using namespace llvm;
 
 namespace cish {
 
-#define UNIMPLEMENTED(TYPE)                         \
-  void LLVMParser::handle(const TYPE& inst) {       \
+#define UNIMPLEMENTED(TYPE)                        \
+  void LLVMFrontend::handle(const TYPE& inst) {    \
     fatal(error() << "NOT IMPLEMENTED: " << inst); \
   }
 
-LLVMParser::LLVMParser(CishContext& context) : context(context), cg(context) {
+LLVMFrontend::LLVMFrontend(CishContext& context)
+    : context(context), si(context.getSourceInfo()),
+      be(context.getLLVMBackend()) {
   ;
 }
 
-// void LLVMParser::getAnalysisUsage(AnalysisUsage& AU) const {
-//   // AU.addRequired<LoopInfoWrapperPass>();
-//   // AU.addRequired<DominatorTreeWrapperPass>();
-//   // AU.addRequired<ScalarEvolutionWrapperPass>();
-//   AU.setPreservesAll();
-// }
+void LLVMFrontend::addIgnoreValue(const llvm::Value* v) {
+  ignoreValues.insert(v);
+}
+
+void LLVMFrontend::addIgnoreValue(const llvm::Value& v) {
+  addIgnoreValue(&v);
+}
+
+bool LLVMFrontend::isIgnoreValue(const llvm::Value* v) const {
+  return ignoreValues.contains(v);
+}
+
+bool LLVMFrontend::isIgnoreValue(const llvm::Value& v) const {
+  return isIgnoreValue(&v);
+}
 
 const Instruction&
-LLVMParser::getInstructionForConstantExpr(const ConstantExpr& cexpr) {
+LLVMFrontend::getInstructionForConstantExpr(const ConstantExpr& cexpr) {
   if(not cexprs.contains(&cexpr))
     // ********************* HORRENDOUS EVIL AHEAD *************************
     //
@@ -58,68 +70,68 @@ LLVMParser::getInstructionForConstantExpr(const ConstantExpr& cexpr) {
 }
 
 const ConstantDataArray*
-LLVMParser::getStringLiteral(const llvm::Instruction& inst) {
+LLVMFrontend::getStringLiteral(const llvm::Instruction& inst) {
   if(const auto* gep = dyn_cast<GetElementPtrInst>(&inst))
-    if(di.isStringLiteral(gep->getPointerOperand())
+    if(si.isStringLiteral(gep->getPointerOperand())
        and gep->hasAllZeroIndices())
       return dyn_cast<ConstantDataArray>(
           dyn_cast<GlobalVariable>(gep->getPointerOperand())->getInitializer());
   return nullptr;
 }
 
-void LLVMParser::handle(const ConstantInt& cint) {
+void LLVMFrontend::handle(const ConstantInt& cint) {
   handle(cint.getType());
-  cg.add(cint);
+  be.add(cint);
 }
 
-void LLVMParser::handle(const ConstantFP& cfp) {
+void LLVMFrontend::handle(const ConstantFP& cfp) {
   handle(cfp.getType());
-  cg.add(cfp);
+  be.add(cfp);
 }
 
-void LLVMParser::handle(const ConstantPointerNull& cnull) {
+void LLVMFrontend::handle(const ConstantPointerNull& cnull) {
   handle(cnull.getType());
-  cg.add(cnull);
+  be.add(cnull);
 }
 
-void LLVMParser::handle(const ConstantAggregateZero& czero) {
+void LLVMFrontend::handle(const ConstantAggregateZero& czero) {
   handle(czero.getType());
-  cg.add(czero);
+  be.add(czero);
 }
 
 // This is a somewhat grotesque abuse of things. But there isn't an equivalent
 // clang Expr for LLVM's undef value. Until (if) I actually make one, just
 // use the GNUNullExpr instead to refer to this undef value
-void LLVMParser::handle(const UndefValue& undef) {
+void LLVMFrontend::handle(const UndefValue& undef) {
   handle(undef.getType());
-  cg.add(undef);
+  be.add(undef);
 }
 
-void LLVMParser::handle(const ConstantArray& carray) {
+void LLVMFrontend::handle(const ConstantArray& carray) {
   handle(carray.getType());
   for(const Use& op : carray.operands())
     handle(op.get());
 
-  cg.add(carray);
+  be.add(carray);
 }
 
-void LLVMParser::handle(const ConstantDataSequential& cseq) {
+void LLVMFrontend::handle(const ConstantDataSequential& cseq) {
   handle(cseq.getType());
   if(not(cseq.isCString() or cseq.isString()))
     for(unsigned i = 0; i < cseq.getNumElements(); i++)
       handle(cseq.getElementAsConstant(i));
-  cg.add(cseq);
+  be.add(cseq);
 }
 
-void LLVMParser::handle(const ConstantStruct& cstruct) {
+void LLVMFrontend::handle(const ConstantStruct& cstruct) {
   handle(cstruct.getType());
   for(const Use& op : cstruct.operands())
     handle(op.get());
 
-  cg.add(cstruct);
+  be.add(cstruct);
 }
 
-void LLVMParser::handle(const ConstantVector& cvec) {
+void LLVMFrontend::handle(const ConstantVector& cvec) {
   // We may be able to use something else to explicitly represent a vector
   // since obviously nothing precisely like it exists in C/C++, but an
   // initializer list ought to be good enough and once annotations are
@@ -128,7 +140,7 @@ void LLVMParser::handle(const ConstantVector& cvec) {
   fatal(error() << "UNIMPLEMENTED: CONSTANT VECTOR");
 }
 
-void LLVMParser::handle(const ConstantExpr& cexpr) {
+void LLVMFrontend::handle(const ConstantExpr& cexpr) {
   const llvm::Instruction& inst = getInstructionForConstantExpr(cexpr);
   // If we are looking up a string literal, just use the literal because
   // that is almost always what we want, I think. I am not sure there is a lot
@@ -136,60 +148,60 @@ void LLVMParser::handle(const ConstantExpr& cexpr) {
   // in "constant" memory and having their addresses taken when being used.
   if(const ConstantDataArray* lit = getStringLiteral(inst)) {
     handle(lit);
-    cg.add(cexpr, *lit);
+    be.add(cexpr, *lit);
   } else {
     handle(&inst);
-    cg.add(cexpr, inst);
+    be.add(cexpr, inst);
   }
 }
 
-void LLVMParser::handle(const AllocaInst& alloca) {
+void LLVMFrontend::handle(const AllocaInst& alloca) {
   handle(alloca.getType());
   handle(alloca.getAllocatedType());
-  cg.add(alloca, getName(alloca, "local"));
+  be.add(alloca, getName(alloca, "local"));
 }
 
 UNIMPLEMENTED(AtomicCmpXchgInst)
 UNIMPLEMENTED(AtomicRMWInst)
 
-void LLVMParser::handle(const BinaryOperator& inst) {
+void LLVMFrontend::handle(const BinaryOperator& inst) {
   handle(inst.getOperand(0));
   handle(inst.getOperand(1));
 
-  cg.add(inst);
+  be.add(inst);
 }
 
-void LLVMParser::handle(const BranchInst& br) {
+void LLVMFrontend::handle(const BranchInst& br) {
   // Don't need to handle the successors because all blocks will be handled
   // separately
   if(br.isConditional())
     handle(br.getCondition());
-  cg.add(br);
+  be.add(br);
 }
 
-void LLVMParser::handle(const CastInst& cst) {
+void LLVMFrontend::handle(const CastInst& cst) {
   handle(cst.getDestTy());
   handle(cst.getOperand(0));
-  cg.add(cst);
+  be.add(cst);
 }
 
 UNIMPLEMENTED(InvokeInst)
 
-void LLVMParser::handle(const CallInst& call) {
+void LLVMFrontend::handle(const CallInst& call) {
   handle(call.getCalledValue());
   for(const Value* arg : call.arg_operands())
     handle(arg);
-  cg.add(call);
+  be.add(call);
 }
 
 UNIMPLEMENTED(CatchReturnInst)
 UNIMPLEMENTED(CatchSwitchInst)
 UNIMPLEMENTED(CleanupReturnInst)
 
-void LLVMParser::handle(const CmpInst& cmp) {
+void LLVMFrontend::handle(const CmpInst& cmp) {
   handle(cmp.getOperand(0));
   handle(cmp.getOperand(1));
-  cg.add(cmp);
+  be.add(cmp);
 }
 
 UNIMPLEMENTED(ExtractElementInst)
@@ -197,11 +209,11 @@ UNIMPLEMENTED(ExtractValueInst)
 UNIMPLEMENTED(FenceInst)
 UNIMPLEMENTED(CatchPadInst)
 
-void LLVMParser::handle(const GetElementPtrInst& gep) {
+void LLVMFrontend::handle(const GetElementPtrInst& gep) {
   handle(gep.getPointerOperand());
   for(const Value* op : gep.indices())
     handle(op);
-  cg.add(gep);
+  be.add(gep);
 }
 
 UNIMPLEMENTED(IndirectBrInst)
@@ -209,12 +221,12 @@ UNIMPLEMENTED(InsertElementInst)
 UNIMPLEMENTED(InsertValueInst)
 UNIMPLEMENTED(LandingPadInst)
 
-void LLVMParser::handle(const LoadInst& load) {
+void LLVMFrontend::handle(const LoadInst& load) {
   handle(load.getPointerOperand());
-  cg.add(load);
+  be.add(load);
 }
 
-void LLVMParser::handle(const PHINode& phi) {
+void LLVMFrontend::handle(const PHINode& phi) {
   // FIXME: This is not correct
   // Cannot handle any incoming values here because if this is a loop, then
   // the value will not have been handled yet and we don't want to handle
@@ -222,42 +234,42 @@ void LLVMParser::handle(const PHINode& phi) {
   // setting this PHI variable, so all sorts of missing variables in that
   // situation
   WithColor::warning(errs()) << "PHI nodes not correctly handled\n";
-  cg.add(phi, getName(phi, "phi"));
+  be.add(phi, getName(phi, "phi"));
 }
 
 UNIMPLEMENTED(ResumeInst)
 
-void LLVMParser::handle(const ReturnInst& ret) {
+void LLVMFrontend::handle(const ReturnInst& ret) {
   if(Value* val = ret.getReturnValue())
     handle(ret.getReturnValue());
-  cg.add(ret);
+  be.add(ret);
 }
 
-void LLVMParser::handle(const SelectInst& select) {
+void LLVMFrontend::handle(const SelectInst& select) {
   handle(select.getCondition());
   handle(select.getTrueValue());
   handle(select.getFalseValue());
-  cg.add(select);
+  be.add(select);
 }
 
 UNIMPLEMENTED(ShuffleVectorInst)
 
-void LLVMParser::handle(const StoreInst& store) {
+void LLVMFrontend::handle(const StoreInst& store) {
   handle(store.getPointerOperand());
   handle(store.getValueOperand());
-  cg.add(store);
+  be.add(store);
 }
 
-  UNIMPLEMENTED(SwitchInst)
+UNIMPLEMENTED(SwitchInst)
 
-void LLVMParser::handle(const UnaryOperator& inst) {
+void LLVMFrontend::handle(const UnaryOperator& inst) {
   handle(inst.getOperand(0));
-  cg.add(inst);
+  be.add(inst);
 }
 
 UNIMPLEMENTED(UnreachableInst)
 
-bool LLVMParser::shouldUseTemporary(const Instruction& inst) const {
+bool LLVMFrontend::shouldUseTemporary(const Instruction& inst) const {
   // If there is zero or more than one use of the instruction, then create a
   // temporary variable for it. This is particularly important in the case
   // of function calls because if we don't do it this way and the result of
@@ -269,7 +281,7 @@ bool LLVMParser::shouldUseTemporary(const Instruction& inst) const {
   if(phiValues.contains(&inst))
     return true;
   else if((isa<CallInst>(inst) or isa<InvokeInst>(inst))
-     and (not inst.getType()->isVoidTy()) and ((uses == 0) or (uses > 1)))
+          and (not inst.getType()->isVoidTy()) and ((uses == 0) or (uses > 1)))
     return true;
   else if(isa<GetElementPtrInst>(inst) or isa<CastInst>(inst))
     return false;
@@ -278,7 +290,7 @@ bool LLVMParser::shouldUseTemporary(const Instruction& inst) const {
   return false;
 }
 
-void LLVMParser::handle(const Instruction* inst) {
+void LLVMFrontend::handle(const Instruction* inst) {
   if(const auto* alloca = dyn_cast<AllocaInst>(inst))
     handle(*alloca);
   else if(const auto* axchg = dyn_cast<AtomicCmpXchgInst>(inst))
@@ -345,17 +357,17 @@ void LLVMParser::handle(const Instruction* inst) {
     fatal(error() << "UNKNOWN INSTRUCTION: " << *inst);
 
   if(shouldUseTemporary(*inst))
-    cg.addTemp(*inst, getName(inst));
+    be.addTemp(*inst, getName(inst));
 }
 
-void LLVMParser::handle(const GlobalValue* gv) {
+void LLVMFrontend::handle(const GlobalValue* gv) {
   if(const auto* ga = dyn_cast<GlobalAlias>(gv))
     handle(*ga);
   else
     fatal(error() << "UNKNOWN GLOBAL: " << *gv);
 }
 
-void LLVMParser::handle(const Constant* c) {
+void LLVMFrontend::handle(const Constant* c) {
   if(const auto* cint = dyn_cast<ConstantInt>(c))
     return handle(*cint);
   else if(const auto* cfp = dyn_cast<ConstantFP>(c))
@@ -380,9 +392,9 @@ void LLVMParser::handle(const Constant* c) {
     fatal(error() << "UNKNOWN CONSTANT: " << *c);
 }
 
-void LLVMParser::handle(const Value* v) {
+void LLVMFrontend::handle(const Value* v) {
   handle(v->getType());
-  if(cg.has(*v))
+  if(be.has(*v))
     return;
 
   // The order of the statements is important. All globals are constants
@@ -399,39 +411,39 @@ void LLVMParser::handle(const Value* v) {
     fatal(error() << "UNHANDLED: " << *v);
 }
 
-void LLVMParser::handle(const BasicBlock& bb) {
+void LLVMFrontend::handle(const BasicBlock& bb) {
   if(bb.hasNPredecessors(0))
-    cg.add(bb);
+    be.add(bb);
   else
-    cg.add(bb, cg.getNewVar("bb"));
+    be.add(bb, be.getNewVar("bb"));
 }
 
 UNIMPLEMENTED(GlobalAlias)
 
-void LLVMParser::handle(PointerType* pty) {
+void LLVMFrontend::handle(PointerType* pty) {
   handle(pty->getElementType());
-  cg.add(pty);
+  be.add(pty);
 }
 
-void LLVMParser::handle(ArrayType* aty) {
+void LLVMFrontend::handle(ArrayType* aty) {
   handle(aty->getElementType());
-  cg.add(aty);
+  be.add(aty);
 }
 
-void LLVMParser::handle(FunctionType* fty) {
+void LLVMFrontend::handle(FunctionType* fty) {
   handle(fty->getReturnType());
   for(Type* param : fty->params())
     handle(param);
-  cg.add(fty);
+  be.add(fty);
 }
 
-void LLVMParser::handle(VectorType* vty) {
+void LLVMFrontend::handle(VectorType* vty) {
   handle(vty->getElementType());
-  cg.add(vty);
+  be.add(vty);
 }
 
-void LLVMParser::handle(Type* type) {
-  if(cg.has(type))
+void LLVMFrontend::handle(Type* type) {
+  if(be.has(type))
     return;
 
   if(auto* pty = dyn_cast<PointerType>(type))
@@ -444,12 +456,12 @@ void LLVMParser::handle(Type* type) {
     handle(vty);
   else if(isa<IntegerType>(type) or type->isFloatingPointTy()
           or type->isVoidTy())
-    cg.add(type);
+    be.add(type);
 }
 
-std::string LLVMParser::getName(llvm::StructType* sty) {
-  if(di.hasName(sty))
-    return di.getName(sty);
+std::string LLVMFrontend::getName(llvm::StructType* sty) {
+  if(si.hasName(sty))
+    return si.getName(sty);
   else if(sty->hasName())
     if(sty->getName().find("struct.") == 0)
       return sty->getName().substr(7);
@@ -460,27 +472,27 @@ std::string LLVMParser::getName(llvm::StructType* sty) {
     else
       return sty->getName();
   else
-    return cg.getNewVar("struct");
+    return be.getNewVar("struct");
 }
 
-std::string LLVMParser::getName(const llvm::Value& val,
-                                const std::string& prefix) {
-  if(di.hasName(val))
-    return di.getName(val);
+std::string LLVMFrontend::getName(const llvm::Value& val,
+                                  const std::string& prefix) {
+  if(si.hasName(val))
+    return si.getName(val);
   else if(val.hasName())
     return val.getName();
   else if(prefix.length())
-    return cg.getNewVar(prefix);
+    return be.getNewVar(prefix);
   else
-    return cg.getNewVar();
+    return be.getNewVar();
 }
 
-std::string LLVMParser::getName(const llvm::Value* val,
-                                const std::string& prefix) {
+std::string LLVMFrontend::getName(const llvm::Value* val,
+                                  const std::string& prefix) {
   return getName(*val, prefix);
 }
 
-bool LLVMParser::allUsesIgnored(const Value* v) const {
+bool LLVMFrontend::allUsesIgnored(const Value* v) const {
   if(v->getNumUses() == 0)
     return false;
   for(const Use& u : v->uses())
@@ -489,136 +501,12 @@ bool LLVMParser::allUsesIgnored(const Value* v) const {
   return true;
 }
 
-void LLVMParser::runOnStruct(StructType* sty) {
-  Vector<std::string> fields;
-  for(unsigned i = 0; i < sty->getNumElements(); i++) {
-    // Shouldn't handle struct types because the only "handling" is done
-    // by this method. And it's not clear
-    Type* ety = sty->getElementType(i);
-    if(not isa<StructType>(ety))
-      handle(sty->getElementType(i));
-    if(di.hasElementName(sty, i))
-      fields.push_back(di.getElementName(sty, i));
-    else
-      fields.push_back("elem_" + std::to_string(i));
-  }
-  cg.add(sty, fields);
-}
-
-void LLVMParser::runOnAlias(const GlobalAlias& alias) {
-  fatal(error() << "NOT IMPLEMENTED: " << alias);
-}
-
-void LLVMParser::runOnGlobal(const GlobalVariable& g) {
-  handle(g.getType());
-  if(const Constant* init = g.getInitializer())
-    handle(init);
-
-  if(not di.isStringLiteral(g))
-    cg.add(g, getName(g, "g"));
-}
-
-void LLVMParser::runOnDeclaration(const Function& f) {
-  handle(f.getFunctionType());
-
-  cg.add(f, getName(f));
-}
-
-void LLVMParser::runOnFunction(const Function& f) {
-  handle(f.getFunctionType());
-
-  Vector<std::string> argNames;
-  for(const Argument& arg : f.args())
-    if(di.hasName(arg))
-      argNames.push_back(di.getName(arg));
-    else if(arg.hasName())
-      argNames.push_back(arg.getName());
-    else
-      argNames.push_back("arg_" + std::to_string(arg.getArgNo()));
-  if(di.hasName(f))
-    cg.add(f, di.getName(f), argNames);
-  else
-    cg.add(f, f.getName(), argNames);
-  for(const BasicBlock& bb : f)
-    handle(bb);
-
-  // LoopInfo& li = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  // errs() << "loops: " << li.getLoopsInPreorder().size() << "\n";
-  // for(const Loop* loop : li) {
-  //   errs() << "Found a loop\n";
-  //   // for(const BasicBlock* bb : loop->blocks())
-  //   //   errs() << *bb << "\n";
-  // }
-
-  cg.beginFunction(f);
-
-  for(const BasicBlock& bb : f) {
-    cg.beginBlock(bb);
-    for(const Instruction& inst : bb) {
-      if(ignoreValues.contains(&inst)) {
-        continue;
-      } else if(phiValues.contains(&inst)) {
-        handle(&inst);
-      } else if(const auto* alloca = dyn_cast<AllocaInst>(&inst)) {
-        handle(*alloca);
-      } else if(const auto* call = dyn_cast<CallInst>(&inst)) {
-        handle(*call);
-      } else if(const auto* invoke = dyn_cast<InvokeInst>(&inst)) {
-        handle(*invoke);
-      } else if(const auto* load = dyn_cast<LoadInst>(&inst)) {
-        handle(*load);
-      } else if(const auto* store = dyn_cast<StoreInst>(&inst)) {
-        handle(*store);
-      } else if(const auto* phi = dyn_cast<PHINode>(&inst)) {
-        handle(*phi);
-      } else if(const auto* br = dyn_cast<BranchInst>(&inst)) {
-        handle(br);
-      } else if(const auto* ret = dyn_cast<ReturnInst>(&inst)) {
-        handle(ret);
-      }
-    }
-    cg.endBlock(bb);
-  }
-
-  cg.endFunction(f);
-}
-
-static bool isMetadataFunction(const Function& f) {
-  FunctionType* fty = f.getFunctionType();
-  if(fty->getReturnType()->isMetadataTy())
-    return true;
-  for(Type* param : fty->params())
-    if(param->isMetadataTy())
-      return true;
-  return false;
-}
-
-void LLVMParser::runOnModule(const Module& m) {
-  di.runOnModule(m);
-
-  for(const Function& f : m.functions())
-    for(const Instruction& inst : instructions(f))
-      if(const PHINode* phi = dyn_cast<PHINode>(&inst))
-        for(const llvm::Value* v : phi->incoming_values())
-          phiValues.insert(v);
-
-  // First find anything that we know are never going to be
-  // converted. These would be any LLVM debug and lifetime intrinsics but
-  // could be other things as well
-  for(const Function& f : m.functions()) {
-    if(isMetadataFunction(f) or f.getName().startswith("llvm.lifetime")
-       or f.getName().startswith("llvm.dbg.")) {
-      ignoreValues.insert(&f);
-      for(const Use& u : f.uses())
-        ignoreValues.insert(u.getUser());
-    }
-  }
-
+void LLVMFrontend::expandIgnoredValues() {
   // Grow the ignore list to include anything that is only used by values in
   // the ignore list
-  Set<const llvm::Value*> wl = ignoreValues;
+  cish::Set<const Value*> wl = ignoreValues;
   while(wl.size()) {
-    Set<const Value*> next;
+    cish::Set<const Value*> next;
     for(const Value* v : wl)
       if(const auto* user = dyn_cast<User>(v))
         for(const Use& op : user->operands())
@@ -628,25 +516,6 @@ void LLVMParser::runOnModule(const Module& m) {
       ignoreValues.insert(v);
     wl = std::move(next);
   }
-
-  // Add all the structs to the context first so a decl exists for each of
-  // them first. Then add bodies for them
-  for(StructType* sty : m.getIdentifiedStructTypes())
-    cg.add(sty, getName(sty));
-  for(StructType* sty : m.getIdentifiedStructTypes())
-    runOnStruct(sty);
-
-  for(const Function& f : m.functions())
-    if(not f.size() and not ignoreValues.contains(&f))
-      runOnDeclaration(f);
-
-  for(const GlobalVariable& g : m.globals())
-    runOnGlobal(g);
-  for(const GlobalAlias& a : m.aliases())
-    runOnAlias(a);
-  for(const Function& f : m.functions())
-    if(f.size())
-      runOnFunction(f);
 }
 
 } // namespace cish

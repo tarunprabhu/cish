@@ -1,8 +1,9 @@
-#ifndef CISH_DI_PARSER_H
-#define CISH_DI_PARSER_H
+#ifndef CISH_SOURCE_INFO_H
+#define CISH_SOURCE_INFO_H
 
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Pass.h>
 
 #include "Map.h"
 #include "Set.h"
@@ -13,7 +14,7 @@ namespace cish {
 /// Parses the debug information contained within in the module if any
 /// and associates names found there with the corresponding LLVM values
 /// and types
-class DIParser {
+class SourceInfo {
 protected:
   Map<const llvm::Value*, std::string> valueNames;
   Map<llvm::StructType*, std::string> structNames;
@@ -33,8 +34,14 @@ protected:
                   const llvm::StructLayout& sl);
   void runOnGlobal(const llvm::GlobalVariable& g);
   void runOnFunction(const llvm::Function& f);
+  void runOnModule(const llvm::Module& m);
+
+  SourceInfo(const SourceInfo&) = delete;
+  SourceInfo(SourceInfo&&) = delete;
 
 public:
+  SourceInfo(const llvm::Module& m);
+
   bool isCString(const llvm::Value* g) const;
   bool isCString(const llvm::Value& g) const;
   bool isStringLiteral(const llvm::Value& g) const;
@@ -49,10 +56,8 @@ public:
   const std::string& getName(const llvm::Value& v) const;
   const std::string& getName(llvm::StructType* sty) const;
   const std::string& getElementName(llvm::StructType* sty, unsigned i) const;
-
-  void runOnModule(const llvm::Module& m);
 };
 
 } // namespace cish
 
-#endif // CISH_DI_PARSER_H
+#endif // CISH_SOURCE_INFO_H

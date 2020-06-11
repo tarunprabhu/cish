@@ -1,24 +1,24 @@
-#ifndef CISH_LLVM_PARSER_H
-#define CISH_LLVM_PARSER_H
+#ifndef CISH_LLVM_FRONTEND_H
+#define CISH_LLVM_FRONTEND_H
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Pass.h>
 
-#include <clang/AST/ExprCXX.h>
-
-#include "CishContext.h"
-#include "DIParser.h"
-#include "LLVMBackend.h"
 #include "Map.h"
 #include "Set.h"
 
 namespace cish {
 
-class LLVMParser {
+class CishContext;
+class LLVMBackend;
+class SourceInfo;
+
+class LLVMFrontend {
 protected:
   CishContext& context;
-  LLVMBackend cg;
-  DIParser di;
+  const SourceInfo& si;
+  LLVMBackend& be;
 
   // Options from the command line
   // Set<IgnoreCasts> ignoreCasts;
@@ -41,7 +41,12 @@ protected:
                       std::function<void(llvm::Instruction*)>>>
       cexprs;
 
-protected:
+public:
+  LLVMFrontend(CishContext& context);
+  LLVMFrontend() = delete;
+  LLVMFrontend(const LLVMFrontend&) = delete;
+  LLVMFrontend(LLVMFrontend&&) = delete;
+
   bool allUsesIgnored(const llvm::Value* v) const;
   bool shouldUseTemporary(const llvm::Instruction& inst) const;
   const llvm::Instruction&
@@ -110,21 +115,19 @@ protected:
   std::string getName(const llvm::Value* v, const std::string& prefix = "");
   std::string getName(const llvm::Value& v, const std::string& prefix = "");
 
+  void expandIgnoredValues();
+  void addIgnoreValue(const llvm::Value* v);
+  void addIgnoreValue(const llvm::Value& v);
+  bool isIgnoreValue(const llvm::Value* v) const;
+  bool isIgnoreValue(const llvm::Value& v) const;
+
   void runOnDeclaration(const llvm::Function& f);
   void runOnFunction(const llvm::Function& f);
   void runOnAlias(const llvm::GlobalAlias& a);
   void runOnGlobal(const llvm::GlobalVariable& g);
   void runOnStruct(llvm::StructType* sty);
-
-public:
-  LLVMParser(CishContext& context);
-  LLVMParser() = delete;
-  LLVMParser(const LLVMParser&) = delete;
-  LLVMParser(LLVMParser&&) = delete;
-
-  void runOnModule(const llvm::Module& m);
 };
 
 } // namespace cish
 
-#endif // CISH_LLVM_PARSER_H
+#endif // CISH_LLVM_FRONTEND_H
