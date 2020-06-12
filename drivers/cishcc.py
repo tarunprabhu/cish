@@ -58,17 +58,17 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(
         'Wrapper script for CISH ({})'.format(lang))
-    ap.add_argument('-strip-casts', type=str, default='never',
+    ap.add_argument('-strip-casts', type=str,
                     help='The type of casts to ignore')
-    ap.add_argument('-prefix', type=str, default='c__',
+    ap.add_argument('-prefix', type=str,
                     help='The prefix for any auto-generated names')
-    ap.add_argument('-indent-style', type=str, default='kr',
+    ap.add_argument('-indent-style', type=str,
                     help='The indentation style to use')
-    ap.add_argument('-indent-offset', type=int, default=4,
+    ap.add_argument('-indent-offset', type=int,
                     help='The indentation offset to use')
-    ap.add_argument('-annotate', type=str, default='cish',
+    ap.add_argument('-annotate', type=str,
                     help='Which annotations to use in the output')
-    ap.add_argument('-o', type=str, default='-',
+    ap.add_argument('-o', type=str,
                     help='File in which to write the output')
     ap.add_argument('file', type=str,
                     help='The input file')
@@ -87,7 +87,7 @@ def main() -> int:
         cmd_cish = [cish] + ['-{}={}'.format(convert_optname(k),
                                              convert_optval(str(v)))
                              for k, v in vars(cish_args).items()
-                             if k != 'file'] + [tmp]
+                             if v and (k != 'file')] + [tmp]
 
         if os.system(' '.join(cmd_cish)):
             os.remove(tmp)
