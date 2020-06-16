@@ -4,16 +4,18 @@ set(SOURCES
   CishContext.cpp
   CishFunctionPass.cpp
   CishModulePass.cpp
+  CishCmdLineFlags.cpp
+  CishOutputPass.cpp
+  CishPreparePass.cpp
   ClangUtils.cpp
-  # CishPreparePass.cpp
   Diagnostics.cpp
-  SourceInfo.cpp
   FormatOptions.cpp
   LLVMBackend.cpp
   LLVMFrontend.cpp
   LLVMUtils.cpp
-  Printer.cpp
-  Stream.cpp)
+  SourceInfo.cpp
+  Stream.cpp
+  StructureAnalysis.cpp)
 
 set(CISH cish)
 add_executable(${CISH} ${SOURCES})

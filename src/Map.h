@@ -25,10 +25,10 @@ protected:
   public:
     key_iterator_t() : IteratorT() {}
     key_iterator_t(IteratorT i) : IteratorT(i) {}
-    key_type& operator->() {
+    auto& operator->() {
       return IteratorT::operator->()->first;
     }
-    key_type& operator*() {
+    auto& operator*() {
       return IteratorT::operator*().first;
     }
   };
@@ -38,10 +38,10 @@ protected:
   public:
     mapped_iterator_t() : IteratorT() {}
     mapped_iterator_t(IteratorT i) : IteratorT(i) {}
-    mapped_type& operator->() {
+    auto& operator->() {
       return IteratorT::operator->()->second;
     }
-    mapped_type& operator*() {
+    auto& operator*() {
       return IteratorT::operator*().second;
     }
   };

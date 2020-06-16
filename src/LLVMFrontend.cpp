@@ -80,22 +80,18 @@ LLVMFrontend::getStringLiteral(const llvm::Instruction& inst) {
 }
 
 void LLVMFrontend::handle(const ConstantInt& cint) {
-  handle(cint.getType());
   be.add(cint);
 }
 
 void LLVMFrontend::handle(const ConstantFP& cfp) {
-  handle(cfp.getType());
   be.add(cfp);
 }
 
 void LLVMFrontend::handle(const ConstantPointerNull& cnull) {
-  handle(cnull.getType());
   be.add(cnull);
 }
 
 void LLVMFrontend::handle(const ConstantAggregateZero& czero) {
-  handle(czero.getType());
   be.add(czero);
 }
 
@@ -103,12 +99,10 @@ void LLVMFrontend::handle(const ConstantAggregateZero& czero) {
 // clang Expr for LLVM's undef value. Until (if) I actually make one, just
 // use the GNUNullExpr instead to refer to this undef value
 void LLVMFrontend::handle(const UndefValue& undef) {
-  handle(undef.getType());
   be.add(undef);
 }
 
 void LLVMFrontend::handle(const ConstantArray& carray) {
-  handle(carray.getType());
   for(const Use& op : carray.operands())
     handle(op.get());
 
@@ -116,7 +110,6 @@ void LLVMFrontend::handle(const ConstantArray& carray) {
 }
 
 void LLVMFrontend::handle(const ConstantDataSequential& cseq) {
-  handle(cseq.getType());
   if(not(cseq.isCString() or cseq.isString()))
     for(unsigned i = 0; i < cseq.getNumElements(); i++)
       handle(cseq.getElementAsConstant(i));
@@ -124,7 +117,6 @@ void LLVMFrontend::handle(const ConstantDataSequential& cseq) {
 }
 
 void LLVMFrontend::handle(const ConstantStruct& cstruct) {
-  handle(cstruct.getType());
   for(const Use& op : cstruct.operands())
     handle(op.get());
 
@@ -156,7 +148,6 @@ void LLVMFrontend::handle(const ConstantExpr& cexpr) {
 }
 
 void LLVMFrontend::handle(const AllocaInst& alloca) {
-  handle(alloca.getType());
   handle(alloca.getAllocatedType());
   be.add(alloca, getName(alloca, "local"));
 }
@@ -227,14 +218,8 @@ void LLVMFrontend::handle(const LoadInst& load) {
 }
 
 void LLVMFrontend::handle(const PHINode& phi) {
-  // FIXME: This is not correct
-  // Cannot handle any incoming values here because if this is a loop, then
-  // the value will not have been handled yet and we don't want to handle
-  // it either. The problems occur because the incoming values may involve
-  // setting this PHI variable, so all sorts of missing variables in that
-  // situation
-  WithColor::warning(errs()) << "PHI nodes not correctly handled\n";
-  be.add(phi, getName(phi, "phi"));
+  // PHINodes should have been removed before getting here
+  fatal(error() << "Unexpected PHI nodes");
 }
 
 UNIMPLEMENTED(ResumeInst)
@@ -278,15 +263,17 @@ bool LLVMFrontend::shouldUseTemporary(const Instruction& inst) const {
   // never made. But if we always use a temporary, the result will never
   // look remotely reasonable and we might as well just read LLVM.
   size_t uses = inst.getNumUses();
-  if(phiValues.contains(&inst))
-    return true;
+  if(isa<PHINode>(inst) or isa<AllocaInst>(inst))
+    return false;
   else if((isa<CallInst>(inst) or isa<InvokeInst>(inst))
           and (not inst.getType()->isVoidTy()) and ((uses == 0) or (uses > 1)))
     return true;
-  else if(isa<GetElementPtrInst>(inst) or isa<CastInst>(inst))
-    return false;
-  else if(not isa<AllocaInst>(inst) and (uses > 1))
-    return true;
+  else if(auto* load = dyn_cast<LoadInst>(&inst))
+    return not inst.getMetadata("cish.notemp");
+  // else if(isa<GetElementPtrInst>(inst) or isa<CastInst>(inst))
+  //   return false;
+  // else if(not isa<AllocaInst>(inst) and (uses > 1))
+  //   return true;
   return false;
 }
 
@@ -360,55 +347,49 @@ void LLVMFrontend::handle(const Instruction* inst) {
     be.addTemp(*inst, getName(inst));
 }
 
-void LLVMFrontend::handle(const GlobalValue* gv) {
-  if(const auto* ga = dyn_cast<GlobalAlias>(gv))
-    handle(*ga);
-  else
-    fatal(error() << "UNKNOWN GLOBAL: " << *gv);
-}
-
-void LLVMFrontend::handle(const Constant* c) {
-  if(const auto* cint = dyn_cast<ConstantInt>(c))
-    return handle(*cint);
-  else if(const auto* cfp = dyn_cast<ConstantFP>(c))
-    return handle(*cfp);
-  else if(const auto* cnull = dyn_cast<ConstantPointerNull>(c))
-    return handle(*cnull);
-  else if(const auto* czero = dyn_cast<ConstantAggregateZero>(c))
-    return handle(*czero);
-  else if(const auto* cexpr = dyn_cast<ConstantExpr>(c))
-    return handle(*cexpr);
-  else if(const auto* undef = dyn_cast<UndefValue>(c))
-    return handle(*undef);
-  else if(const auto* carray = dyn_cast<ConstantArray>(c))
-    return handle(*carray);
-  else if(const auto* cda = dyn_cast<ConstantDataArray>(c))
-    return handle(*cda);
-  else if(const auto* cstruct = dyn_cast<ConstantStruct>(c))
-    return handle(*cstruct);
-  else if(const auto* cvec = dyn_cast<ConstantVector>(c))
-    return handle(*cvec);
-  else
-    fatal(error() << "UNKNOWN CONSTANT: " << *c);
-}
-
 void LLVMFrontend::handle(const Value* v) {
-  handle(v->getType());
   if(be.has(*v))
     return;
 
+  handle(v->getType());
   // The order of the statements is important. All globals are constants
   // but they need to be handled differently from the other constants
   if(const auto* inst = dyn_cast<Instruction>(v))
     return handle(inst);
-  else if(const auto* g = dyn_cast<GlobalValue>(v))
-    return handle(g);
-  else if(const auto* c = dyn_cast<Constant>(v))
-    return handle(c);
+  else if(const auto* ga = dyn_cast<GlobalAlias>(v))
+    return handle(*ga);
+  else if(const auto* f = dyn_cast<Function>(v))
+    return handle(*f);
+  else if(const auto* g = dyn_cast<GlobalVariable>(v))
+    return handle(*g);
+  else if(const auto* cint = dyn_cast<ConstantInt>(v))
+    return handle(*cint);
+  else if(const auto* cfp = dyn_cast<ConstantFP>(v))
+    return handle(*cfp);
+  else if(const auto* cnull = dyn_cast<ConstantPointerNull>(v))
+    return handle(*cnull);
+  else if(const auto* czero = dyn_cast<ConstantAggregateZero>(v))
+    return handle(*czero);
+  else if(const auto* cexpr = dyn_cast<ConstantExpr>(v))
+    return handle(*cexpr);
+  else if(const auto* undef = dyn_cast<UndefValue>(v))
+    return handle(*undef);
+  else if(const auto* carray = dyn_cast<ConstantArray>(v))
+    return handle(*carray);
+  else if(const auto* cda = dyn_cast<ConstantDataArray>(v))
+    return handle(*cda);
+  else if(const auto* cstruct = dyn_cast<ConstantStruct>(v))
+    return handle(*cstruct);
+  else if(const auto* cvec = dyn_cast<ConstantVector>(v))
+    return handle(*cvec);
   else if(const auto* bb = dyn_cast<BasicBlock>(v))
     return handle(*bb);
   else
     fatal(error() << "UNHANDLED: " << *v);
+}
+
+void LLVMFrontend::handle(const Value& v) {
+  handle(&v);
 }
 
 void LLVMFrontend::handle(const BasicBlock& bb) {
@@ -416,6 +397,35 @@ void LLVMFrontend::handle(const BasicBlock& bb) {
     be.add(bb);
   else
     be.add(bb, be.getNewVar("bb"));
+}
+
+void LLVMFrontend::handle(const Function& f) {
+  if(f.size()) {
+    cish::Vector<std::string> argNames;
+    for(const Argument& arg : f.args())
+      if(si.hasName(arg))
+        argNames.push_back(si.getName(arg));
+      else if(arg.hasName())
+        argNames.push_back(arg.getName());
+      else
+        argNames.push_back("arg_" + std::to_string(arg.getArgNo()));
+    if(si.hasName(f))
+      be.add(f, si.getName(f), argNames);
+    else
+      be.add(f, f.getName(), argNames);
+    for(const BasicBlock& bb : f)
+      handle(bb);
+  } else if(not isIgnoreValue(&f)) {
+    be.add(f, getName(f));
+  }
+}
+
+void LLVMFrontend::handle(const GlobalVariable& g) {
+  if(const Constant* init = g.getInitializer())
+    handle(init);
+
+  if(not si.isStringLiteral(g))
+    be.add(g, getName(g, "g"));
 }
 
 UNIMPLEMENTED(GlobalAlias)

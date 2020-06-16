@@ -134,8 +134,16 @@ public:
     return _impl.erase(first, last);
   }
 
-  size_type erase(const T& key) {
+  size_type erase(const reference key) {
     return _impl.erase(key);
+  }
+
+  iterator find(const reference e) {
+    return _impl.find(e);
+  }
+
+  const_iterator find(const reference e) const {
+    return _impl.find(e);
   }
 
   bool contains(const T& e) const {

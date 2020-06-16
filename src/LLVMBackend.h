@@ -4,6 +4,7 @@
 #include "BackendBase.h"
 #include "Map.h"
 #include "Set.h"
+#include "Stack.h"
 #include "Vector.h"
 
 #include <llvm/Analysis/LoopInfo.h>
@@ -98,6 +99,40 @@ protected:
   clang::CStyleCastExpr* createCastExpr(clang::Expr& expr,
                                         clang::QualType type);
 
+  clang::IfStmt*
+  createIfStmt(clang::Expr& cond, clang::Stmt* thn, clang::Stmt* els = nullptr);
+
+  clang::GotoStmt* createGoto(clang::LabelDecl* label);
+
+  clang::CompoundStmt*
+  createCompoundStmt(const cish::Vector<clang::Stmt*>& stmts);
+
+  clang::CompoundStmt* createCompoundStmt(clang::Stmt* stmt);
+
+  clang::BreakStmt* createBreakStmt();
+
+  clang::ContinueStmt* createContinueStmt();
+
+  clang::ReturnStmt* createReturnStmt(clang::Expr* retExpr);
+
+  clang::DeclRefExpr* createDeclRefExpr(clang::ValueDecl* decl);
+
+  clang::CallExpr* createCallExpr(clang::Expr& callee,
+                                  const Vector<clang::Expr*>& args,
+                                  clang::QualType type);
+
+  clang::DoStmt* createDoStmt(clang::Stmt* body,
+                              clang::Expr& cond);
+  clang::WhileStmt* createWhileStmt(clang::Expr& cond, clang::Stmt* body);
+
+  clang::CXXBoolLiteralExpr* createBoolLiteral(bool b, clang::QualType type);
+  clang::IntegerLiteral* createIntLiteral(const llvm::APInt& i,
+                                          clang::QualType type);
+  clang::FloatingLiteral* createFloatLiteral(const llvm::APFloat& f,
+                                             clang::QualType type);
+  clang::CXXNullPtrLiteralExpr* createNullptr(clang::QualType type);
+  clang::InitListExpr* createInitListExpr(const Vector<clang::Expr*>& exprs);
+
 public:
   /// @param prefix The prefix to use when generating names
   LLVMBackend(CishContext& context);
@@ -108,8 +143,25 @@ public:
 
   void beginFunction(const llvm::Function& f);
   void endFunction(const llvm::Function& f);
+
+  /// Begin an unstructured block. In this case, a label will be created
+  /// and there may or may not be a new scope (compound statement)
+  /// created for the block.
+  /// @params bb A llvm::BasicBlock
   void beginBlock(const llvm::BasicBlock& bb);
+
+  /// End the given basic block. This must match a call to beginBlock() with
+  /// the same llvm:BasicBlock
+  /// @params bb A llvm::BasicBlock
   void endBlock(const llvm::BasicBlock& bb);
+
+  /// Begin a structured block. A label will not be created, a new compound
+  /// statement will definitely be created and all statements will be added
+  /// to that compound statement
+  void beginBlock();
+
+  /// End the compound statement
+  void endBlock();
 
   void add(const llvm::AllocaInst& alloca, const std::string& name);
   void add(const llvm::AtomicCmpXchgInst& axchg);
@@ -169,13 +221,19 @@ public:
   void add(llvm::VectorType* vty);
   void add(llvm::Type* type);
 
-  // Struct types need to be added in two phases because they may be recursive.
-  // In the first phase, all the structs are added and they are all empty.
-  // In the second phase, bodies are added to all of them.
+  // Struct types need to be added in two phases because they may be
+  // recursive. In the first phase, all the structs are added and they are all
+  // empty. In the second phase, bodies are added to all of them.
   void add(llvm::StructType* sty, const std::string& name);
   void add(llvm::StructType* sty, const Vector<std::string>& elems);
 
   void addTemp(const llvm::Instruction& val, const std::string& name);
+  void addIfThen(const llvm::BranchInst& br);
+  void addIfThenElse(const llvm::BranchInst& br);
+  void addDoWhile(llvm::Type* type);
+  void addEndlessLoop();
+  void addBreak();
+  void addContinue();
 
   template <
       typename ClangT = clang::Stmt,
@@ -204,28 +262,6 @@ public:
   ClangT& get(const llvm::Value& val) {
     return get<ClangT>(&val);
   }
-
-  // /// @param loop A llvm::Loop
-  // /// @returns The AST node for the llvm::Loop @loop
-  // template <
-  //     typename ClangT,
-  //     std::enable_if_t<std::is_same<clang::ForStmt, ClangT>::value
-  //                          || std::is_same<clang::WhileStmt, ClangT>::value,
-  //                      int> = 0>
-  // ClangT& get(const llvm::Loop* loop) {
-  //   return *llvm::dyn_cast<ClangT>(loops.at(loop));
-  // }
-
-  // /// @param val A llvm::Loop
-  // /// @returns The AST node for the llvm::Loop @val
-  // template <
-  //     typename ClangT,
-  //     std::enable_if_t<std::is_same<clang::ForStmt, ClangT>::value
-  //                          || std::is_same<clang::WhileStmt, ClangT>::value,
-  //                      int> = 0>
-  // ClangT& get(const llvm::Loop& loop) {
-  //   return get<ClangT>(&loop);
-  // }
 
   /// @param val A llvm::Value
   /// @returns true if the @val has a corresponding AST node

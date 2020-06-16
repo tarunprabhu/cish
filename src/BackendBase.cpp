@@ -1,23 +1,21 @@
 #include "BackendBase.h"
 #include "CishContext.h"
+#include "LLVMUtils.h"
 
 using namespace clang;
 
 namespace cish {
 
 BackendBase::BackendBase(CishContext& context)
-    : context(context), astContext(context.getASTContext()),
-      varPrefix(context.getFormatOptions().prefix), varSuffix(0) {
+    : varPrefix(context.getFormatOptions().prefix), varSuffix(0),
+      context(context), astContext(context.getASTContext()) {
   ;
 }
 
 std::string BackendBase::getNewVar(const std::string& prefix) {
   std::string buf;
   llvm::raw_string_ostream ss(buf);
-  ss << varPrefix;
-  if(prefix.length())
-    ss << prefix << "_";
-  ss << varSuffix;
+  ss << varPrefix << prefix << varSuffix;
 
   varSuffix++;
 
@@ -25,22 +23,22 @@ std::string BackendBase::getNewVar(const std::string& prefix) {
 }
 
 void BackendBase::beginFunction(FunctionDecl*) {
-  stmts.clear();
   varSuffix = 0;
+  stmts.emplace();
 }
 
-void BackendBase::endFunction(FunctionDecl* f) {
-  CompoundStmt* body = CompoundStmt::Create(
-      astContext, llvm::ArrayRef<Stmt*>(stmts), invLoc, invLoc);
-  f->setBody(body);
+void BackendBase::endFunction(FunctionDecl*) {
+  varSuffix = 0;
+  stmts.clear();
 }
 
-void BackendBase::beginBlock(LabelDecl* label) {
-  stmts.push_back(new(astContext) LabelStmt(invLoc, label, nullptr));
+Stmt* BackendBase::add(Stmt* stmt) {
+  stmts.top().push_back(stmt);
+  return stmt;
 }
 
-void BackendBase::endBlock(LabelDecl*) {
-  // Nothing to do here
+Stmt& BackendBase::add(Stmt& stmt) {
+  return *add(&stmt);
 }
 
 } // namespace cish

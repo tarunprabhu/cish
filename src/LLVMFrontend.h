@@ -27,11 +27,6 @@ protected:
   // The values to tbe ignored when converting
   Set<const llvm::Value*> ignoreValues;
 
-  // Values used in PHI nodes. These must always be assigned to a temporary
-  // These probably will still need to be around when branches and loops
-  // are handled correctly
-  Set<const llvm::Value*> phiValues;
-
   // When processing llvm::ConstantExpr, we may end up creating an instruction
   // that implements the same operation. Those are kept here for easy cleanup.
   // Right now, we only make one pass over the function, but if that ever
@@ -41,19 +36,7 @@ protected:
                       std::function<void(llvm::Instruction*)>>>
       cexprs;
 
-public:
-  LLVMFrontend(CishContext& context);
-  LLVMFrontend() = delete;
-  LLVMFrontend(const LLVMFrontend&) = delete;
-  LLVMFrontend(LLVMFrontend&&) = delete;
-
-  bool allUsesIgnored(const llvm::Value* v) const;
-  bool shouldUseTemporary(const llvm::Instruction& inst) const;
-  const llvm::Instruction&
-  getInstructionForConstantExpr(const llvm::ConstantExpr& cexpr);
-  const llvm::ConstantDataArray*
-  getStringLiteral(const llvm::Instruction& inst);
-
+protected:
   void handle(const llvm::AllocaInst& alloca);
   void handle(const llvm::AtomicCmpXchgInst& axchg);
   void handle(const llvm::AtomicRMWInst& rmw);
@@ -99,17 +82,32 @@ public:
 
   void handle(const llvm::BasicBlock& bb);
   void handle(const llvm::GlobalAlias& g);
+  void handle(const llvm::GlobalVariable& g);
+  void handle(const llvm::Function& f);
 
   void handle(const llvm::Instruction* inst);
-  void handle(const llvm::GlobalValue* g);
-  void handle(const llvm::Constant* c);
-  void handle(const llvm::Value* v);
 
   void handle(llvm::PointerType* pty);
   void handle(llvm::ArrayType* aty);
   void handle(llvm::FunctionType* fty);
   void handle(llvm::VectorType* vty);
+
+public:
+  LLVMFrontend(CishContext& context);
+  LLVMFrontend() = delete;
+  LLVMFrontend(const LLVMFrontend&) = delete;
+  LLVMFrontend(LLVMFrontend&&) = delete;
+
+  bool allUsesIgnored(const llvm::Value* v) const;
+  bool shouldUseTemporary(const llvm::Instruction& inst) const;
+  const llvm::Instruction&
+  getInstructionForConstantExpr(const llvm::ConstantExpr& cexpr);
+  const llvm::ConstantDataArray*
+  getStringLiteral(const llvm::Instruction& inst);
+
   void handle(llvm::Type* type);
+  void handle(const llvm::Value* v);
+  void handle(const llvm::Value& v);
 
   std::string getName(llvm::StructType* sty);
   std::string getName(const llvm::Value* v, const std::string& prefix = "");

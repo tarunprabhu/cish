@@ -1,6 +1,9 @@
 #ifndef CISH_BACKEND_BASE_H
 #define CISH_BACKEND_BASE_H
 
+#include "Stack.h"
+#include "Vector.h"
+
 #include <clang/AST/ExprCXX.h>
 
 namespace cish {
@@ -8,6 +11,10 @@ namespace cish {
 class CishContext;
 
 class BackendBase {
+private:
+  std::string varPrefix;
+  uint64_t varSuffix;
+
 protected:
   CishContext& context;
 
@@ -15,16 +22,13 @@ protected:
   // std::unique_ptr<clang::ASTContext> astContext;
   clang::ASTContext& astContext;
 
-  std::string varPrefix;
-  uint64_t varSuffix;
-
-  // The statements comprising the body of the current function being
-  // converted
-  std::vector<clang::Stmt*> stmts;
-
   // We obviously don't have any SourceLocations, so just use this wherever
   // we need a clang::SourceLocation
   const clang::FullSourceLoc invLoc;
+
+  // The statements comprising the body of the current function being
+  // converted
+  Stack<Vector<clang::Stmt*>> stmts;
 
 protected:
   BackendBase(CishContext& context);
@@ -34,8 +38,9 @@ protected:
 
   void beginFunction(clang::FunctionDecl* f);
   void endFunction(clang::FunctionDecl* f);
-  void beginBlock(clang::LabelDecl* bb);
-  void endBlock(clang::LabelDecl* bb);
+
+  clang::Stmt* add(clang::Stmt* stmt);
+  clang::Stmt& add(clang::Stmt& stmt);
 
 public:
   virtual ~BackendBase() = default;

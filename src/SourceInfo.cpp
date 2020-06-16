@@ -440,3 +440,34 @@ void SourceInfo::runOnModule(const Module& m) {
 }
 
 } // namespace cish
+
+SourceInfoWrapperPass::SourceInfoWrapperPass() : ModulePass(ID), si(nullptr) {
+  ;
+}
+
+StringRef SourceInfoWrapperPass::getPassName() const {
+  return "Cish Source Info Wrapper Pass";
+}
+
+void SourceInfoWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
+  AU.setPreservesAll();
+}
+
+const cish::SourceInfo& SourceInfoWrapperPass::getSourceInfo() const {
+  return *si;
+}
+
+bool SourceInfoWrapperPass::runOnModule(Module& m) {
+  si.reset(new cish::SourceInfo(m));
+
+  return false;
+}
+
+char SourceInfoWrapperPass::ID = 0;
+
+static RegisterPass<SourceInfoWrapperPass>
+    X("cish-source-info", "Parses debug info", true, true);
+
+Pass* createNewSourceInfoWrapperPass() {
+  return new SourceInfoWrapperPass();
+}

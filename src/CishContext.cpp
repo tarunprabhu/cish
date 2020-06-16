@@ -1,19 +1,13 @@
 #include "CishContext.h"
+#include "CishCmdLineFlags.h"
 
-#include <llvm/Support/CommandLine.h>
-
-extern llvm::cl::list<cish::StripCasts> optStripCasts;
-extern llvm::cl::opt<std::string> optPrefix;
-extern llvm::cl::list<cish::Annotations> optAnnotations;
-extern llvm::cl::opt<cish::IndentStyle> optIndentStyle;
-extern llvm::cl::opt<unsigned> optOffset;
-extern llvm::cl::opt<cish::Parens> optParens;
-extern llvm::cl::opt<bool> optQuiet;
+using namespace llvm;
 
 namespace cish {
 
-CishContext::CishContext(const llvm::Module& m)
-    : si(m), fileMgr(fileOpts), diagIDs(new clang::DiagnosticIDs()),
+CishContext::CishContext(const Module& m)
+    : llvmContext(m.getContext()), si(m), fileMgr(fileOpts),
+      diagIDs(new clang::DiagnosticIDs()),
       diagOpts(new clang::DiagnosticOptions()), diagEngine(diagIDs, diagOpts),
       srcMgr(diagEngine, fileMgr), targetOpts(new clang::TargetOptions()),
       targetInfo() {
@@ -42,6 +36,10 @@ CishContext::CishContext(const llvm::Module& m)
   fe.reset(new LLVMFrontend(*this));
 }
 
+LLVMContext& CishContext::getLLVMContext() const {
+  return llvmContext;
+}
+
 clang::ASTContext& CishContext::getASTContext() const {
   return *astContext;
 }
@@ -63,8 +61,6 @@ const SourceInfo& CishContext::getSourceInfo() const {
 }
 
 } // namespace cish
-
-using namespace llvm;
 
 CishContextWrapperPass::CishContextWrapperPass()
     : ModulePass(ID), context(nullptr) {
@@ -91,10 +87,8 @@ bool CishContextWrapperPass::runOnModule(Module& m) {
 
 char CishContextWrapperPass::ID = 0;
 
-static RegisterPass<CishContextWrapperPass> X("cish-context-wrapper",
-                                              "Cish Context Wrapper Pass",
-                                              true,
-                                              true);
+static RegisterPass<CishContextWrapperPass>
+    X("cish-context-wrapper", "Cish Context Wrapper Pass", true, true);
 
 Pass* createCishContextWrapperPass() {
   return new CishContextWrapperPass();

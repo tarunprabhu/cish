@@ -218,6 +218,12 @@ public:
       push_back(e);
   }
 
+  value_type pop_back() {
+    value_type v = back();
+    _impl.pop_back();
+    return v;
+  }
+
   iterator erase(const_iterator pos) {
     return _impl.erase(pos);
   }

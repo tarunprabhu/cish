@@ -18,6 +18,8 @@ class SourceInfo;
 
 class CishContext {
 private:
+  llvm::LLVMContext& llvmContext;
+
   SourceInfo si;
   clang::FileSystemOptions fileOpts;
   clang::FileManager fileMgr;
@@ -43,6 +45,7 @@ public:
   CishContext(const CishContext&) = delete;
   CishContext(CishContext&&) = delete;
 
+  llvm::LLVMContext& getLLVMContext() const;
   clang::ASTContext& getASTContext() const;
   cish::LLVMFrontend& getLLVMFrontend() const;
   cish::LLVMBackend& getLLVMBackend() const;

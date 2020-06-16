@@ -56,7 +56,7 @@ public:
   bool has(Annotations ann) const;
 
 public:
-  static constexpr const char* defPrefix = "c__";
+  static constexpr const char* defPrefix = "_";
   static constexpr StripCasts defStripCasts = StripCasts::Never;
   static constexpr Annotations defAnnotations = Annotations::None;
   static constexpr IndentStyle defIndentStyle = IndentStyle::KR;

@@ -61,7 +61,7 @@ bool CishModulePass::runOnModule(Module& m) {
   }
 
   // Add all the structs to the context first so a decl exists for each of
-  // them first
+  // them first because there may be recursive structs
   for(StructType* sty : m.getIdentifiedStructTypes())
     be.add(sty, fe.getName(sty));
 
@@ -80,21 +80,12 @@ bool CishModulePass::runOnModule(Module& m) {
     be.add(sty, fields);
   }
 
-  for(const Function& f : m.functions()) {
-    if(not f.size() and not fe.isIgnoreValue(&f)) {
-      fe.handle(f.getFunctionType());
-      be.add(f, fe.getName(f));
-    }
-  }
+  for(const GlobalVariable& g : m.globals())
+    fe.handle(&g);
 
-  for(const GlobalVariable& g : m.globals()) {
-    fe.handle(g.getType());
-    if(const Constant* init = g.getInitializer())
-      fe.handle(init);
-
-    if(not si.isStringLiteral(g))
-      be.add(g, fe.getName(g, "g"));
-  }
+  for(const Function& f : m.functions())
+    if(not isMetadataFunction(f))
+      fe.handle(&f);
 
   for(const GlobalAlias& alias : m.aliases()){
     cish::fatal(cish::error() << "NOT IMPLEMENTED: " << alias);

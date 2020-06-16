@@ -94,6 +94,9 @@ public:
   Stream& operator<<(const clang::ArraySubscriptExpr*);
   Stream& operator<<(const clang::ForStmt*);
   Stream& operator<<(const clang::WhileStmt*);
+  Stream& operator<<(const clang::DoStmt*);
+  Stream& operator<<(const clang::BreakStmt*);
+  Stream& operator<<(const clang::ContinueStmt*);
 
   Stream& operator<<(const clang::CXXBoolLiteralExpr*);
   Stream& operator<<(const clang::CharacterLiteral*);

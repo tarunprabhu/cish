@@ -1,6 +1,8 @@
 #ifndef CISH_LLVM_UTILS_H
 #define CISH_LLVM_UTILS_H
 
+#include "Vector.h"
+
 #include <llvm/IR/Function.h>
 
 // A collection of utilities to because LLVM's API is inconsistent across
@@ -33,5 +35,10 @@ bool isPointerToType(llvm::Type* ty) {
 llvm::Type* getBaseType(llvm::ArrayType* aty);
 
 const llvm::Value* stripCasts(const llvm::Value* v);
+
+template<typename T>
+llvm::ArrayRef<T> makeArrayRef(const cish::Vector<T>& vec) {
+  return llvm::ArrayRef<T>(vec.data(), vec.size());
+}
 
 #endif // CISH_LLVM_UTILS_H

@@ -60,4 +60,21 @@ public:
 
 } // namespace cish
 
+class SourceInfoWrapperPass : public llvm::ModulePass {
+public:
+  static char ID;
+
+protected:
+  std::unique_ptr<cish::SourceInfo> si;
+
+public:
+  SourceInfoWrapperPass();
+
+  const cish::SourceInfo& getSourceInfo() const;
+
+  virtual llvm::StringRef getPassName() const override;
+  virtual void getAnalysisUsage(llvm::AnalysisUsage& AU) const override;
+  virtual bool runOnModule(llvm::Module& m) override;
+};
+
 #endif // CISH_SOURCE_INFO_H

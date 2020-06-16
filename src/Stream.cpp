@@ -423,6 +423,16 @@ Stream& Stream::operator<<(const Stmt* stmt) {
     *this << labelStmt;
   else if(const auto* gotoStmt = dyn_cast<GotoStmt>(stmt))
     *this << gotoStmt;
+  else if(const auto* doStmt = dyn_cast<DoStmt>(stmt))
+    *this << doStmt;
+  else if(const auto* whileStmt = dyn_cast<WhileStmt>(stmt))
+    *this << whileStmt;
+  else if(const auto* forStmt = dyn_cast<ForStmt>(stmt))
+    *this << forStmt;
+  else if(const auto* breakStmt = dyn_cast<BreakStmt>(stmt))
+    *this << breakStmt;
+  else if(const auto* continueStmt = dyn_cast<ContinueStmt>(stmt))
+    *this << continueStmt;
   else if(const auto* binOp = dyn_cast<BinaryOperator>(stmt))
     *this << binOp;
   else if(const auto* unOp = dyn_cast<UnaryOperator>(stmt))
@@ -677,6 +687,14 @@ Stream& Stream::operator<<(const GotoStmt* gotoStmt) {
   return *this;
 }
 
+Stream& Stream::operator<<(const BreakStmt*) {
+  return *this << "break";
+}
+
+Stream& Stream::operator<<(const ContinueStmt*) {
+  return *this << "continue";
+}
+
 Stream& Stream::operator<<(const IfStmt* ifStmt) {
   *this << "if (" << ifStmt->getCond() << ")" << ifStmt->getThen();
   if(const Stmt* then = ifStmt->getElse()) {
@@ -712,6 +730,8 @@ Stream& Stream::operator<<(const DeclStmt* declStmt) {
 Stream& Stream::operator<<(const CompoundStmt* compoundStmt) {
   beginBlock();
   for(Stmt* stmt : compoundStmt->body()) {
+    if(not stmt)
+      break;
     if(not isa<LabelStmt>(stmt))
       tab();
     *this << stmt;
@@ -730,14 +750,29 @@ Stream& Stream::operator<<(const CompoundStmt* compoundStmt) {
   return *this;
 }
 
+Stream& Stream::operator<<(const DoStmt* doStmt) {
+  *this << "do" << doStmt->getBody();
+  switch(fmtOpts.indentation) {
+  case IndentStyle::KR:
+    *this << " while";
+    break;
+  case IndentStyle::Allman:
+  case IndentStyle::Stroustrup:
+    endl() << tab() << "while";
+    break;
+  }
+  *this << space() << "(" << doStmt->getCond() << ")";
+
+  return *this;
+}
+
 Stream& Stream::operator<<(const ForStmt* forStmt) {
   fatal(error() << "NOT IMPLEMENTED: " << forStmt->getStmtClassName());
   return *this;
 }
 
 Stream& Stream::operator<<(const WhileStmt* whileStmt) {
-  *this << "while (" << whileStmt->getCond() << ")" << beginBlock()
-        << whileStmt->getBody() << endBlock();
+  *this << "while (" << whileStmt->getCond() << ")" << whileStmt->getBody();
 
   return *this;
 }
