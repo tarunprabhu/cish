@@ -12,12 +12,39 @@
 #include <llvm/Pass.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "DerefIter.h"
 #include "List.h"
 #include "Map.h"
 #include "Set.h"
 #include "Vector.h"
 
 namespace cish {
+
+class StructNode;
+
+struct Edge {
+  StructNode& head;
+  StructNode& tail;
+
+  // The instruction that associated with this edge.
+  const llvm::Instruction* inst;
+
+  // This is set if the edge is conditionally taken as a result
+  // of a branch (ways = 2) or a switch (ways = n). If a 2-way branch, a value
+  // of 0 is for the false branch and 1 for the true branch. For a switch,
+  // this will be set from an llvm::SwitchInst and will be same as the
+  // llvm::CaseHandle for a given case
+  const llvm::ConstantInt* condition;
+
+  // Either both inst and condition are null, or neither is.
+  Edge(StructNode& head,
+       StructNode& tail,
+       const llvm::Instruction* inst = nullptr,
+       const llvm::ConstantInt* condition = nullptr)
+      : head(head), tail(tail), inst(inst), condition(condition) {
+    ;
+  }
+};
 
 // This is a slightly modified version of the structural analysis described in
 // Muchnick's book. Because we have a dedicated switch instruction in LLVM
@@ -47,17 +74,45 @@ public:
     F_Exit = 0x8,
   };
 
+public:
+  template <typename IteratorT>
+  class pred_iterator_t : public IteratorT {
+  public:
+    pred_iterator_t() : IteratorT() {}
+    pred_iterator_t(IteratorT i) : IteratorT(i) {}
+    auto& operator->() {
+      return IteratorT::operator->()->head;
+    }
+    auto& operator*() {
+      return IteratorT::operator*().head;
+    }
+  };
+
+  template <typename IteratorT>
+  class succ_iterator_t : public IteratorT {
+  public:
+    succ_iterator_t() : IteratorT() {}
+    succ_iterator_t(IteratorT i) : IteratorT(i) {}
+    auto& operator->() {
+      return IteratorT::operator->()->tail;
+    }
+    auto& operator*() {
+      return IteratorT::operator*().tail;
+    }
+  };
+
 private:
   Kind kind;
-  List<StructNode*> preds;
-  List<StructNode*> succs;
+  List<Edge> in;
+  List<Edge> out;
   unsigned flags;
 
 public:
-  using pred_iterator = decltype(preds)::iterator;
-  using const_pred_iterator = decltype(preds)::const_iterator;
-  using succ_iterator = decltype(succs)::iterator;
-  using const_succ_iterator = decltype(succs)::const_iterator;
+  using const_edge_iterator = decltype(out)::const_iterator;
+  using const_pred_iterator
+      = pred_iterator_t<decltype(in)::const_iterator>;
+  using const_succ_iterator
+      = succ_iterator_t<decltype(out)::const_iterator>;
 
 protected:
   StructNode(Kind kind);
@@ -79,8 +134,12 @@ public:
   void setHeader();
   void setExiting();
   void setExit();
-  StructNode& addSuccessor(StructNode& succ);
-  StructNode& addPredecessor(StructNode& pred);
+  StructNode& addSuccessor(StructNode& succ,
+                           const llvm::Instruction* inst = nullptr,
+                           const llvm::ConstantInt* cond = nullptr);
+  StructNode& addPredecessor(StructNode& pred,
+                             const llvm::Instruction* inst = nullptr,
+                             const llvm::ConstantInt* cond = nullptr);
   StructNode& removeSuccessor(StructNode& succ);
   StructNode& removePredecessor(StructNode& pred);
   StructNode& replacePredecessor(StructNode& old, StructNode& neew);
@@ -98,17 +157,20 @@ public:
   size_t getNumSuccessors() const;
   StructNode& getSuccessor(size_t at) const;
   StructNode& getPredecessor(size_t at) const;
+  const Edge& getIncomingEdge(StructNode& pred) const;
+  const Edge& getOutgoingEdge(StructNode& succ) const;
   Vector<StructNode*> getPredecessors() const;
   Vector<StructNode*> getSuccessors() const;
 
-  succ_iterator succ_begin();
-  succ_iterator succ_end();
-  pred_iterator pred_begin();
-  pred_iterator pred_end();
-  llvm::iterator_range<succ_iterator> successors();
+  llvm::iterator_range<const_edge_iterator> incoming() const;
+  llvm::iterator_range<const_edge_iterator> outgoing() const;
   llvm::iterator_range<const_succ_iterator> successors() const;
-  llvm::iterator_range<pred_iterator> predecessors();
   llvm::iterator_range<const_pred_iterator> predecessors() const;
+
+  // The nodes are intended to be uniqued and their copy constructors have
+  // been deleted. So a comparison of address sufficient for uniqueness
+  bool operator==(const StructNode& other) const;
+  bool operator!=(const StructNode& other) const;
 };
 
 // Just a wrapper around a basic block so it can be added to the tree
@@ -119,6 +181,8 @@ private:
 
 public:
   Block(const llvm::BasicBlock& bb);
+  Block(const Block&) = delete;
+  Block(Block&&) = delete;
   virtual ~Block() = default;
 
   const llvm::BasicBlock& getLLVM() const;
@@ -134,10 +198,12 @@ private:
   List<StructNode*> seq;
 
 public:
-  using const_iterator = decltype(seq)::const_iterator;
+  using const_iterator = DerefIter<decltype(seq)::const_iterator>;
 
 public:
   Sequence(const List<StructNode*>& seq = {});
+  Sequence(const Sequence&) = delete;
+  Sequence(Sequence&&) = delete;
   virtual ~Sequence() = default;
 
   void add(StructNode& elem);
@@ -154,30 +220,37 @@ public:
 class LoopBase : public StructNode {
 protected:
   List<StructNode*> nodes;
-  StructNode* header;
+  StructNode& header;
 
 public:
-  using const_iterator = decltype(nodes)::const_iterator;
+  using const_iterator = DerefIter<decltype(nodes)::const_iterator>;
 
 protected:
   LoopBase(StructNode::Kind kind, StructNode& header);
 
 public:
+  LoopBase(const LoopBase&) = delete;
+  LoopBase(LoopBase&&) = delete;
   virtual ~LoopBase() = default;
 
   StructNode& getHeader() const;
 
   bool isInLoop(StructNode& node) const;
-  bool isInLoop(StructNode* node) const;
   const_iterator begin() const;
   const_iterator end() const;
 };
 
 class DoWhileLoop : public LoopBase {
 private:
+  const llvm::CmpInst* cond;
+
 public:
-  DoWhileLoop(StructNode& header);
+  DoWhileLoop(StructNode& header, StructNode& exit);
+  DoWhileLoop(const StructNode&) = delete;
+  DoWhileLoop(StructNode&&) = delete;
   virtual ~DoWhileLoop() = default;
+
+  const llvm::CmpInst& getCondition() const;
 
 public:
   static bool classof(const StructNode* ct) {
@@ -189,6 +262,8 @@ public:
 class EndlessLoop : public LoopBase {
 public:
   EndlessLoop(StructNode& header);
+  EndlessLoop(const StructNode&) = delete;
+  EndlessLoop(StructNode&&) = delete;
   virtual ~EndlessLoop() = default;
 
 public:
@@ -201,6 +276,8 @@ public:
 class NaturalLoop : public LoopBase {
 public:
   NaturalLoop(StructNode& header);
+  NaturalLoop(const StructNode&) = delete;
+  NaturalLoop(StructNode&&) = delete;
   virtual ~NaturalLoop() = default;
 
 public:
@@ -234,6 +311,8 @@ protected:
   IfThenBase(StructNode::Kind kind, Block& cond, StructNode& thn);
 
 public:
+  IfThenBase(const IfThenBase&) = delete;
+  IfThenBase(IfThenBase&&) = delete;
   virtual ~IfThenBase() = default;
 
   const llvm::BranchInst& getLLVMBranchInst() const;
@@ -242,9 +321,16 @@ public:
 };
 
 class IfThen : public IfThenBase {
+protected:
+  bool inverted;
+
 public:
-  IfThen(Block& cond, StructNode& thn);
+  IfThen(Block& cond, StructNode& thn, bool inverted = false);
+  IfThen(const IfThen&) = delete;
+  IfThen(IfThen&&) = delete;
   virtual ~IfThen() = default;
+
+  bool isInverted() const;
 
 public:
   static bool classof(const StructNode* ct) {
@@ -258,6 +344,8 @@ private:
 
 public:
   IfThenElse(Block& cond, StructNode& then, StructNode& els);
+  IfThenElse(const IfThenElse&) = delete;
+  IfThenElse(IfThenElse&&) = delete;
   virtual ~IfThenElse() = default;
 
   const StructNode& getElse() const;
@@ -272,13 +360,15 @@ public:
 // if the branch if taken, has a (possibly empty) block and exits the loop
 class IfThenBreak : public IfThenBase {
 private:
-  DoWhileLoop& loop;
+  bool inverted;
 
 public:
-  IfThenBreak(Block& cond, StructNode& thn, DoWhileLoop& loop);
+  IfThenBreak(Block& cond, StructNode& thn, bool inverted);
+  IfThenBreak(const IfThenBreak&) = delete;
+  IfThenBreak(IfThenBreak&&) = delete;
   virtual ~IfThenBreak() = default;
 
-  const DoWhileLoop& getLoop() const;
+  bool isInverted() const;
 
 public:
   static bool classof(const StructNode* ct) {

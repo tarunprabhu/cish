@@ -530,6 +530,8 @@ Stream& Stream::operator<<(UnaryOperator::Opcode opc) {
     return *this << "-";
   case UO_Not:
     return *this << "~";
+  case UO_LNot:
+    return *this << "!";
   case UO_AddrOf:
     return *this << "&";
   case UO_Deref:

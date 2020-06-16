@@ -789,9 +789,12 @@ void LLVMBackend::addTemp(const llvm::Instruction& inst,
   add(inst, var);
 }
 
-void LLVMBackend::addIfThen(const llvm::BranchInst& br) {
+void LLVMBackend::addIfThen(const llvm::BranchInst& br, bool invert) {
   Stmt* thn = stmts.top().pop_back();
-  BackendBase::add(createIfStmt(get<Expr>(br.getCondition()), thn));
+  Expr* cond = &get<Expr>(br.getCondition());
+  if(invert)
+    cond = createUnaryOperator(*cond, UO_LNot, cond->getType());
+  BackendBase::add(createIfStmt(*cond, thn));
 }
 
 void LLVMBackend::addIfThenElse(const llvm::BranchInst& br) {
@@ -808,10 +811,23 @@ void LLVMBackend::addContinue() {
   BackendBase::add(createContinueStmt());
 }
 
-void LLVMBackend::addDoWhile(llvm::Type* type) {
-  add(type);
-  BackendBase::add(createDoStmt(createCompoundStmt({}),
-                                *createBoolLiteral(true, get(type))));
+void LLVMBackend::addDoWhileLoop(const llvm::CmpInst& cmp) {
+  // LLVM implements loop termination conditions as
+  //
+  // if(cmp)
+  //   break;
+  //
+  // Whereas when writing it as a loop, it should look like
+  //
+  // do {
+  //
+  // } while(not cmp);
+  //
+  Expr& expr = get<Expr>(cmp);
+  Expr* cond = createUnaryOperator(expr, UO_LNot, expr.getType());
+  Stmt* body = stmts.top().pop_back();
+
+  BackendBase::add(createDoStmt(body, *cond));
 }
 
 void LLVMBackend::addEndlessLoop() {

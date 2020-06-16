@@ -77,7 +77,7 @@ void Walker::walk(const cish::Block& block) {
 }
 
 void Walker::walk(const cish::Sequence& seq) {
-  for(const cish::StructNode* next : seq)
+  for(const cish::StructNode& next : seq)
     walk(next);
 }
 
@@ -87,7 +87,7 @@ void Walker::walk(const cish::IfThen& ift) {
   walk(ift.getThen());
   be.endBlock();
 
-  be.addIfThen(ift.getLLVMBranchInst());
+  be.addIfThen(ift.getLLVMBranchInst(), ift.isInverted());
 }
 
 void Walker::walk(const cish::IfThenElse& ifte) {
@@ -112,18 +112,20 @@ void Walker::walk(const cish::IfThenBreak& iftb) {
   be.addBreak();
   be.endBlock();
 
-  be.addIfThen(iftb.getLLVMBranchInst());
+  be.addIfThen(iftb.getLLVMBranchInst(), iftb.isInverted());
 }
 
 void Walker::walk(const cish::IfThenContinue& iftc) {
-  walk(iftc.getCond());
+  cish::fatal(cish::error() << "Probably have no need for IfThenContinue\n");
 
-  be.beginBlock();
-  walk(iftc.getThen());
-  be.addContinue();
-  be.endBlock();
+  // walk(iftc.getCond());
 
-  be.addIfThen(iftc.getLLVMBranchInst());
+  // be.beginBlock();
+  // walk(iftc.getThen());
+  // be.addContinue();
+  // be.endBlock();
+
+  // be.addIfThen(iftc.getLLVMBranchInst());
 }
 
 void Walker::walk(const cish::Switch& sw) {
@@ -131,12 +133,17 @@ void Walker::walk(const cish::Switch& sw) {
 }
 
 void Walker::walk(const cish::DoWhileLoop& loop) {
-  cish::warning() << "DoWhileLoop (UNIMPLEMNETED)\n";
+  be.beginBlock();
+  for(const cish::StructNode& node : loop)
+    walk(node);
+  be.endBlock();
+
+  be.addDoWhileLoop(loop.getCondition());
 }
 
 void Walker::walk(const cish::EndlessLoop& loop) {
   be.beginBlock();
-  for(const cish::StructNode* node : loop)
+  for(const cish::StructNode& node : loop)
     walk(node);
   be.endBlock();
 
@@ -216,8 +223,6 @@ bool CishFunctionPass::runOnFunction(Function& f) {
   cish::LLVMFrontend& fe = context.getLLVMFrontend();
   cish::LLVMBackend& be = context.getLLVMBackend();
 
-  errs() << f << "\n";
-
   llvmContext = &f.getContext();
   be.beginFunction(f);
 
@@ -256,6 +261,8 @@ bool CishFunctionPass::runOnFunction(Function& f) {
   }
 
   be.endFunction(f);
+
+  errs() << f << "\n";
 
   return false;
 }

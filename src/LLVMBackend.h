@@ -228,9 +228,9 @@ public:
   void add(llvm::StructType* sty, const Vector<std::string>& elems);
 
   void addTemp(const llvm::Instruction& val, const std::string& name);
-  void addIfThen(const llvm::BranchInst& br);
+  void addIfThen(const llvm::BranchInst& br, bool invert);
   void addIfThenElse(const llvm::BranchInst& br);
-  void addDoWhile(llvm::Type* type);
+  void addDoWhileLoop(const llvm::CmpInst& cmp);
   void addEndlessLoop();
   void addBreak();
   void addContinue();
