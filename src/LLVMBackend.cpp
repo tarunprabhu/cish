@@ -42,7 +42,7 @@ void LLVMBackend::endBlock() {
 }
 
 void LLVMBackend::beginBlock(const llvm::BasicBlock& bb) {
-  BackendBase::add(new(astContext) LabelStmt(invLoc, blocks.at(&bb), nullptr));
+  BackendBase::add(createLabelStmt(blocks.at(&bb)));
 }
 
 void LLVMBackend::endBlock(const llvm::BasicBlock& bb) {
@@ -59,6 +59,15 @@ DeclRefExpr* LLVMBackend::createDeclRefExpr(ValueDecl* decl) {
                              decl->getType(),
                              VK_LValue,
                              decl);
+}
+
+LabelStmt* LLVMBackend::createLabelStmt(LabelDecl* label) {
+  return new(astContext) LabelStmt(invLoc, label, nullptr);
+}
+
+LabelDecl* LLVMBackend::createLabelDecl(FunctionDecl* f,
+                                        const std::string& name) {
+  return LabelDecl::Create(astContext, f, invLoc, &astContext.Idents.get(name));
 }
 
 DeclRefExpr* LLVMBackend::createVariable(const std::string& name,
@@ -573,10 +582,7 @@ void LLVMBackend::add(const llvm::GlobalVariable& g, const std::string& name) {
 }
 
 void LLVMBackend::add(const llvm::BasicBlock& bb, const std::string& name) {
-  blocks[&bb] = LabelDecl::Create(astContext,
-                                  funcs.at(bb.getParent()),
-                                  invLoc,
-                                  &astContext.Idents.get(name));
+  blocks[&bb] = createLabelDecl(funcs.at(bb.getParent()), name);
 }
 
 void LLVMBackend::add(llvm::StructType* sty, const std::string& name) {
@@ -803,6 +809,31 @@ void LLVMBackend::addIfThenElse(const llvm::BranchInst& br) {
   BackendBase::add(createIfStmt(get<Expr>(br.getCondition()), thn, els));
 }
 
+void LLVMBackend::addIfThenBreak(const llvm::BranchInst& br) {
+  Stmt* thn = createCompoundStmt(createBreakStmt());
+  BackendBase::add(createIfStmt(get<Expr>(br.getCondition()), thn));
+}
+
+void LLVMBackend::addIfThenGoto(const std::string& name,
+                                const llvm::BranchInst& br,
+                                bool invert) {
+  if(not labels.contains(name))
+    labels[name] = createLabelDecl(funcs.at(br.getParent()->getParent()), name);
+
+  Stmt* stmt = createCompoundStmt(createGoto(labels.at(name)));
+  Expr* cond = &get<Expr>(br.getCondition());
+  if(invert)
+    cond = createUnaryOperator(*cond, UO_LNot, cond->getType());
+
+  BackendBase::add(createIfStmt(*cond, stmt));
+}
+
+void LLVMBackend::addLabel(const std::string& name, const llvm::Function& f) {
+  if(not labels.contains(name))
+    labels[name] = createLabelDecl(funcs.at(&f), name);
+  BackendBase::add(createLabelStmt(labels.at(name)));
+}
+
 void LLVMBackend::addBreak() {
   BackendBase::add(createBreakStmt());
 }
@@ -811,29 +842,10 @@ void LLVMBackend::addContinue() {
   BackendBase::add(createContinueStmt());
 }
 
-void LLVMBackend::addDoWhileLoop(const llvm::CmpInst& cmp) {
-  // LLVM implements loop termination conditions as
-  //
-  // if(cmp)
-  //   break;
-  //
-  // Whereas when writing it as a loop, it should look like
-  //
-  // do {
-  //
-  // } while(not cmp);
-  //
-  Expr& expr = get<Expr>(cmp);
-  Expr* cond = createUnaryOperator(expr, UO_LNot, expr.getType());
-  Stmt* body = stmts.top().pop_back();
-
-  BackendBase::add(createDoStmt(body, *cond));
-}
-
 void LLVMBackend::addEndlessLoop() {
   Stmt* body = stmts.top().pop_back();
   BackendBase::add(
-      createWhileStmt(*createBoolLiteral(true, astContext.BoolTy), body));
+      createDoStmt(body, *createBoolLiteral(true, astContext.BoolTy)));
 }
 
 bool LLVMBackend::has(llvm::Type* type) const {

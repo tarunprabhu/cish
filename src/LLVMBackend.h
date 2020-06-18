@@ -52,6 +52,7 @@ private:
   Map<llvm::StructType*, Vector<clang::DeclRefExpr*>> fields;
   Map<const llvm::Function*, clang::FunctionDecl*> funcs;
   Map<const llvm::BasicBlock*, clang::LabelDecl*> blocks;
+  Map<std::string, clang::LabelDecl*> labels;
 
 protected:
   template <
@@ -132,6 +133,10 @@ protected:
                                              clang::QualType type);
   clang::CXXNullPtrLiteralExpr* createNullptr(clang::QualType type);
   clang::InitListExpr* createInitListExpr(const Vector<clang::Expr*>& exprs);
+
+  clang::LabelStmt* createLabelStmt(clang::LabelDecl* label);
+  clang::LabelDecl* createLabelDecl(clang::FunctionDecl* f,
+                                    const std::string& name);
 
 public:
   /// @param prefix The prefix to use when generating names
@@ -230,7 +235,10 @@ public:
   void addTemp(const llvm::Instruction& val, const std::string& name);
   void addIfThen(const llvm::BranchInst& br, bool invert);
   void addIfThenElse(const llvm::BranchInst& br);
-  void addDoWhileLoop(const llvm::CmpInst& cmp);
+  void addIfThenBreak(const llvm::BranchInst& br);
+  void addIfThenGoto(const std::string& label, const llvm::BranchInst& br,
+                     bool invert);
+  void addLabel(const std::string& name, const llvm::Function& f);
   void addEndlessLoop();
   void addBreak();
   void addContinue();

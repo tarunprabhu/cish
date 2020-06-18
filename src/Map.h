@@ -23,6 +23,9 @@ protected:
   template <typename IteratorT>
   class key_iterator_t : public IteratorT {
   public:
+    using value_type = typename IteratorT::value_type::first_type;
+
+  public:
     key_iterator_t() : IteratorT() {}
     key_iterator_t(IteratorT i) : IteratorT(i) {}
     auto& operator->() {
@@ -35,6 +38,9 @@ protected:
 
   template <typename IteratorT>
   class mapped_iterator_t : public IteratorT {
+  public:
+    using value_type = typename IteratorT::value_type::second_type;
+
   public:
     mapped_iterator_t() : IteratorT() {}
     mapped_iterator_t(IteratorT i) : IteratorT(i) {}

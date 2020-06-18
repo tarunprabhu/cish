@@ -15,6 +15,7 @@ set(SOURCES
   LLVMUtils.cpp
   SourceInfo.cpp
   Stream.cpp
+  Structure.cpp
   StructureAnalysis.cpp)
 
 set(CISH cish)

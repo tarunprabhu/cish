@@ -21,24 +21,27 @@ protected:
   const cish::SourceInfo& si;
   cish::LLVMFrontend& fe;
   cish::LLVMBackend& be;
+  const Function& func;
 
 protected:
   void walk(const cish::Block& block);
   void walk(const cish::Sequence& seq);
+  void walk(const cish::Label& label);
   void walk(const cish::IfThen& ift);
   void walk(const cish::IfThenElse& ifte);
   void walk(const cish::IfThenBreak& iftb);
-  void walk(const cish::IfThenContinue& iftc);
-  void walk(const cish::DoWhileLoop& loop);
+  void walk(const cish::IfThenGoto& iftg);
   void walk(const cish::EndlessLoop& loop);
   void walk(const cish::NaturalLoop& loop);
-  void walk(const cish::Latch& latch);
   void walk(const cish::Switch& sw);
+
+  void handle(const Instruction& inst);
 
 public:
   Walker(const cish::SourceInfo& si,
          cish::LLVMFrontend& fe,
-         cish::LLVMBackend& be);
+         cish::LLVMBackend& be,
+         const llvm::Function& func);
   Walker(const Walker&) = delete;
   Walker(Walker&&) = delete;
   virtual ~Walker() = default;
@@ -49,9 +52,23 @@ public:
 
 Walker::Walker(const cish::SourceInfo& si,
                cish::LLVMFrontend& fe,
-               cish::LLVMBackend& be)
-  : si(si), fe(fe), be(be) {
+               cish::LLVMBackend& be,
+               const Function& func)
+  : si(si), fe(fe), be(be), func(func) {
   ;
+}
+
+void Walker::handle(const Instruction& inst) {
+  if(not fe.isIgnoreValue(inst)) {
+    if(const BranchInst* br = dyn_cast<BranchInst>(&inst)) {
+      if(br->isConditional())
+        fe.handle(br->getCondition());
+    } else if(isa<AllocaInst>(inst) or isa<CallInst>(inst)
+              or isa<InvokeInst>(inst) or isa<StoreInst>(inst)
+              or isa<ReturnInst>(inst)) {
+      fe.handle(static_cast<const Value&>(inst));
+    }
+  }
 }
 
 void Walker::walk(const cish::Block& block) {
@@ -62,18 +79,8 @@ void Walker::walk(const cish::Block& block) {
   // If at some point, we allow a "hybrid" situation where only a part of the
   // structure may have been constructed, we need to check if this is a basic
   // block for which we need to handle the branch
-  for(const Instruction& inst : block.getLLVM()) {
-    if(fe.isIgnoreValue(inst)) {
-      continue;
-    } else if(const BranchInst* br = dyn_cast<BranchInst>(&inst)) {
-      if(br->isConditional())
-        fe.handle(br->getCondition());
-    } else if(isa<AllocaInst>(inst) or isa<CallInst>(inst)
-              or isa<InvokeInst>(inst) or isa<StoreInst>(inst)
-              or isa<ReturnInst>(inst)) {
-      fe.handle(static_cast<const Value&>(inst));
-    }
-  }
+  for(const Instruction& inst : block.getLLVM())
+    handle(inst);
 }
 
 void Walker::walk(const cish::Sequence& seq) {
@@ -105,40 +112,24 @@ void Walker::walk(const cish::IfThenElse& ifte) {
 }
 
 void Walker::walk(const cish::IfThenBreak& iftb) {
-  walk(iftb.getCond());
-
-  be.beginBlock();
-  walk(iftb.getThen());
-  be.addBreak();
-  be.endBlock();
-
-  be.addIfThen(iftb.getLLVMBranchInst(), iftb.isInverted());
+  const BranchInst& br = iftb.getLLVMBranchInst();
+  handle(br);
+  be.addIfThenBreak(br);
 }
 
-void Walker::walk(const cish::IfThenContinue& iftc) {
-  cish::fatal(cish::error() << "Probably have no need for IfThenContinue\n");
+void Walker::walk(const cish::IfThenGoto& iftg) {
+  walk(iftg.getBlock());
 
-  // walk(iftc.getCond());
+  be.addIfThenGoto(
+      iftg.getTarget().getName(), iftg.getLLVMBranchInst(), iftg.isInverted());
+}
 
-  // be.beginBlock();
-  // walk(iftc.getThen());
-  // be.addContinue();
-  // be.endBlock();
-
-  // be.addIfThen(iftc.getLLVMBranchInst());
+void Walker::walk(const cish::Label& label) {
+  be.addLabel(label.getName(), func);
 }
 
 void Walker::walk(const cish::Switch& sw) {
   ;
-}
-
-void Walker::walk(const cish::DoWhileLoop& loop) {
-  be.beginBlock();
-  for(const cish::StructNode& node : loop)
-    walk(node);
-  be.endBlock();
-
-  be.addDoWhileLoop(loop.getCondition());
 }
 
 void Walker::walk(const cish::EndlessLoop& loop) {
@@ -151,11 +142,12 @@ void Walker::walk(const cish::EndlessLoop& loop) {
 }
 
 void Walker::walk(const cish::NaturalLoop& loop) {
-  cish::warning() << "Natural Loop (UNIMPLEMENTED)\n";
-}
+  be.beginBlock();
+  for(const cish::StructNode& node : loop)
+    walk(node);
+  be.endBlock();
 
-void Walker::walk(const cish::Latch& latch) {
-  errs() << "walk: Latch (UNIMPLEMENTED)\n";
+  be.addEndlessLoop();
 }
 
 void Walker::walk(const cish::StructNode* node) {
@@ -163,22 +155,23 @@ void Walker::walk(const cish::StructNode* node) {
     walk(*block);
   else if(const auto* seq = dyn_cast<cish::Sequence>(node))
     walk(*seq);
+  else if(const auto* label = dyn_cast<cish::Label>(node))
+    walk(*label);
   else if(const auto* ift = dyn_cast<cish::IfThen>(node))
     walk(*ift);
   else if(const auto* ifte = dyn_cast<cish::IfThenElse>(node))
     walk(*ifte);
   else if(const auto* iftb = dyn_cast<cish::IfThenBreak>(node))
     walk(*iftb);
-  else if(const auto* iftc = dyn_cast<cish::IfThenContinue>(node))
-    walk(*iftc);
-  else if(const auto* loop = dyn_cast<cish::DoWhileLoop>(node))
-    walk(*loop);
+  else if(const auto* iftg = dyn_cast<cish::IfThenGoto>(node))
+    walk(*iftg);
   else if(const auto* endless = dyn_cast<cish::EndlessLoop>(node))
     walk(*endless);
   else if(const auto* natural = dyn_cast<cish::NaturalLoop>(node))
     walk(*natural);
-  else if(const auto* latch = dyn_cast<cish::Latch>(node))
-    walk(*latch);
+  else if(const auto* header = dyn_cast<cish::LoopHeader>(node))
+    // Loop headers are empty by design
+    ;
   else if(const auto* sw = dyn_cast<cish::Switch>(node))
     walk(*sw);
   else
@@ -228,7 +221,7 @@ bool CishFunctionPass::runOnFunction(Function& f) {
 
   const auto& analysis = getAnalysis<StructureAnalysisWrapperPass>();
   if(analysis.isStructured()) {
-    Walker(si, fe, be).walk(&analysis.getStructured());
+    Walker(si, fe, be, f).walk(&analysis.getStructured());
   } else {
     for(const BasicBlock& bb : f) {
       be.beginBlock(bb);
@@ -262,7 +255,7 @@ bool CishFunctionPass::runOnFunction(Function& f) {
 
   be.endFunction(f);
 
-  errs() << f << "\n";
+  // errs() << f << "\n";
 
   return false;
 }

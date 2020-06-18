@@ -134,15 +134,15 @@ public:
     return _impl.erase(first, last);
   }
 
-  size_type erase(const reference key) {
+  size_type erase(const_reference key) {
     return _impl.erase(key);
   }
 
-  iterator find(const reference e) {
+  iterator find(const_reference e) {
     return _impl.find(e);
   }
 
-  const_iterator find(const reference e) const {
+  const_iterator find(const_reference e) const {
     return _impl.find(e);
   }
 

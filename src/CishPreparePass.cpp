@@ -120,12 +120,11 @@ bool CishPreparePass::runOnFunction(Function& f) {
     }
   }
 
-  for(AllocaInst* alloca : allocas)
-    errs() << "alloca: " << *alloca << "\n";
   PromoteMemToReg(allocas, dt, &ac);
 
   // Move the branch instruction in the exiting branch of a loop to its own
-  // basic block.
+  // basic block. Also make the header an empty block so it only acts as
+  // the target of a backedge and does nothing else
   cish::Set<Loop*> loops;
   for(Loop* loop : li)
     collectLoops(loop, loops);
@@ -134,6 +133,8 @@ bool CishPreparePass::runOnFunction(Function& f) {
     loop->getExitingBlocks(exiting);
     for(BasicBlock* bb : exiting)
       bb->splitBasicBlock(&bb->back());
+    BasicBlock* header = loop->getHeader();
+    header->splitBasicBlock(&header->front());
   }
 
   return true;

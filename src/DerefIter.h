@@ -18,11 +18,11 @@ public:
     ;
   }
 
-  reference operator*() const {
+  reference operator*() {
     return *(this->IterT::operator*());
   }
 
-  pointer operator->() const {
+  pointer operator->() {
     return this->IterT::operator*();
   }
 };
