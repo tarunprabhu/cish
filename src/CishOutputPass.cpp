@@ -1,7 +1,7 @@
+#include "CishContext.h"
 #include "Diagnostics.h"
 #include "Stream.h"
 #include "Vector.h"
-#include "CishContext.h"
 
 #include <llvm/Pass.h>
 #include <llvm/Support/raw_ostream.h>

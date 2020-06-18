@@ -28,7 +28,7 @@ protected:
   public:
     key_iterator_t() : IteratorT() {}
     key_iterator_t(IteratorT i) : IteratorT(i) {}
-    auto& operator->() {
+    auto& operator-> () {
       return IteratorT::operator->()->first;
     }
     auto& operator*() {
@@ -44,7 +44,7 @@ protected:
   public:
     mapped_iterator_t() : IteratorT() {}
     mapped_iterator_t(IteratorT i) : IteratorT(i) {}
-    auto& operator->() {
+    auto& operator-> () {
       return IteratorT::operator->()->second;
     }
     auto& operator*() {

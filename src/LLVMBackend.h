@@ -122,8 +122,7 @@ protected:
                                   const Vector<clang::Expr*>& args,
                                   clang::QualType type);
 
-  clang::DoStmt* createDoStmt(clang::Stmt* body,
-                              clang::Expr& cond);
+  clang::DoStmt* createDoStmt(clang::Stmt* body, clang::Expr& cond);
   clang::WhileStmt* createWhileStmt(clang::Expr& cond, clang::Stmt* body);
 
   clang::CXXBoolLiteralExpr* createBoolLiteral(bool b, clang::QualType type);
@@ -236,7 +235,8 @@ public:
   void addIfThen(const llvm::BranchInst& br, bool invert);
   void addIfThenElse(const llvm::BranchInst& br);
   void addIfThenBreak(const llvm::BranchInst& br);
-  void addIfThenGoto(const std::string& label, const llvm::BranchInst& br,
+  void addIfThenGoto(const std::string& label,
+                     const llvm::BranchInst& br,
                      bool invert);
   void addLabel(const std::string& name, const llvm::Function& f);
   void addEndlessLoop();

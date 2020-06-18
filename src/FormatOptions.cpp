@@ -3,7 +3,7 @@
 namespace cish {
 
 FormatOptions::FormatOptions()
-  : ignoreCasts(0), annotations(0), prefix(FormatOptions::defPrefix),
+    : ignoreCasts(0), annotations(0), prefix(FormatOptions::defPrefix),
       indentation(FormatOptions::defIndentStyle),
       parens(FormatOptions::defParens), offset(FormatOptions::defOffset),
       quiet(FormatOptions::defQuiet) {

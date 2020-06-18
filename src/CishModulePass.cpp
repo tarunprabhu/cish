@@ -1,8 +1,8 @@
 #include "CishContext.h"
 #include "Diagnostics.h"
-#include "SourceInfo.h"
-#include "LLVMFrontend.h"
 #include "LLVMBackend.h"
+#include "LLVMFrontend.h"
+#include "SourceInfo.h"
 
 using namespace llvm;
 
@@ -87,7 +87,7 @@ bool CishModulePass::runOnModule(Module& m) {
     if(not isMetadataFunction(f))
       fe.handle(&f);
 
-  for(const GlobalAlias& alias : m.aliases()){
+  for(const GlobalAlias& alias : m.aliases()) {
     cish::fatal(cish::error() << "NOT IMPLEMENTED: " << alias);
   }
 

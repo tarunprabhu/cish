@@ -1,5 +1,5 @@
-#include "CishContext.h"
 #include "CishCmdLineFlags.h"
+#include "CishContext.h"
 #include "Diagnostics.h"
 #include "FormatOptions.h"
 #include "Passes.h"

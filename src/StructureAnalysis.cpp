@@ -385,7 +385,8 @@ bool StructureAnalysis::tryReduceIfThenGoto(
   // Add the goto to the node with the largest indegree. Hopefully this will
   // minimize the number of gotos but who knows
   Vector<StructNode*> sorted(postorder.begin(), postorder.end());
-  std::sort(sorted.begin(), sorted.end(),
+  std::sort(sorted.begin(),
+            sorted.end(),
             [](const StructNode* a, const StructNode* b) {
               return a->getNumPredecessors() < b->getNumPredecessors();
             });
@@ -679,7 +680,7 @@ bool StructureAnalysis::runOnFunction(const Function& f) {
     for(const BasicBlock* bb : blocks) {
       StructNode& node = getNodeFor(bb);
       if((bb->size() == 1) and isa<Block>(node)
-         and (not (headers.contains(bb) or exiting.contains(bb)))
+         and (not(headers.contains(bb) or exiting.contains(bb)))
          and (node.getNumPredecessors() == 1)
          and (node.getNumSuccessors() == 1)) {
         StructNode& pred = node.getPredecessor();
@@ -701,7 +702,6 @@ bool StructureAnalysis::runOnFunction(const Function& f) {
     fs.close();
     cfg++;
   }
-
 
   // Do these first because it is guaranteed that everything in the tree is
   // still a Block.

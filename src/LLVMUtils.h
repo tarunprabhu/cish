@@ -36,7 +36,7 @@ llvm::Type* getBaseType(llvm::ArrayType* aty);
 
 const llvm::Value* stripCasts(const llvm::Value* v);
 
-template<typename T>
+template <typename T>
 llvm::ArrayRef<T> makeArrayRef(const cish::Vector<T>& vec) {
   return llvm::ArrayRef<T>(vec.data(), vec.size());
 }

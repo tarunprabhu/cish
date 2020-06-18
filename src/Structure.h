@@ -40,7 +40,7 @@ public:
   public:
     pred_iterator_t() : IteratorT() {}
     pred_iterator_t(IteratorT i) : IteratorT(i) {}
-    auto& operator->() {
+    auto& operator-> () {
       return IteratorT::operator->()->getHead();
     }
     auto& operator*() {
@@ -53,7 +53,7 @@ public:
   public:
     succ_iterator_t() : IteratorT() {}
     succ_iterator_t(IteratorT i) : IteratorT(i) {}
-    auto& operator->() {
+    auto& operator-> () {
       return IteratorT::operator->()->getTail();
     }
     auto& operator*() {
