@@ -5,7 +5,6 @@
 
 #include "DerefIter.h"
 #include "List.h"
-#include "Map.h"
 #include "Set.h"
 #include "Vector.h"
 
@@ -24,8 +23,10 @@ public:
     S_Block,
     S_Sequence,
     S_LoopHeader,
+    S_LoopLatch,
     S_EndlessLoop,
-    S_NaturalLoop,
+    S_ForLoop,
+    S_SimplifiedLoop,
     S_IfThen,
     S_IfThenElse,
     S_IfThenBreak,
@@ -36,46 +37,38 @@ public:
 
 public:
   template <typename IteratorT>
-  class pred_iterator_t : public IteratorT {
-  public:
-    pred_iterator_t() : IteratorT() {}
-    pred_iterator_t(IteratorT i) : IteratorT(i) {}
-    auto& operator-> () {
-      return IteratorT::operator->()->getHead();
-    }
-    auto& operator*() {
-      return IteratorT::operator*().getHead();
-    }
-  };
-
-  template <typename IteratorT>
   class succ_iterator_t : public IteratorT {
+  public:
+    using value_type = typename IteratorT::value_type::second_type;
+
   public:
     succ_iterator_t() : IteratorT() {}
     succ_iterator_t(IteratorT i) : IteratorT(i) {}
-    auto& operator-> () {
-      return IteratorT::operator->()->getTail();
+    auto& operator->() {
+      return IteratorT::operator->()->second;
     }
     auto& operator*() {
-      return IteratorT::operator*().getTail();
+      return IteratorT::operator*().second;
     }
   };
 
 private:
   Kind kind;
   List<StructNode*> in;
-  Map<long, StructNode*> out;
+  Vector<std::pair<const llvm::ConstantInt*, StructNode*>> out;
 
 public:
+  using Edge = std::pair<const llvm::ConstantInt*, StructNode*>;
+  using Edges = Vector<Edge>;
   using const_edge_iterator = decltype(out)::const_iterator;
   using const_pred_iterator = DerefIter<typename decltype(in)::const_iterator>;
   using const_succ_iterator
-      = DerefIter<typename decltype(out)::const_mapped_iterator>;
+      = DerefIter<succ_iterator_t<typename decltype(out)::const_iterator>>;
 
 protected:
   StructNode(Kind kind);
 
-  StructNode& addPredecessor(long kase, StructNode& pred);
+  StructNode& addPredecessor(const llvm::ConstantInt* kase, StructNode& pred);
 
 public:
   StructNode(const StructNode&) = delete;
@@ -86,22 +79,22 @@ public:
   Kind getKind() const;
   unsigned long getId() const;
 
-  StructNode& addSuccessor(long kase, StructNode& succ);
+  StructNode& addSuccessor(const llvm::ConstantInt* kase, StructNode& succ);
   StructNode& removeSuccessor(StructNode& succ);
   StructNode& removePredecessor(StructNode& pred);
   StructNode& disconnect();
 
-  long getSuccessorCase(const StructNode& succ) const;
+  const llvm::ConstantInt* getSuccessorCase(const StructNode& succ) const;
   bool hasPredecessor(const StructNode& node) const;
   bool hasSuccessor(const StructNode& node) const;
   size_t getNumPredecessors() const;
   size_t getNumSuccessors() const;
   StructNode& getSuccessor() const;
-  StructNode& getSuccessor(long kase) const;
+  StructNode& getSuccessor(const llvm::ConstantInt* kase) const;
   StructNode& getPredecessor() const;
   StructNode& getPredecessorAt(size_t) const;
-  Vector<std::pair<long, StructNode*>> getIncoming() const;
-  const Map<long, StructNode*>& getOutgoing() const;
+  Edges getIncoming() const;
+  const Edges& getOutgoing() const;
   Vector<StructNode*> getPredecessors() const;
   Vector<StructNode*> getSuccessors() const;
 
@@ -219,10 +212,10 @@ class IfThenBreak : public StructNode {
 private:
   StructNode& exit;
   const llvm::BranchInst& br;
-  unsigned loopDepth;
+  bool invert;
 
 public:
-  IfThenBreak(StructNode& exit, const llvm::BranchInst& br, unsigned loopDepth);
+  IfThenBreak(StructNode& exit, const llvm::BranchInst& br, bool invert);
   IfThenBreak(const IfThenBreak&) = delete;
   IfThenBreak(IfThenBreak&&) = delete;
   virtual ~IfThenBreak() = default;
@@ -232,7 +225,7 @@ public:
   const StructNode& getExit() const;
   const StructNode& getContinue() const;
   const llvm::BranchInst& getLLVMBranchInst() const;
-  unsigned getLoopDepth() const;
+  bool isInverted() const;
 
 public:
   static bool classof(const StructNode* ct) {
@@ -303,6 +296,26 @@ public:
   }
 };
 
+// Latch for a for loop. Could just use a block with a flag, but this makes
+// it a shade stronger
+class LoopLatch : public StructNode {
+private:
+  const llvm::BasicBlock& block;
+
+public:
+  LoopLatch(const llvm::BasicBlock& block);
+  LoopLatch(const LoopLatch&) = delete;
+  LoopLatch(LoopLatch&&) = delete;
+  virtual ~LoopLatch() = default;
+
+  const llvm::BasicBlock& getBlock() const;
+
+public:
+  static bool classof(const StructNode* ct) {
+    return ct->getKind() == StructNode::S_LoopLatch;
+  }
+};
+
 class LoopBase : public StructNode {
 protected:
   List<StructNode*> nodes;
@@ -340,8 +353,32 @@ public:
   }
 };
 
-// Loop with multiple exits
-class NaturalLoop : public LoopBase {
+class ForLoop : public LoopBase {
+private:
+  IfThenBreak& brk;
+  LoopLatch& latch;
+
+public:
+  ForLoop(LoopHeader& header, IfThenBreak& brk, LoopLatch& latch);
+  ForLoop(const ForLoop&) = delete;
+  ForLoop(ForLoop&&) = delete;
+  virtual ~ForLoop() = default;
+
+  const llvm::BranchInst& getLLVMBranchInst() const;
+  bool isInverted() const;
+  const LoopLatch& getLatch() const;
+
+public:
+  static bool classof(const StructNode* ct) {
+    return ct->getKind() == StructNode::S_ForLoop;
+  }
+};
+
+// Loop with a dedicated exit (but may have multiple exiting blocks) and
+// a single backedge (unique latch). The terminology used is the same as
+// that of LLVM. LLVM additionally requires that the loop have a preheader
+// but that is not necessary here
+class SimplifiedLoop : public LoopBase {
 private:
   List<IfThenBreak*> exits;
 
@@ -349,24 +386,53 @@ public:
   using const_iterator = decltype(nodes)::const_iterator;
 
 public:
-  NaturalLoop(LoopHeader& header, const List<IfThenBreak*>& exits);
-  NaturalLoop(const StructNode&) = delete;
-  NaturalLoop(StructNode&&) = delete;
-  virtual ~NaturalLoop() = default;
+  SimplifiedLoop(LoopHeader& header, const List<IfThenBreak*>& exits);
+  SimplifiedLoop(const StructNode&) = delete;
+  SimplifiedLoop(StructNode&&) = delete;
+  virtual ~SimplifiedLoop() = default;
 
   const List<IfThenBreak*>& getExits() const;
 
 public:
   static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_NaturalLoop;
+    return ct->getKind() == StructNode::S_SimplifiedLoop;
   }
 };
 
 class Switch : public StructNode {
-private:
 public:
-  Switch();
+  class Case {
+  private:
+    const llvm::ConstantInt& value;
+    StructNode* dest;
+    bool fallthrough;
+
+  public:
+    Case(const llvm::ConstantInt& value, StructNode* dest, bool fallthrough);
+
+    const llvm::ConstantInt& getValue() const;
+    const StructNode& getBody() const;
+    bool isEmpty() const;
+    bool isFallthrough() const;
+  };
+
+private:
+  const llvm::SwitchInst& sw;
+  Vector<Case> cases;
+  StructNode* deflt;
+
+public:
+  Switch(const llvm::SwitchInst& sw,
+         const Vector<Case>& cases,
+         StructNode* deflt = nullptr);
+  Switch(const Switch&) = delete;
+  Switch(Switch&&) = delete;
   virtual ~Switch() = default;
+
+  const llvm::SwitchInst& getLLVM() const;
+  bool hasDefault() const;
+  const StructNode& getDefault() const;
+  const Vector<Case>& getCases() const;
 
 public:
   static bool classof(const StructNode* ct) {

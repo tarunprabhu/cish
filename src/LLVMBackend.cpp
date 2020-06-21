@@ -27,7 +27,7 @@ void LLVMBackend::beginFunction(const llvm::Function& f) {
 }
 
 void LLVMBackend::endFunction(const llvm::Function& f) {
-  clang::FunctionDecl* cf = funcs.at(&f);
+  FunctionDecl* cf = funcs.at(&f);
   cf->setBody(createCompoundStmt(stmts.pop()));
   BackendBase::endFunction(cf);
 }
@@ -138,7 +138,7 @@ IfStmt* LLVMBackend::createIfStmt(Expr& cond, Stmt* thn, Stmt* els) {
       astContext, invLoc, false, nullptr, nullptr, &cond, thn, invLoc, els);
 }
 
-GotoStmt* LLVMBackend::createGoto(LabelDecl* label) {
+GotoStmt* LLVMBackend::createGotoStmt(LabelDecl* label) {
   return new(astContext) GotoStmt(label, invLoc, invLoc);
 }
 
@@ -149,6 +149,18 @@ CompoundStmt* LLVMBackend::createCompoundStmt(const Vector<Stmt*>& stmts) {
 CompoundStmt* LLVMBackend::createCompoundStmt(Stmt* stmt) {
   return CompoundStmt::Create(
       astContext, llvm::ArrayRef<Stmt*>(stmt), invLoc, invLoc);
+}
+
+SwitchStmt* LLVMBackend::createSwitchStmt(Expr& cond) {
+  return SwitchStmt::Create(astContext, nullptr, nullptr, &cond);
+}
+
+CaseStmt* LLVMBackend::createCaseStmt(Expr& value) {
+  return CaseStmt::Create(astContext, &value, nullptr, invLoc, invLoc, invLoc);
+}
+
+DefaultStmt* LLVMBackend::createDefaultStmt(Stmt* body) {
+  return new(astContext) DefaultStmt(invLoc, invLoc, body);
 }
 
 BreakStmt* LLVMBackend::createBreakStmt() {
@@ -260,11 +272,13 @@ void LLVMBackend::add(const llvm::BinaryOperator& inst) {
 void LLVMBackend::add(const llvm::BranchInst& br) {
   if(br.isConditional()) {
     llvm::Value* cond = br.getCondition();
-    auto* thn = createCompoundStmt(createGoto(blocks.at(br.getSuccessor(0))));
-    auto* els = createCompoundStmt(createGoto(blocks.at(br.getSuccessor(1))));
+    auto* thn
+        = createCompoundStmt(createGotoStmt(blocks.at(br.getSuccessor(0))));
+    auto* els
+        = createCompoundStmt(createGotoStmt(blocks.at(br.getSuccessor(1))));
     add(br, createIfStmt(get<Expr>(cond), thn, els));
   } else {
-    add(br, createGoto(blocks.at(br.getSuccessor(0))));
+    add(br, createGotoStmt(blocks.at(br.getSuccessor(0))));
   }
   BackendBase::add(get(br));
 }
@@ -345,19 +359,24 @@ UNIMPLEMENTED(ExtractValueInst)
 UNIMPLEMENTED(FenceInst)
 UNIMPLEMENTED(CatchPadInst)
 
-static ArraySubscriptExpr* getAsArraySubscriptExpr(clang::Expr* expr) {
+static ArraySubscriptExpr* getAsArraySubscriptExpr(Expr* expr) {
   if(auto* un = dyn_cast<UnaryOperator>(stripCasts(expr)))
     return dyn_cast<ArraySubscriptExpr>(un->getSubExpr());
   return nullptr;
 }
 
-clang::Expr*
-LLVMBackend::handleIndexOperand(llvm::PointerType* pty,
-                                clang::Expr* currExpr,
-                                unsigned idx,
-                                const Vector<const llvm::Value*>& indices,
-                                const llvm::Instruction& inst) {
+Expr* LLVMBackend::handleIndexOperand(llvm::PointerType* pty,
+                                      Expr* currExpr,
+                                      unsigned idx,
+                                      const Vector<const llvm::Value*>& indices,
+                                      const llvm::Instruction& inst) {
   const llvm::Value* op = indices[idx];
+  if(const auto* cint = dyn_cast<llvm::ConstantInt>(op)) {
+    // If the current offset is zero, don't add it because it is unlikely to
+    // be "useful" and just ends up complicating the resulting expression
+    if(cint->getLimitedValue() == 0)
+      return currExpr;
+  }
   if(idx == 0) {
     // If the first pointer operand to the instruction is an ArraySubscriptExpr,
     // then this is continuing an index computation. For the high-level
@@ -379,29 +398,22 @@ LLVMBackend::handleIndexOperand(llvm::PointerType* pty,
       else
         return addrOf;
     }
-  } else if(const auto* cint = dyn_cast<llvm::ConstantInt>(op)) {
-    // If the current offset is zero, don't add it because it is unlikely to
-    // be "useful" and just ends up complicating the resulting expression
-    if(cint->getLimitedValue() == 0)
-      return currExpr;
   }
   return createArraySubscriptExpr(*currExpr, get<Expr>(op), get(pty));
 }
 
-clang::Expr*
-LLVMBackend::handleIndexOperand(llvm::ArrayType* aty,
-                                clang::Expr* currExpr,
-                                unsigned idx,
-                                const Vector<const llvm::Value*>& indices,
-                                const llvm::Instruction& inst) {
-  return createArraySubscriptExpr(
-      *currExpr, get<Expr>(indices.at(idx)), get(aty));
+Expr* LLVMBackend::handleIndexOperand(llvm::ArrayType* aty,
+                                      Expr* currExpr,
+                                      unsigned idx,
+                                      const Vector<const llvm::Value*>& indices,
+                                      const llvm::Instruction& inst) {
+  return createArraySubscriptExpr(*currExpr, get<Expr>(indices[idx]), get(aty));
 }
 
-clang::Expr* LLVMBackend::handleIndexOperand(llvm::StructType* sty,
-                                             clang::Expr* currExpr,
-                                             unsigned field,
-                                             const llvm::Instruction& inst) {
+Expr* LLVMBackend::handleIndexOperand(llvm::StructType* sty,
+                                      Expr* currExpr,
+                                      unsigned field,
+                                      const llvm::Instruction& inst) {
 
   return createBinaryOperator(*currExpr,
                               *fields.at(sty)[field],
@@ -412,7 +424,7 @@ clang::Expr* LLVMBackend::handleIndexOperand(llvm::StructType* sty,
 void LLVMBackend::add(const llvm::GetElementPtrInst& gep) {
   const llvm::Value* ptr = gep.getPointerOperand();
   llvm::Type* type = ptr->getType();
-  clang::Expr* expr = &get<Expr>(ptr);
+  Expr* expr = &get<Expr>(ptr);
   Vector<const llvm::Value*> indices(gep.idx_begin(), gep.idx_end());
   for(unsigned i = 0; i < indices.size(); i++) {
     if(auto* pty = dyn_cast<llvm::PointerType>(type)) {
@@ -491,6 +503,19 @@ void LLVMBackend::add(const llvm::StoreInst& store) {
   add(store, assign);
 }
 
+void LLVMBackend::add(const llvm::SwitchInst& swtch) {
+  addSwitchStmt(swtch);
+  for(const auto& i : swtch.cases()) {
+    BackendBase::add(
+        createCompoundStmt(createGotoStmt(blocks.at(i.getCaseSuccessor()))));
+    addSwitchCase(i.getCaseValue());
+  };
+  if(const llvm::BasicBlock* deflt = swtch.getDefaultDest()) {
+    BackendBase::add(createCompoundStmt(createGotoStmt(blocks.at(deflt))));
+    addSwitchDefault();
+  }
+}
+
 void LLVMBackend::add(const llvm::UnaryOperator& inst) {
   UnaryOperator::Opcode opc = (UnaryOperator::Opcode)-1;
   switch(inst.getOpcode()) {
@@ -507,7 +532,9 @@ void LLVMBackend::add(const llvm::UnaryOperator& inst) {
           get<Expr>(inst.getOperand(0)), opc, get(inst.getType())));
 }
 
-UNIMPLEMENTED(UnreachableInst)
+void LLVMBackend::add(const llvm::UnreachableInst&) {
+  // Nothing to do here
+}
 
 void LLVMBackend::add(const llvm::Argument& arg, const std::string& name) {
   // We could look for dereferenceable bytes in the argument and then display
@@ -820,7 +847,7 @@ void LLVMBackend::addIfThenGoto(const std::string& name,
   if(not labels.contains(name))
     labels[name] = createLabelDecl(funcs.at(br.getParent()->getParent()), name);
 
-  Stmt* stmt = createCompoundStmt(createGoto(labels.at(name)));
+  Stmt* stmt = createCompoundStmt(createGotoStmt(labels.at(name)));
   Expr* cond = &get<Expr>(br.getCondition());
   if(invert)
     cond = createUnaryOperator(*cond, UO_LNot, cond->getType());
@@ -846,6 +873,54 @@ void LLVMBackend::addEndlessLoop() {
   Stmt* body = stmts.top().pop_back();
   BackendBase::add(
       createDoStmt(body, *createBoolLiteral(true, astContext.BoolTy)));
+}
+
+void LLVMBackend::addSwitchStmt(const llvm::SwitchInst& sw) {
+  BackendBase::add(createSwitchStmt(get<Expr>(sw.getCondition())));
+}
+
+void LLVMBackend::addSwitchCase(const llvm::ConstantInt* value) {
+  Stmt* body = stmts.top().pop_back();
+  SwitchCase* newCase = nullptr;
+  if(value) {
+    CaseStmt* kase = createCaseStmt(get<Expr>(*value));
+    kase->setSubStmt(body);
+    newCase = kase;
+  } else {
+    newCase = createDefaultStmt(body);
+  }
+
+  // Calling SwitchStmt->addSwitchCase() ends up with the newly added case
+  // becoming the first case in the switch statement. Better to maintain the
+  // order here
+  auto* stmt = cast<SwitchStmt>(stmts.top().back());
+  clang::SwitchCase* first = stmt->getSwitchCaseList();
+  if(not first) {
+    stmt->addSwitchCase(newCase);
+  } else {
+    clang::SwitchCase* last = first;
+    while(last->getNextSwitchCase())
+      last = last->getNextSwitchCase();
+    last->setNextSwitchCase(newCase);
+  }
+}
+
+void LLVMBackend::addSwitchCase(const llvm::ConstantInt& value) {
+  addSwitchCase(&value);
+}
+
+void LLVMBackend::addSwitchDefault() {
+  addSwitchCase(nullptr);
+}
+
+void LLVMBackend::addGoto(const llvm::BasicBlock& bb) {
+  BackendBase::add(createGotoStmt(blocks.at(&bb)));
+}
+
+void LLVMBackend::addGoto(const std::string& dest, const llvm::Function& f) {
+  if(not labels.contains(dest))
+    labels[dest] = createLabelDecl(funcs.at(&f), dest);
+  BackendBase::add(createGotoStmt(labels.at(dest)));
 }
 
 bool LLVMBackend::has(llvm::Type* type) const {

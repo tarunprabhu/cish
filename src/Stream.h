@@ -1,8 +1,6 @@
 #ifndef CISH_STREAM_H
 #define CISH_STREAM_H
 
-#include "FormatOptions.h"
-
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/ExprCXX.h>
 
@@ -13,7 +11,6 @@ namespace cish {
 class Stream {
 protected:
   const clang::ASTContext& astContext;
-  const FormatOptions& fmtOpts;
   llvm::raw_ostream& os;
 
   std::string tabStr;
@@ -35,10 +32,10 @@ protected:
   bool isDoubleTy(const clang::Type*) const;
   bool isLongDoubleTy(const clang::Type*) const;
 
+  Stream& doCompoundStmt(const clang::CompoundStmt* stmt, bool block);
+
 public:
-  Stream(const clang::ASTContext& astContext,
-         const FormatOptions& fmtOpts,
-         llvm::raw_ostream& os);
+  Stream(const clang::ASTContext& astContext, llvm::raw_ostream& os);
 
   Stream& tab();
   Stream& endl();
@@ -84,7 +81,6 @@ public:
   Stream& operator<<(const clang::CompoundStmt*);
   Stream& operator<<(const clang::LabelStmt*);
   Stream& operator<<(const clang::GotoStmt*);
-  Stream& operator<<(const clang::IfStmt*);
   Stream& operator<<(const clang::ReturnStmt*);
   Stream& operator<<(const clang::BinaryOperator*);
   Stream& operator<<(const clang::UnaryOperator*);
@@ -97,6 +93,10 @@ public:
   Stream& operator<<(const clang::DoStmt*);
   Stream& operator<<(const clang::BreakStmt*);
   Stream& operator<<(const clang::ContinueStmt*);
+  Stream& operator<<(const clang::IfStmt*);
+  Stream& operator<<(const clang::SwitchStmt*);
+  Stream& operator<<(const clang::CaseStmt*);
+  Stream& operator<<(const clang::DefaultStmt*);
 
   Stream& operator<<(const clang::CXXBoolLiteralExpr*);
   Stream& operator<<(const clang::CharacterLiteral*);

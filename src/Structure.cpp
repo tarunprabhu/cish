@@ -1,5 +1,6 @@
 #include "Structure.h"
 #include "Diagnostics.h"
+#include "Map.h"
 
 #include <llvm/Support/raw_ostream.h>
 
@@ -27,6 +28,8 @@ StringRef StructNode::getKindName() const {
     return "Sequence";
   case S_LoopHeader:
     return "Header";
+  case S_LoopLatch:
+    return "Latch";
   case S_Label:
     return "Label";
   case S_IfThen:
@@ -39,8 +42,10 @@ StringRef StructNode::getKindName() const {
     return "IfThenGoto";
   case S_EndlessLoop:
     return "EndlessLoop";
-  case S_NaturalLoop:
-    return "NaturalLoop";
+  case S_ForLoop:
+    return "ForLoop";
+  case S_SimplifiedLoop:
+    return "SimplifiedLoop";
   case S_Switch:
     return "Switch";
   default:
@@ -48,7 +53,8 @@ StringRef StructNode::getKindName() const {
   };
 }
 
-StructNode& StructNode::addPredecessor(long kase, StructNode& pred) {
+StructNode& StructNode::addPredecessor(const ConstantInt* kase,
+                                       StructNode& pred) {
   if(not hasPredecessor(pred)) {
     in.push_back(&pred);
     pred.addSuccessor(kase, *this);
@@ -56,9 +62,21 @@ StructNode& StructNode::addPredecessor(long kase, StructNode& pred) {
   return *this;
 }
 
-StructNode& StructNode::addSuccessor(long kase, StructNode& succ) {
-  if(not hasSuccessor(succ)) {
-    out.emplace(kase, &succ);
+StructNode& StructNode::addSuccessor(const ConstantInt* kase,
+                                     StructNode& succ) {
+  bool hasSuccessor = false;
+  if(not kase) {
+    for(const Edge& e : out)
+      if((not e.first) and (*e.second == succ))
+        hasSuccessor = true;
+  } else {
+    for(const Edge& e : out)
+      if(e.first and (e.first->getLimitedValue() == kase->getLimitedValue())
+         and (*e.second == succ))
+        hasSuccessor = true;
+  }
+  if(not hasSuccessor) {
+    out.emplace_back(kase, &succ);
     succ.addPredecessor(kase, *this);
   }
 
@@ -103,7 +121,7 @@ unsigned long StructNode::getId() const {
   return (unsigned long)this;
 }
 
-long StructNode::getSuccessorCase(const StructNode& succ) const {
+const ConstantInt* StructNode::getSuccessorCase(const StructNode& succ) const {
   for(auto i = out.begin(); i != out.end(); i++)
     if(*i->second == succ)
       return i->first;
@@ -118,8 +136,8 @@ bool StructNode::hasPredecessor(const StructNode& pred) const {
 }
 
 bool StructNode::hasSuccessor(const StructNode& succ) const {
-  for(StructNode* node : out.values())
-    if(*node == succ)
+  for(StructNode& node : successors())
+    if(node == succ)
       return true;
   return false;
 }
@@ -144,22 +162,34 @@ StructNode& StructNode::getPredecessorAt(size_t n) const {
 
 StructNode& StructNode::getSuccessor() const {
   if(out.size() != 1)
-    fatal(error() << "No unique successor: " << out.size());
+    fatal(error() << "No unique successor for " << getId() << ": "
+                  << out.size());
   return *out.begin()->second;
 }
 
-StructNode& StructNode::getSuccessor(long kase) const {
-  return *out.at(kase);
+StructNode& StructNode::getSuccessor(const ConstantInt* kase) const {
+  if(not kase) {
+    for(const std::pair<const ConstantInt*, StructNode*>& p : out)
+      if(not p.first)
+        return *p.second;
+  } else {
+    for(const std::pair<const ConstantInt*, StructNode*>& p : out)
+      if(p.first->getLimitedValue() == kase->getLimitedValue())
+        return *p.second;
+  }
+  fatal(error() << "No successor for " << *kase << " in " << getId());
 }
 
-Vector<std::pair<long, StructNode*>> StructNode::getIncoming() const {
-  Vector<std::pair<long, StructNode*>> ret;
+Vector<std::pair<const ConstantInt*, StructNode*>>
+StructNode::getIncoming() const {
+  Vector<std::pair<const ConstantInt*, StructNode*>> ret;
   for(StructNode* pred : in)
     ret.emplace_back(pred->getSuccessorCase(*this), pred);
   return ret;
 }
 
-const Map<long, StructNode*>& StructNode::getOutgoing() const {
+const Vector<std::pair<const ConstantInt*, StructNode*>>&
+StructNode::getOutgoing() const {
   return out;
 }
 
@@ -168,12 +198,14 @@ Vector<StructNode*> StructNode::getPredecessors() const {
 }
 
 Vector<StructNode*> StructNode::getSuccessors() const {
-  return Vector<StructNode*>(out.values().begin(), out.values().end());
+  Vector<StructNode*> ret;
+  for(const auto& i : out)
+    ret.push_back(i.second);
+  return ret;
 }
 
 iterator_range<StructNode::const_edge_iterator> StructNode::outgoing() const {
-  return iterator_range<const_edge_iterator>(out.values().begin(),
-                                             out.values().end());
+  return iterator_range<const_edge_iterator>(out.begin(), out.end());
 }
 
 iterator_range<StructNode::const_pred_iterator>
@@ -182,8 +214,8 @@ StructNode::predecessors() const {
 }
 
 iterator_range<StructNode::const_succ_iterator> StructNode::successors() const {
-  return iterator_range<const_succ_iterator>(out.values().begin(),
-                                             out.values().end());
+  return iterator_range<const_succ_iterator>(const_succ_iterator(out.begin()),
+                                             const_succ_iterator(out.end()));
 }
 
 bool StructNode::operator==(const StructNode& other) const {
@@ -255,12 +287,14 @@ const StructNode& IfThenElse::getElse() const {
   return els;
 }
 
-IfThenBreak::IfThenBreak(StructNode& exit,
-                         const BranchInst& br,
-                         unsigned loopDepth)
+IfThenBreak::IfThenBreak(StructNode& exit, const BranchInst& br, bool invert)
     : StructNode(StructNode::S_IfThenBreak), exit(exit), br(br),
-      loopDepth(loopDepth) {
+      invert(invert) {
   ;
+}
+
+bool IfThenBreak::isInverted() const {
+  return invert;
 }
 
 StructNode& IfThenBreak::getExit() {
@@ -287,10 +321,6 @@ const StructNode& IfThenBreak::getContinue() const {
 
 const BranchInst& IfThenBreak::getLLVMBranchInst() const {
   return br;
-}
-
-unsigned IfThenBreak::getLoopDepth() const {
-  return loopDepth;
 }
 
 Label::Label(const std::string& name)
@@ -332,8 +362,66 @@ unsigned LoopHeader::getLoopDepth() const {
   return loopDepth;
 }
 
-Switch::Switch() : StructNode(StructNode::S_Switch) {
+LoopLatch::LoopLatch(const BasicBlock& block)
+    : StructNode(S_LoopLatch), block(block) {
   ;
+}
+
+const BasicBlock& LoopLatch::getBlock() const {
+  return block;
+}
+
+Switch::Case::Case(const ConstantInt& value, StructNode* dest, bool fallthrough)
+    : value(value), dest(dest), fallthrough(fallthrough) {
+  ;
+}
+
+const ConstantInt& Switch::Case::getValue() const {
+  return value;
+}
+
+const StructNode& Switch::Case::getBody() const {
+  return *dest;
+}
+
+bool Switch::Case::isEmpty() const {
+  return not dest;
+}
+
+bool Switch::Case::isFallthrough() const {
+  return fallthrough;
+}
+
+Switch::Switch(const SwitchInst& sw,
+               const Vector<Case>& cases,
+               StructNode* deflt)
+    : StructNode(StructNode::S_Switch), sw(sw), deflt(deflt) {
+  // The order of the edges in the graph may have been changed during the
+  // reduction. But keep to the order in the LLVM instruction
+  Map<const ConstantInt*, const Case*> cmap;
+  for(const Case& kase : cases)
+    cmap[&kase.getValue()] = &kase;
+  for(const auto& i : sw.cases()) {
+    const ConstantInt* c = i.getCaseValue();
+    if(cmap.contains(c))
+      this->cases.push_back(*cmap[i.getCaseValue()]);
+  }
+}
+
+const SwitchInst& Switch::getLLVM() const {
+  return sw;
+}
+
+bool Switch::hasDefault() const {
+  return deflt;
+}
+
+const StructNode& Switch::getDefault() const {
+  return *deflt;
+}
+
+const Vector<Switch::Case>& Switch::getCases() const {
+  return cases;
 }
 
 LoopBase::LoopBase(StructNode::Kind kind, StructNode& header)
@@ -363,8 +451,26 @@ EndlessLoop::EndlessLoop(StructNode& header)
     nodes.push_back(&node);
 }
 
-NaturalLoop::NaturalLoop(LoopHeader& header, const List<IfThenBreak*>& exits)
-    : LoopBase(StructNode::S_NaturalLoop, header), exits(exits) {
+ForLoop::ForLoop(LoopHeader& header, IfThenBreak& brk, LoopLatch& latch)
+    : LoopBase(StructNode::S_ForLoop, header), brk(brk), latch(latch) {
+  ;
+}
+
+const BranchInst& ForLoop::getLLVMBranchInst() const {
+  return brk.getLLVMBranchInst();
+}
+
+bool ForLoop::isInverted() const {
+  return brk.isInverted();
+}
+
+const LoopLatch& ForLoop::getLatch() const {
+  return latch;
+}
+
+SimplifiedLoop::SimplifiedLoop(LoopHeader& header,
+                               const List<IfThenBreak*>& exits)
+    : LoopBase(StructNode::S_SimplifiedLoop, header), exits(exits) {
   StructNode* curr = &header;
   do {
     nodes.push_back(curr);
@@ -375,7 +481,7 @@ NaturalLoop::NaturalLoop(LoopHeader& header, const List<IfThenBreak*>& exits)
   } while(curr != &header);
 }
 
-const List<IfThenBreak*>& NaturalLoop::getExits() const {
+const List<IfThenBreak*>& SimplifiedLoop::getExits() const {
   return exits;
 }
 

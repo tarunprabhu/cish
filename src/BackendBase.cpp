@@ -1,14 +1,15 @@
 #include "BackendBase.h"
 #include "CishContext.h"
 #include "LLVMUtils.h"
+#include "Options.h"
 
 using namespace clang;
 
 namespace cish {
 
 BackendBase::BackendBase(CishContext& context)
-    : varPrefix(context.getFormatOptions().prefix), varSuffix(0),
-      context(context), astContext(context.getASTContext()) {
+    : varPrefix(opts().prefix), varSuffix(0), context(context),
+      astContext(context.getASTContext()) {
   ;
 }
 

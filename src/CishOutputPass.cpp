@@ -44,9 +44,8 @@ void CishOutputPass::run(llvm::raw_ostream& os) {
   const cish::CishContext& context
       = getAnalysis<CishContextWrapperPass>().getCishContext();
   clang::ASTContext& astContext = context.getASTContext();
-  const cish::FormatOptions& fmtOpts = context.getFormatOptions();
 
-  cish::Stream stream(astContext, fmtOpts, os);
+  cish::Stream stream(astContext, os);
 
   cish::Vector<const clang::RecordDecl*> structs;
   cish::Vector<const clang::VarDecl*> globals;

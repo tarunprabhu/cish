@@ -1,6 +1,7 @@
 #include "Stream.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
+#include "Options.h"
 
 #include <sstream>
 
@@ -23,14 +24,12 @@ static std::string formatArrayDims(const ConstantArrayType* aty) {
   return ss.str();
 }
 
-Stream::Stream(const clang::ASTContext& astContext,
-               const FormatOptions& fmtOpts,
-               llvm::raw_ostream& os)
-    : astContext(astContext), fmtOpts(fmtOpts), os(os), ilevel(0) {
-  if(fmtOpts.offset == 0)
+Stream::Stream(const clang::ASTContext& astContext, llvm::raw_ostream& os)
+    : astContext(astContext), os(os), ilevel(0) {
+  if(opts().indentOffset == 0)
     tabStr = "\t";
   else
-    for(unsigned i = 0; i < fmtOpts.offset; i++)
+    for(unsigned i = 0; i < opts().indentOffset; i++)
       tabStr.append(" ");
 }
 
@@ -71,21 +70,21 @@ bool Stream::isLongDoubleTy(const Type* type) const {
 }
 
 bool Stream::shouldPrintCast(const Type* type) const {
-  if(fmtOpts.has(StripCasts::All)) {
+  if(opts().has(StripCasts::All)) {
     return false;
-  } else if(fmtOpts.has(StripCasts::Never)) {
+  } else if(opts().has(StripCasts::Never)) {
     return true;
   } else if(const auto* pty = dyn_cast<PointerType>(type)) {
     if(isa<FunctionProtoType>(pty->getPointeeType()))
-      return not fmtOpts.has(StripCasts::Function);
+      return not opts().has(StripCasts::Function);
     else if(isa<VectorType>(pty->getPointeeType()))
-      return not fmtOpts.has(StripCasts::Vector);
+      return not opts().has(StripCasts::Vector);
     else
-      return not fmtOpts.has(StripCasts::Pointer);
+      return not opts().has(StripCasts::Pointer);
   } else if(type->isScalarType()) {
-    return not fmtOpts.has(StripCasts::Scalar);
+    return not opts().has(StripCasts::Scalar);
   } else if(isa<VectorType>(type)) {
-    return not fmtOpts.has(StripCasts::Vector);
+    return not opts().has(StripCasts::Vector);
   }
   return true;
 }
@@ -95,8 +94,18 @@ bool Stream::shouldPrintCast(QualType type) const {
 }
 
 Stream& Stream::parenthetize(const Stmt* stmt) {
-  if(fmtOpts.parens == Parens::Smart) {
-    if(isa<BinaryOperator>(stmt) or isa<ConditionalOperator>(stmt))
+  if(opts().parens == Parens::Smart) {
+    if(const auto* op = dyn_cast<BinaryOperator>(stmt))
+      switch(op->getOpcode()) {
+      case BO_Assign:
+      case BO_PtrMemD:
+      case BO_PtrMemI:
+      case BO_Comma:
+        return *this << stmt;
+      default:
+        return *this << "(" << stmt << ")";
+      }
+    else if(isa<ConditionalOperator>(stmt))
       *this << "(" << stmt << ")";
     else
       *this << stmt;
@@ -131,7 +140,7 @@ Stream& Stream::endst(bool newl) {
 }
 
 Stream& Stream::beginBlock(const std::string& label) {
-  switch(fmtOpts.indentation) {
+  switch(opts().indentStyle) {
   case IndentStyle::KR:
   case IndentStyle::Stroustrup:
     space();
@@ -429,6 +438,12 @@ Stream& Stream::operator<<(const Stmt* stmt) {
     *this << whileStmt;
   else if(const auto* forStmt = dyn_cast<ForStmt>(stmt))
     *this << forStmt;
+  else if(const auto* swStmt = dyn_cast<SwitchStmt>(stmt))
+    *this << swStmt;
+  else if(const auto* caseStmt = dyn_cast<CaseStmt>(stmt))
+    *this << caseStmt;
+  else if(const auto* defltStmt = dyn_cast<DefaultStmt>(stmt))
+    *this << defltStmt;
   else if(const auto* breakStmt = dyn_cast<BreakStmt>(stmt))
     *this << breakStmt;
   else if(const auto* continueStmt = dyn_cast<ContinueStmt>(stmt))
@@ -623,7 +638,7 @@ Stream& Stream::operator<<(const UnaryOperator* unOp) {
     // and although dirty, should work
     std::string buf;
     llvm::raw_string_ostream ss(buf);
-    Stream stream(astContext, fmtOpts, ss);
+    Stream stream(astContext, ss);
     stream << unOp->getSubExpr();
     ss.flush();
     if(buf.size() and (buf[0] == '&'))
@@ -697,10 +712,62 @@ Stream& Stream::operator<<(const ContinueStmt*) {
   return *this << "continue";
 }
 
+Stream& Stream::operator<<(const CaseStmt* kase) {
+  // The case and default statements was created with a compound statement.
+  // Although it is correct to use it, it's cleaner not to.
+  // The only reason to use it at all would be to support declaring variables
+  // "near" their actual definition, but that's not done now
+  *this << tab() << "case " << kase->getLHS() << ":" << endl();
+  ilevel += 1;
+  if(const auto* stmt = dyn_cast<CompoundStmt>(kase->getSubStmt()))
+    doCompoundStmt(stmt, false);
+  else
+    fatal(error() << "Expected compound statement in switch case: Got "
+                  << kase->getSubStmt()->getStmtClassName());
+  ilevel -= 1;
+
+  return *this;
+}
+
+Stream& Stream::operator<<(const DefaultStmt* deflt) {
+  // The case and default statements was created with a compound statement.
+  // Although it is correct to use it, it's cleaner not to.
+  // The only reason to use it at all would be to support declaring variables
+  // "near" their actual definition, but that's not done now
+  *this << tab() << "default:" << endl();
+  ilevel += 1;
+  if(const auto* stmt = dyn_cast<CompoundStmt>(deflt->getSubStmt()))
+    doCompoundStmt(stmt, false);
+  else
+    fatal(error() << "Expected compound statement in switch default: Got "
+                  << deflt->getSubStmt()->getStmtClassName());
+  ilevel -= 1;
+
+  return *this;
+}
+
+Stream& Stream::operator<<(const SwitchStmt* sw) {
+  *this << "switch(" << sw->getCond() << ")" << beginBlock();
+
+  for(const clang::SwitchCase* i = sw->getSwitchCaseList(); i;
+      i = i->getNextSwitchCase())
+    if(const auto* kase = dyn_cast<CaseStmt>(i))
+      *this << kase;
+
+  for(const clang::SwitchCase* i = sw->getSwitchCaseList(); i;
+      i = i->getNextSwitchCase())
+    if(const auto* deflt = dyn_cast<DefaultStmt>(i))
+      *this << deflt;
+
+  *this << endBlock();
+
+  return *this;
+}
+
 Stream& Stream::operator<<(const IfStmt* ifStmt) {
   *this << "if (" << ifStmt->getCond() << ")" << ifStmt->getThen();
   if(const Stmt* then = ifStmt->getElse()) {
-    switch(fmtOpts.indentation) {
+    switch(opts().indentStyle) {
     case IndentStyle::KR:
       *this << " else";
       break;
@@ -729,32 +796,42 @@ Stream& Stream::operator<<(const DeclStmt* declStmt) {
   return *this;
 }
 
-Stream& Stream::operator<<(const CompoundStmt* compoundStmt) {
-  beginBlock();
-  for(Stmt* stmt : compoundStmt->body()) {
+Stream& Stream::doCompoundStmt(const CompoundStmt* stmt, bool block) {
+  if(block)
+    beginBlock();
+
+  for(Stmt* stmt : stmt->body()) {
     if(not stmt)
       break;
     if(not isa<LabelStmt>(stmt))
       tab();
     *this << stmt;
     if(isa<IfStmt>(stmt) or isa<ForStmt>(stmt) or isa<WhileStmt>(stmt)
-       or isa<DeclStmt>(stmt)) {
+       or isa<SwitchStmt>(stmt) or isa<DeclStmt>(stmt)) {
+      // Statements that should not have a semicolon at the end
       endl();
     } else if(const auto* label = dyn_cast<LabelStmt>(stmt)) {
+      // Labels definitely don't end with a semicolon
       if(label->getDecl()->getName().size())
         endl();
     } else {
       endst();
     }
   }
-  endBlock();
+
+  if(block)
+    endBlock();
 
   return *this;
 }
 
+Stream& Stream::operator<<(const CompoundStmt* compoundStmt) {
+  return doCompoundStmt(compoundStmt, true);
+}
+
 Stream& Stream::operator<<(const DoStmt* doStmt) {
   *this << "do" << doStmt->getBody();
-  switch(fmtOpts.indentation) {
+  switch(opts().indentStyle) {
   case IndentStyle::KR:
     *this << " while";
     break;

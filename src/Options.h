@@ -1,7 +1,15 @@
-#ifndef CISH_FORMAT_OPTIONS_H
-#define CISH_FORMAT_OPTIONS_H
+#ifndef CISH_OPTIONS_H
+#define CISH_OPTIONS_H
 
 #include <string>
+
+#include <llvm/Support/CommandLine.h>
+
+namespace llvm {
+namespace cl {
+class OptionCategory;
+}
+} // namespace llvm
 
 namespace cish {
 
@@ -32,39 +40,43 @@ enum class Parens {
   Smart,  // Be "smart" about adding parentheses to operands of operators
 };
 
-class FormatOptions {
+class Options {
 private:
-  unsigned ignoreCasts;
+  unsigned stripCasts;
   unsigned annotations;
 
-public:
-  // The prefix string to use for generated variable names
-  std::string prefix;
-  IndentStyle indentation;
-  Parens parens;
-  unsigned offset;
-  bool quiet;
-
-public:
-  FormatOptions();
-  FormatOptions(const FormatOptions&) = delete;
-  FormatOptions(FormatOptions&&) = delete;
-
+private:
   void set(StripCasts cst);
   void set(Annotations ann);
-  bool has(StripCasts cst) const;
-  bool has(Annotations ann) const;
 
 public:
-  static constexpr const char* defPrefix = "_";
-  static constexpr StripCasts defStripCasts = StripCasts::Never;
-  static constexpr Annotations defAnnotations = Annotations::None;
-  static constexpr IndentStyle defIndentStyle = IndentStyle::KR;
-  static constexpr Parens defParens = Parens::Smart;
-  static constexpr unsigned defOffset = 4;
-  static constexpr bool defQuiet = false;
+  std::string fileIn;
+  std::string fileOut;
+
+  // The prefix string to use for generated variable names
+  std::string prefix;
+  IndentStyle indentStyle;
+  unsigned indentOffset;
+  Parens parens;
+  bool verbose;
+  bool log;
+  std::string logDir;
+
+public:
+  Options();
+  Options(const Options&) = delete;
+  Options(Options&&) = delete;
+
+  bool has(StripCasts cst) const;
+  bool has(Annotations ann) const;
 };
+
+// Exposes the singular global object containing the parsed command line
+// parameters
+const Options& opts();
+bool isOpt(const llvm::cl::Option& cat);
+void parseOpts();
 
 } // namespace cish
 
-#endif // CISH_FORMAT_OPTIONS_H
+#endif // CISH_OPTIONS_H

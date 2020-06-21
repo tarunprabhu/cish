@@ -1,3 +1,4 @@
+#include "CishCmdLineFlags.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
 #include "LLVMBackend.h"
@@ -27,6 +28,7 @@ StringRef CishModulePass::getPassName() const {
 }
 
 void CishModulePass::getAnalysisUsage(AnalysisUsage& AU) const {
+  AU.addRequired<SourceInfoWrapperPass>();
   AU.addRequired<CishContextWrapperPass>();
   AU.setPreservesAll();
 }
@@ -42,11 +44,37 @@ static bool isMetadataFunction(const Function& f) {
 }
 
 bool CishModulePass::runOnModule(Module& m) {
+  cish::message() << "Running " << getPassName() << "\n";
+
+  const cish::SourceInfo& si
+      = getAnalysis<SourceInfoWrapperPass>().getSourceInfo();
   const cish::CishContext& context
       = getAnalysis<CishContextWrapperPass>().getCishContext();
-  const cish::SourceInfo& si = context.getSourceInfo();
   cish::LLVMFrontend& fe = context.getLLVMFrontend();
   cish::LLVMBackend& be = context.getLLVMBackend();
+
+
+  if(cish::opts().log) {
+    std::string buf;
+    raw_string_ostream filename(buf);
+    if(cish::opts().logDir.size())
+      filename << cish::opts().logDir << "/";
+    std::string file = m.getSourceFileName();
+    size_t start = file.rfind('/');
+    size_t end = file.rfind('.');
+    if(start == std::string::npos)
+      start = 0;
+    filename << file.substr(start, end - start) << ".prepared.ll";
+    std::error_code ec;
+    raw_fd_ostream fs(filename.str(), ec);
+    if(not ec) {
+      fs << m << "\n";
+      fs.close();
+      cish::message() << "Wrote prepare LLVM IR to " << filename.str() << "\n";
+    } else {
+      cish::warning() << "Could not write to log file " << filename.str() << "\n";
+    }
+  }
 
   // First find anything that we know are never going to be
   // converted. These would be any LLVM debug and lifetime intrinsics but

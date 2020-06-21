@@ -1,26 +1,16 @@
 #include "CishContext.h"
-#include "CishCmdLineFlags.h"
+#include "Diagnostics.h"
 
 using namespace llvm;
 
 namespace cish {
 
-CishContext::CishContext(const Module& m)
-    : llvmContext(m.getContext()), si(m), fileMgr(fileOpts),
+CishContext::CishContext(const Module& m, const SourceInfo& si)
+    : llvmContext(m.getContext()), fileMgr(fileOpts),
       diagIDs(new clang::DiagnosticIDs()),
       diagOpts(new clang::DiagnosticOptions()), diagEngine(diagIDs, diagOpts),
       srcMgr(diagEngine, fileMgr), targetOpts(new clang::TargetOptions()),
       targetInfo() {
-  fmtOpts.prefix = optPrefix;
-  fmtOpts.indentation = optIndentStyle;
-  fmtOpts.parens = optParens;
-  fmtOpts.offset = optOffset;
-  fmtOpts.quiet = optQuiet;
-  for(StripCasts cst : optStripCasts)
-    fmtOpts.set(cst);
-  for(Annotations ann : optAnnotations)
-    fmtOpts.set(ann);
-
   langOpts.CPlusPlus11 = true;
   langOpts.Bool = true;
 
@@ -33,7 +23,7 @@ CishContext::CishContext(const Module& m)
       new clang::ASTContext(langOpts, srcMgr, *idents, sels, builtins));
   astContext->InitBuiltinTypes(*targetInfo);
   be.reset(new LLVMBackend(*this));
-  fe.reset(new LLVMFrontend(*this));
+  fe.reset(new LLVMFrontend(*this, si));
 }
 
 LLVMContext& CishContext::getLLVMContext() const {
@@ -52,14 +42,6 @@ LLVMBackend& CishContext::getLLVMBackend() const {
   return *be;
 }
 
-const FormatOptions& CishContext::getFormatOptions() const {
-  return fmtOpts;
-}
-
-const SourceInfo& CishContext::getSourceInfo() const {
-  return si;
-}
-
 } // namespace cish
 
 CishContextWrapperPass::CishContextWrapperPass()
@@ -72,6 +54,7 @@ StringRef CishContextWrapperPass::getPassName() const {
 }
 
 void CishContextWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
+  AU.addRequired<SourceInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
@@ -80,7 +63,12 @@ const cish::CishContext& CishContextWrapperPass::getCishContext() const {
 }
 
 bool CishContextWrapperPass::runOnModule(Module& m) {
-  context.reset(new cish::CishContext(m));
+  cish::message() << "Running " << getPassName() << "\n";
+
+  const cish::SourceInfo& si
+      = getAnalysis<SourceInfoWrapperPass>().getSourceInfo();
+
+  context.reset(new cish::CishContext(m, si));
 
   return false;
 }

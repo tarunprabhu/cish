@@ -6,6 +6,7 @@
 
 namespace cish {
 
+llvm::WithColor message(llvm::raw_ostream& = llvm::outs());
 llvm::WithColor warning(llvm::raw_ostream& = llvm::errs());
 llvm::WithColor error(llvm::raw_ostream& = llvm::errs());
 [[noreturn]] void fatal(llvm::raw_ostream& = llvm::errs());

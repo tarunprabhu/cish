@@ -1,13 +1,13 @@
 #ifndef CISH_CISH_CONTEXT_H
 #define CISH_CISH_CONTEXT_H
 
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Pass.h>
 
 #include <clang/AST/ASTContext.h>
 #include <clang/Basic/Builtins.h>
 
-#include "FormatOptions.h"
 #include "LLVMBackend.h"
 #include "LLVMFrontend.h"
 #include "SourceInfo.h"
@@ -20,7 +20,6 @@ class CishContext {
 private:
   llvm::LLVMContext& llvmContext;
 
-  SourceInfo si;
   clang::FileSystemOptions fileOpts;
   clang::FileManager fileMgr;
   clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagIDs;
@@ -35,13 +34,12 @@ private:
   std::shared_ptr<clang::TargetInfo> targetInfo;
 
 protected:
-  FormatOptions fmtOpts;
   std::unique_ptr<clang::ASTContext> astContext;
   std::unique_ptr<LLVMFrontend> fe;
   std::unique_ptr<LLVMBackend> be;
 
 public:
-  CishContext(const llvm::Module& m);
+  CishContext(const llvm::Module& m, const SourceInfo& si);
   CishContext(const CishContext&) = delete;
   CishContext(CishContext&&) = delete;
 
@@ -49,8 +47,6 @@ public:
   clang::ASTContext& getASTContext() const;
   cish::LLVMFrontend& getLLVMFrontend() const;
   cish::LLVMBackend& getLLVMBackend() const;
-  const cish::SourceInfo& getSourceInfo() const;
-  const cish::FormatOptions& getFormatOptions() const;
 };
 
 } // namespace cish

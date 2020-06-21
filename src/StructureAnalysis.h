@@ -10,6 +10,12 @@ namespace cish {
 
 class StructureAnalysis;
 
+enum class StructureKind {
+  Unstructured,
+  SemiStructured,
+  Structured,
+};
+
 } // namespace cish
 
 class StructureAnalysisWrapperPass : public llvm::FunctionPass {
@@ -17,13 +23,13 @@ public:
   static char ID;
 
 private:
-  bool structured;
+  cish::StructureKind structureKind;
   std::unique_ptr<cish::StructureAnalysis> ctree;
 
 public:
   StructureAnalysisWrapperPass();
 
-  bool isStructured() const;
+  cish::StructureKind getStructureKind() const;
   const cish::StructNode& getStructured() const;
 
   virtual llvm::StringRef getPassName() const override;

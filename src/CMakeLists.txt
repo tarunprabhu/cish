@@ -4,15 +4,14 @@ set(SOURCES
   CishContext.cpp
   CishFunctionPass.cpp
   CishModulePass.cpp
-  CishCmdLineFlags.cpp
   CishOutputPass.cpp
   CishPreparePass.cpp
   ClangUtils.cpp
   Diagnostics.cpp
-  FormatOptions.cpp
   LLVMBackend.cpp
   LLVMFrontend.cpp
   LLVMUtils.cpp
+  Options.cpp
   SourceInfo.cpp
   Stream.cpp
   Structure.cpp

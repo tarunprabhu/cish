@@ -1,6 +1,8 @@
 #include "StructureAnalysis.h"
+#include "CishContext.h"
 #include "Diagnostics.h"
 #include "Map.h"
+#include "Options.h"
 #include "Structure.h"
 
 #include <llvm/Analysis/LoopInfo.h>
@@ -8,6 +10,8 @@
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/Support/WithColor.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 
@@ -19,8 +23,9 @@ namespace cish {
 // its sole successor
 class Entry : protected StructNode {
 public:
-  Entry(StructNode& entry) : StructNode(StructNode::S_Entry) {
-    addSuccessor(true, entry);
+  Entry(LLVMContext& llvmContext, StructNode& entry)
+      : StructNode(StructNode::S_Entry) {
+    addSuccessor(ConstantInt::getTrue(llvmContext), entry);
   }
   virtual ~Entry() = default;
 
@@ -31,14 +36,16 @@ public:
 
 class StructureAnalysis {
 private:
+  LLVMContext& llvmContext;
+  const Function& func;
   const LoopInfo& li;
-  const DominatorTree& dt;
-  const PostDominatorTree& pdt;
 
+  unsigned reductions;
   unsigned labelId;
   std::unique_ptr<Entry> root;
   List<std::unique_ptr<StructNode>> nodes;
   Map<const BasicBlock*, StructNode*> nodeMap;
+  raw_null_ostream nullStream;
 
 private:
   template <
@@ -65,18 +72,16 @@ private:
   List<StructNode*> dfs(StructNode& node) const;
 
   bool reduceEndlessLoop(StructNode& header);
-  bool reduceNaturalLoop(LoopHeader& header, const List<IfThenBreak*>& exits);
+  bool reduceSimplifiedLoop(LoopHeader& header,
+                            const List<IfThenBreak*>& exits);
   bool reduceSequence(const List<StructNode*>& nodes);
-  bool reduceIfThen(Block& cond,
-                    StructNode& thn,
-                    StructNode& succ,
-                    bool invert = false);
+  bool reduceIfThen(Block& cond, StructNode& thn, StructNode& succ);
   bool reduceIfThenElse(Block& cond,
-                        StructNode& thn,
-                        StructNode& els,
+                        StructNode& pi,
+                        StructNode& pj,
                         StructNode& succ);
   bool reduceIfThenGoto(StructNode& dest);
-  bool reduceSwitch();
+  bool reduceSwitch(StructNode::Edges cases, Block& block, StructNode& succ);
 
   bool tryReduce(const List<StructNode*>& postorder);
   bool tryReduceSequence(const List<StructNode*>& postorder);
@@ -84,25 +89,23 @@ private:
   bool tryReduceIfThenElse(const List<StructNode*>& postorder);
   bool tryReduceIfThenGoto(const List<StructNode*>& postorder);
   bool tryReduceEndlessLoop(const List<StructNode*>& postorder);
-  bool tryReduceNaturalLoop(const List<StructNode*>& postorder);
+  bool tryReduceSimplifiedLoop(const List<StructNode*>& postorder);
   bool tryReduceSwitch(const List<StructNode*>& postorder);
 
+  void log(const std::string& = "");
+
 public:
-  StructureAnalysis(const LoopInfo& li,
-                    const DominatorTree& dt,
-                    const PostDominatorTree& pdt);
+  StructureAnalysis(const Function& func, const LoopInfo& li);
   StructureAnalysis(const StructureAnalysis&) = delete;
   StructureAnalysis(const StructureAnalysis&&) = delete;
 
-  void dot(raw_ostream&) const;
   const StructNode& getStructured() const;
-  bool runOnFunction(const Function&);
+  StructureKind runOnFunction(const Function&);
 };
 
-StructureAnalysis::StructureAnalysis(const LoopInfo& li,
-                                     const DominatorTree& dt,
-                                     const PostDominatorTree& pdt)
-    : li(li), dt(dt), pdt(pdt), labelId(0) {
+StructureAnalysis::StructureAnalysis(const Function& func, const LoopInfo& li)
+    : llvmContext(func.getContext()), func(func), li(li), reductions(0),
+      labelId(0) {
   ;
 }
 
@@ -110,35 +113,57 @@ const StructNode& StructureAnalysis::getStructured() const {
   return root->getEntry();
 }
 
-void StructureAnalysis::dot(raw_ostream& os) const {
-  os << "digraph {\n";
+void StructureAnalysis::log(const std::string& tag) {
+  if(not opts().log)
+    return;
 
-  os << "  " << (uint64_t)&root->getEntry() << " [label=\""
-     << root->getEntry().getKindName() << "("
-     << (unsigned long)&root->getEntry() << ")\"]\n";
-  Set<const StructNode*> seen = {&root->getEntry()};
-  List<const StructNode*> wl = {&root->getEntry()};
-  do {
-    List<const StructNode*> next;
-    for(const StructNode* node : wl) {
-      for(const auto& edge : node->outgoing()) {
-        long kase = edge.first;
-        const StructNode& child = *edge.second;
-        uint64_t childId = child.getId();
-        os << "  " << node->getId() << " -> " << childId << " [label=" << kase
-           << "]\n";
-        if(not seen.contains(&child)) {
-          os << "  " << child.getId() << " [label=\"" << child.getKindName()
-             << "(" << child.getId() << ")\"]\n";
-          seen.insert(&child);
-          next.push_back(&child);
+  std::string buf;
+  raw_string_ostream fname(buf);
+  if(opts().logDir.length())
+    fname << opts().logDir << "/";
+  if(tag.length())
+    fname << func.getName() << "." << tag << ".dot";
+  else
+    fname << func.getName() << "." << reductions << ".dot";
+
+  std::error_code ec;
+  raw_fd_ostream fs(fname.str(), ec);
+  if(not ec) {
+
+    fs << "digraph {\n";
+
+    const StructNode& entry = root->getEntry();
+    fs << "  " << entry.getId() << " [label=\"" << entry.getKindName() << "("
+       << entry.getId() << ")\"]\n";
+    Set<const StructNode*> seen = {&root->getEntry()};
+    List<const StructNode*> wl = {&root->getEntry()};
+    do {
+      List<const StructNode*> next;
+      for(const StructNode* node : wl) {
+        for(const auto& edge : node->outgoing()) {
+          const ConstantInt* kase = edge.first;
+          const StructNode& child = *edge.second;
+          uint64_t childId = child.getId();
+          fs << "  " << node->getId() << " -> " << childId << " [label="
+             << (kase ? std::to_string(kase->getLimitedValue())
+                      : std::string("default"))
+             << "]\n";
+          if(not seen.contains(&child)) {
+            fs << "  " << childId << " [label=\"" << child.getKindName() << "("
+               << childId << ")\"]\n";
+            seen.insert(&child);
+            next.push_back(&child);
+          }
         }
       }
-    }
-    wl = std::move(next);
-  } while(wl.size());
+      wl = std::move(next);
+    } while(wl.size());
 
-  os << "}";
+    fs << "}";
+    fs.close();
+  } else {
+    warning() << "Could not write to log file " << fname.str() << "\n";
+  }
 }
 
 void StructureAnalysis::dfs(StructNode& node,
@@ -162,27 +187,27 @@ List<StructNode*> StructureAnalysis::dfs(StructNode& node) const {
 }
 
 bool StructureAnalysis::reduceSequence(const List<StructNode*>& nodes) {
-  errs() << "Reducing Sequence at " << nodes.front()->getId() << " |"
-         << nodes.size() << "|\n";
   StructNode& head = *nodes.front();
   StructNode& tail = *nodes.back();
-  Vector<std::pair<long, StructNode*>> headEdges = head.getIncoming();
-  Map<long, StructNode*> tailEdges = tail.getOutgoing();
+  StructNode::Edges headEdges = head.getIncoming();
+  StructNode::Edges tailEdges = tail.getOutgoing();
   for(StructNode* node : nodes)
     node->disconnect();
 
   Sequence& seq = newNode<Sequence>(nodes);
   for(const auto& i : headEdges) {
-    long kase = i.first;
+    const ConstantInt* kase = i.first;
     StructNode& pred = *i.second;
     pred.addSuccessor(kase, seq);
   }
   for(const auto& i : tailEdges) {
-    long kase = i.first;
+    const ConstantInt* kase = i.first;
     StructNode& succ = *i.second;
     seq.addSuccessor(kase, succ);
   }
 
+  message() << ++reductions << ": Reducing Sequence |" << nodes.size()
+            << "| => " << seq.getId() << "\n";
   return true;
 }
 
@@ -210,10 +235,10 @@ bool StructureAnalysis::tryReduceSequence(const List<StructNode*>& postorder) {
 
 bool StructureAnalysis::reduceIfThen(Block& cond,
                                      StructNode& thn,
-                                     StructNode& succ,
-                                     bool invert) {
-  errs() << "Reducing IfThen at " << cond.getId() << "\n";
-  Vector<std::pair<long, StructNode*>> preds = cond.getIncoming();
+                                     StructNode& succ) {
+  bool invert = cond.getSuccessorCase(thn)->isZero();
+  Vector<std::pair<const ConstantInt*, StructNode*>> preds = cond.getIncoming();
+
   cond.disconnect();
   thn.disconnect();
   succ.removePredecessor(cond);
@@ -221,12 +246,13 @@ bool StructureAnalysis::reduceIfThen(Block& cond,
 
   IfThen& iff = newNode<IfThen>(cond, thn, invert);
   for(auto i : preds) {
-    long kase = i.first;
+    const ConstantInt* kase = i.first;
     StructNode& pred = *i.second;
     pred.addSuccessor(kase, iff);
   }
-  iff.addSuccessor(true, succ);
+  iff.addSuccessor(ConstantInt::getTrue(llvmContext), succ);
 
+  message() << ++reductions << ": Reducing IfThen => " << iff.getId() << "\n";
   return true;
 }
 
@@ -247,27 +273,19 @@ bool StructureAnalysis::tryReduceIfThen(const List<StructNode*>& postorder) {
           StructNode& pj = node->getPredecessorAt(j);
 
           // From the post order, it's not clear which path contains the "then"
-          if((pi.getNumPredecessors() == 1) and (pi.getPredecessor() == pj)) {
+          if((pi.getNumPredecessors() == 1) and (pi.getNumSuccessors() == 1)
+             and (pi.getPredecessor() == pj)) {
             // pi is the "then" block and pj is the condition block
-            // Now, determine whether the condition should be inverted so
-            // the "then" block is always encountered if the condition is true
-            if(auto* cond = dyn_cast<Block>(&pj)) {
-              if(cond->getSuccessorCase(pi))
+            if(auto* cond = dyn_cast<Block>(&pj))
+              if(not isa<SwitchInst>(cond->getLLVM().back()))
                 return reduceIfThen(*cond, pi, *node);
-              else
-                return reduceIfThen(*cond, pi, *node, true);
-            }
-            fatal(error() << "Condition of an IfThen must be a block");
           } else if((pj.getNumPredecessors() == 1)
+                    and (pj.getNumSuccessors() == 1)
                     and (pj.getPredecessor() == pi)) {
             // pj is the "then" block. Do the same as for pi
-            if(auto* cond = dyn_cast<Block>(&pi)) {
-              if(cond->getSuccessorCase(pj))
+            if(auto* cond = dyn_cast<Block>(&pi))
+              if(not isa<SwitchInst>(cond->getLLVM().back()))
                 return reduceIfThen(*cond, pj, *node);
-              else
-                return reduceIfThen(*cond, pj, *node, true);
-            }
-            fatal(error() << "Condition of an IfThen must be a block");
           }
         }
       }
@@ -278,11 +296,13 @@ bool StructureAnalysis::tryReduceIfThen(const List<StructNode*>& postorder) {
 }
 
 bool StructureAnalysis::reduceIfThenElse(Block& cond,
-                                         StructNode& thn,
-                                         StructNode& els,
+                                         StructNode& pi,
+                                         StructNode& pj,
                                          StructNode& succ) {
-  errs() << "Reducing IfThenElse at " << cond.getId() << "\n";
-  Vector<std::pair<long, StructNode*>> preds = cond.getIncoming();
+  StructNode& thn = (cond.getSuccessorCase(pi)->isOne()) ? pi : pj;
+  StructNode& els = (thn == pi) ? pj : pi;
+  Vector<std::pair<const ConstantInt*, StructNode*>> preds = cond.getIncoming();
+
   cond.disconnect();
   thn.disconnect();
   els.disconnect();
@@ -291,12 +311,14 @@ bool StructureAnalysis::reduceIfThenElse(Block& cond,
 
   IfThenElse& iff = newNode<IfThenElse>(cond, thn, els);
   for(auto i : preds) {
-    long kase = i.first;
+    const ConstantInt* kase = i.first;
     StructNode& pred = *i.second;
     pred.addSuccessor(kase, iff);
   }
-  iff.addSuccessor(true, succ);
+  iff.addSuccessor(ConstantInt::getTrue(llvmContext), succ);
 
+  message() << ++reductions << ": Reducing IfThenElse => " << iff.getId()
+            << "\n";
   return true;
 }
 
@@ -317,18 +339,14 @@ bool StructureAnalysis::tryReduceIfThenElse(
     if(n >= 2) {
       for(unsigned i = 0; i < n - 1; i++) {
         for(unsigned j = i + 1; j < n; j++) {
-          StructNode& thn = node->getPredecessorAt(i);
-          StructNode& els = node->getPredecessorAt(j);
-          if((thn.getNumPredecessors() == 1) and (els.getNumPredecessors() == 1)
-             and (thn.getPredecessor() == els.getPredecessor())) {
-            if(auto* cond = dyn_cast<Block>(&thn.getPredecessor())) {
-              if(cond->getSuccessorCase(thn))
-                return reduceIfThenElse(*cond, thn, els, *node);
-              else
-                return reduceIfThenElse(*cond, els, thn, *node);
-            }
-            fatal(error() << "Condition of an IfThenElse must be a block");
-          }
+          StructNode& pi = node->getPredecessorAt(i);
+          StructNode& pj = node->getPredecessorAt(j);
+          if((pi.getNumPredecessors() == 1) and (pi.getNumSuccessors() == 1)
+             and (pj.getNumPredecessors() == 1) and (pj.getNumSuccessors() == 1)
+             and (pi.getPredecessor() == pj.getPredecessor()))
+            if(auto* cond = dyn_cast<Block>(&pi.getPredecessor()))
+              if(not isa<SwitchInst>(cond->getLLVM().back()))
+                return reduceIfThenElse(*cond, pi, pj, *node);
         }
       }
     }
@@ -338,40 +356,43 @@ bool StructureAnalysis::tryReduceIfThenElse(
 }
 
 bool StructureAnalysis::reduceIfThenGoto(StructNode& dest) {
-  errs() << "Reducing to gotos with target: " << dest.getId() << "\n";
-
   // Add a label node as the new target of the IfThenGotos
-  Vector<std::pair<long, StructNode*>> preds = dest.getIncoming();
+  Vector<std::pair<const ConstantInt*, StructNode*>> preds = dest.getIncoming();
   Label& label = newNode<Label>("label_" + std::to_string(labelId++));
   for(const auto& i : preds) {
-    long kase = i.first;
+    const ConstantInt* kase = i.first;
     StructNode& pred = *i.second;
     pred.removeSuccessor(dest);
     pred.addSuccessor(kase, label);
   }
-  label.addSuccessor(true, dest);
+  label.addSuccessor(ConstantInt::getTrue(llvmContext), dest);
 
   for(const auto& i : preds) {
-    long kase = i.first;
     StructNode& pred = *i.second;
     if(pred.getNumSuccessors() == 2) {
-      if(auto* block = dyn_cast<Block>(&pred)) {
-        IfThenGoto& ifg = newNode<IfThenGoto>(label, *block, not kase);
-        Vector<std::pair<long, StructNode*>> preds = block->getIncoming();
-        StructNode& succ = block->getSuccessor(not kase);
+      const ConstantInt* kase = i.first;
+      const ConstantInt* invKase = kase->isZero()
+                                       ? ConstantInt::getTrue(llvmContext)
+                                       : ConstantInt::getFalse(llvmContext);
+      auto* block = cast<Block>(&pred);
 
-        block->disconnect();
-        for(const auto& j : preds) {
-          long kase = j.first;
-          StructNode& pred = *j.second;
-          pred.addSuccessor(kase, ifg);
-        }
-        ifg.addSuccessor(not kase, succ);
-      } else {
-        fatal(error() << "Expected block when reducing goto");
+      IfThenGoto& ifg = newNode<IfThenGoto>(label, *block, kase->isZero());
+      Vector<std::pair<const ConstantInt*, StructNode*>> preds
+          = block->getIncoming();
+      StructNode& succ = block->getSuccessor(invKase);
+
+      block->disconnect();
+      for(const auto& j : preds) {
+        const ConstantInt* kase = j.first;
+        StructNode& pred = *j.second;
+        pred.addSuccessor(kase, ifg);
       }
+      ifg.addSuccessor(invKase, succ);
     }
   }
+
+  message() << ++reductions << ": Reducing to IfThenGoto with target "
+            << dest.getId() << "\n";
 
   return true;
 }
@@ -393,17 +414,19 @@ bool StructureAnalysis::tryReduceIfThenGoto(
   std::reverse(sorted.begin(), sorted.end());
 
   for(StructNode* node : sorted) {
-    if(node->getNumPredecessors() > 2) {
-      bool candidate = true;
+    // Of the predecessors of the node, at least one must be a block with
+    // more than one successor and that predecessor cannot be a switch
+    if(node->getNumPredecessors() >= 2) {
+      bool candidate = not isa<Label>(node);
       unsigned blocks = 0;
-      for(StructNode& pred : node->predecessors()) {
-        if(isa<Block>(pred) and (pred.getNumSuccessors() > 1))
-          blocks += 1;
-        else if(pred.getNumSuccessors() != 1)
-          candidate = false;
+      if(candidate) {
+        for(StructNode& pred : node->predecessors()) {
+          if(isa<Block>(pred) and (pred.getNumSuccessors() == 2))
+            blocks += 1;
+          else if(pred.getNumSuccessors() != 1)
+            candidate = false;
+        }
       }
-      // Of the predecessors of the node, at least one must be a block with
-      // more than one successor
       if(candidate and (blocks > 1))
         return reduceIfThenGoto(*node);
     }
@@ -413,8 +436,6 @@ bool StructureAnalysis::tryReduceIfThenGoto(
 }
 
 bool StructureAnalysis::reduceEndlessLoop(StructNode& node) {
-  errs() << "Reducing endless loop at " << node.getId() << "\n";
-
   StructNode& header = [&]() -> StructNode& {
     if(node.hasSuccessor(node))
       // If this is a single node loop, the header is itself
@@ -430,9 +451,9 @@ bool StructureAnalysis::reduceEndlessLoop(StructNode& node) {
   }();
 
   EndlessLoop& loop = newNode<EndlessLoop>(header);
-  Map<long, StructNode*> preds;
+  Map<const ConstantInt*, StructNode*> preds;
   for(const auto& i : header.getIncoming()) {
-    long kase = i.first;
+    const ConstantInt* kase = i.first;
     StructNode& pred = *i.second;
     if(not loop.isInLoop(pred))
       preds[kase] = &pred;
@@ -443,6 +464,9 @@ bool StructureAnalysis::reduceEndlessLoop(StructNode& node) {
   for(auto i : preds)
     i.second->addSuccessor(i.first, loop);
 
+  message() << ++reductions << ": Reducing endless loop => " << loop.getId()
+            << "\n";
+  ;
   return true;
 }
 
@@ -468,17 +492,10 @@ bool StructureAnalysis::tryReduceEndlessLoop(
   return false;
 }
 
-bool StructureAnalysis::reduceNaturalLoop(LoopHeader& header,
-                                          const List<IfThenBreak*>& exits) {
-  // FIXME: Remove this limitation
-  if(exits.size() > 1) {
-    warning() << "Loops with multiple exits not supported\n";
-    return false;
-  }
-
-  errs() << "Reducing Natural Loop at " << header.getId() << "\n";
-
-  Vector<std::pair<long, StructNode*>> preds = header.getIncoming();
+bool StructureAnalysis::reduceSimplifiedLoop(LoopHeader& header,
+                                             const List<IfThenBreak*>& exits) {
+  Vector<std::pair<const ConstantInt*, StructNode*>> preds
+      = header.getIncoming();
   Vector<StructNode*> succs;
   for(IfThenBreak* exit : exits) {
     StructNode& succ = exit->getExit();
@@ -489,24 +506,26 @@ bool StructureAnalysis::reduceNaturalLoop(LoopHeader& header,
   // The node should be made before disconnecting everything because we need
   // the connections to correctly construct the sequence of nodes in the loop
   // body
-  NaturalLoop& loop = newNode<NaturalLoop>(header, exits);
+  SimplifiedLoop& loop = newNode<SimplifiedLoop>(header, exits);
   header.disconnect();
   for(IfThenBreak* exit : exits)
     exit->disconnect();
 
   for(auto& i : preds) {
-    long kase = i.first;
+    const ConstantInt* kase = i.first;
     StructNode& pred = *i.second;
     if(not loop.isInLoop(pred))
       pred.addSuccessor(kase, loop);
   }
   for(StructNode* succ : succs)
-    loop.addSuccessor(true, *succ);
+    loop.addSuccessor(ConstantInt::getTrue(llvmContext), *succ);
 
+  message() << ++reductions << ": Reducing Simplified Loop => " << loop.getId()
+            << "\n";
   return true;
 }
 
-bool StructureAnalysis::tryReduceNaturalLoop(
+bool StructureAnalysis::tryReduceSimplifiedLoop(
     const List<StructNode*>& postorder) {
   // Find deepest loop
   LoopHeader* header = nullptr;
@@ -518,47 +537,131 @@ bool StructureAnalysis::tryReduceNaturalLoop(
         header = h;
     }
   }
+  if(not header)
+    return false;
 
-  // The natural loop must contain alternating IfThenBreak and other nodes
-  if(header) {
-    List<IfThenBreak*> exits;
-    StructNode* curr = &header->getSuccessor();
-    bool expectingBreak = isa<IfThenBreak>(curr);
-    do {
-      if(expectingBreak) {
-        if(auto* iftb = dyn_cast<IfThenBreak>(curr)) {
-          curr = &iftb->getContinue();
-          exits.push_back(iftb);
-        } else {
-          return false;
-        }
-      } else if(isa<IfThenBreak>(curr)) {
-        return false;
-      } else if(curr->getNumSuccessors() != 1) {
-        return false;
-      } else {
-        curr = &curr->getSuccessor();
-      }
-      expectingBreak = not expectingBreak;
-    } while(curr != header);
+  // Only IfThenBreaks can appear successively in the loop.
+  // Any two non-IfThenBreak nodes must be separated by at least one IfThenBreak
+  // All non-IfThenBreak nodes must have exactly one  successor. If not, it
+  // may be a backedge
+  List<IfThenBreak*> exits;
+  StructNode* curr = &header->getSuccessor();
+  StructNode* prev = header;
+  do {
+    if(auto* iftb = dyn_cast<IfThenBreak>(curr)) {
+      // If the current node is an IfThenBreak, doesn't matter what the previous
+      // one was
+      prev = curr;
+      curr = &iftb->getContinue();
+      exits.push_back(iftb);
+    } else if(not isa<LoopHeader>(prev) and not isa<IfThenBreak>(prev)) {
+      // If the previous node was not the header and it was not an IfThenBreak,
+      // then this is not a natural loop
+      return false;
+    } else if(curr->getNumSuccessors() != 1) {
+      // The current node is not an IfThenBreak, and the previous node was
+      // either the loop header or an IfThenBreak. If this has more than one
+      // successor, one of the successors may be a backedge or else the loop
+      // is not yet reduced. In either case, we cannot reduce it
+      return false;
+    } else {
+      prev = curr;
+      curr = &curr->getSuccessor();
+    }
+  } while(curr != header);
 
-    return reduceNaturalLoop(*header, exits);
+  // The loop may have multiple exiting blocks but it should have a dedicated
+  // exit block
+  if(exits.size()) {
+    StructNode& exit = exits.front()->getExit();
+    for(const IfThenBreak* iftb : exits)
+      if(exit != iftb->getExit())
+        return false;
+    return reduceSimplifiedLoop(*header, exits);
   }
+
   return false;
 }
 
-bool StructureAnalysis::reduceSwitch() {
-  fatal(error() << "NOT IMPLEMENTED: reduceSwitch()\n");
+bool StructureAnalysis::reduceSwitch(StructNode::Edges edges,
+                                     Block& block,
+                                     StructNode& succ) {
+  Vector<std::pair<const ConstantInt*, StructNode*>> preds
+      = block.getIncoming();
+  const auto& switchInst = cast<SwitchInst>(block.getLLVM().back());
+  for(StructNode::Edge& edge : edges) {
+    StructNode& node = *edge.second;
+    if(node != succ)
+      node.disconnect();
+  }
+  block.disconnect();
+
+  Vector<Switch::Case> cases;
+  StructNode* deflt = nullptr;
+  for(const auto& i : edges) {
+    const ConstantInt* value = i.first;
+    StructNode* dest = i.second;
+    if(value)
+      if(*dest != succ)
+        cases.emplace_back(*value, dest, false);
+      else
+        cases.emplace_back(*value, nullptr, false);
+    else if(*dest != succ)
+      deflt = dest;
+  }
+
+  Switch& sw = newNode<Switch>(switchInst, cases, deflt);
+  for(const auto& i : preds) {
+    const ConstantInt* kase = i.first;
+    StructNode& pred = *i.second;
+    pred.addSuccessor(kase, sw);
+  }
+  sw.addSuccessor(ConstantInt::getTrue(llvmContext), succ);
+
+  message() << ++reductions << ": Reducing Switch |" << edges.size() << "| => "
+            << sw.getId() << "\n";
+
+  return true;
+}
+
+static bool isSwitchStrict(const Block& cond, const StructNode& succ) {
+  for(StructNode& body : cond.successors())
+    if(not((body == succ)
+           or ((body.getNumSuccessors() == 1)
+               and (body.getSuccessor() == succ))))
+      return false;
+  return true;
+}
+
+static bool isSwitchFallthrough(const Block& sw, const StructNode& succ) {
+  // FIXME: Implement this
   return false;
 }
 
 bool StructureAnalysis::tryReduceSwitch(const List<StructNode*>& postorder) {
+  for(StructNode* i : postorder) {
+    if(auto* block = dyn_cast<Block>(i)) {
+      if(const auto* sw = dyn_cast<SwitchInst>(&block->getLLVM().back())) {
+        // Because the nodes are visited in postorder, the successor must be
+        // before this the postorder list
+        for(StructNode* j : postorder) {
+          if(j == i)
+            break;
+          if(isSwitchStrict(*block, *j))
+            return reduceSwitch(block->getOutgoing(), *block, *j);
+          else if(isSwitchFallthrough(*block, *j))
+            // FIXME: Support switches with fallthroughs
+            return false;
+        }
+      }
+    }
+  }
   return false;
 }
 
 bool StructureAnalysis::tryReduce(const List<StructNode*>& postorder) {
   // Short-circuits. The order in which each is tried matters to an extent
-  return (tryReduceEndlessLoop(postorder) || tryReduceNaturalLoop(postorder)
+  return (tryReduceEndlessLoop(postorder) || tryReduceSimplifiedLoop(postorder)
           || tryReduceSequence(postorder) || tryReduceSwitch(postorder)
           || tryReduceIfThen(postorder) || tryReduceIfThenElse(postorder)
           || tryReduceIfThenGoto(postorder));
@@ -597,27 +700,7 @@ static List<const BasicBlock*> getBlocksInPostOrder(const Function& f) {
   return blocks;
 }
 
-static void getBlocksInPreOrder(const BasicBlock* bb,
-                                Set<const BasicBlock*>& seen,
-                                List<const BasicBlock*>& blocks) {
-  if(not seen.contains(bb)) {
-    seen.insert(bb);
-    blocks.push_back(bb);
-    for(const BasicBlock* succ : successors(bb))
-      getBlocksInPreOrder(succ, seen, blocks);
-  }
-}
-
-static List<const BasicBlock*> getBlocksInPreOrder(const Function& f) {
-  List<const BasicBlock*> blocks;
-  Set<const BasicBlock*> seen;
-
-  getBlocksInPreOrder(&f.getEntryBlock(), seen, blocks);
-
-  return blocks;
-}
-
-bool StructureAnalysis::runOnFunction(const Function& f) {
+StructureKind StructureAnalysis::runOnFunction(const Function& f) {
   List<const Loop*> loops = collectLoops(li);
   Map<const BasicBlock*, unsigned> exiting;
   Map<const BasicBlock*, unsigned> headers;
@@ -626,7 +709,6 @@ bool StructureAnalysis::runOnFunction(const Function& f) {
     loop->getExitEdges(edges);
     for(const Loop::Edge& edge : edges) {
       const BasicBlock* inside = edge.first;
-      const BasicBlock* outside = edge.second;
       // The exiting blocks should only contain a single branch instruction
       if(inside->size() == 1) {
         exiting[inside] = loop->getLoopDepth();
@@ -635,138 +717,158 @@ bool StructureAnalysis::runOnFunction(const Function& f) {
     headers[loop->getHeader()] = loop->getLoopDepth();
   }
 
-  // Construct initial tree
-  LLVMContext& llvmContext = f.getContext();
+  message() << "Build CFG\n";
   List<const BasicBlock*> blocks = getBlocksInPostOrder(f);
   for(const BasicBlock* bb : blocks)
     nodeMap[bb] = &newNode<Block>(*bb);
 
-  // Add edges with attributes if required
+  root.reset(new Entry(f.getContext(), getNodeFor(&f.getEntryBlock())));
   for(const BasicBlock* bb : blocks) {
     StructNode& node = getNodeFor(bb);
     const Instruction& inst = bb->back();
     if(const auto* br = dyn_cast<BranchInst>(&inst)) {
       if(br->isConditional()) {
-        node.addSuccessor(true, getNodeFor(br->getSuccessor(0)));
-        node.addSuccessor(false, getNodeFor(br->getSuccessor(1)));
+        node.addSuccessor(ConstantInt::getTrue(llvmContext),
+                          getNodeFor(br->getSuccessor(0)));
+        node.addSuccessor(ConstantInt::getFalse(llvmContext),
+                          getNodeFor(br->getSuccessor(1)));
       } else {
-        node.addSuccessor(true, getNodeFor(br->getSuccessor(0)));
+        node.addSuccessor(ConstantInt::getTrue(llvmContext),
+                          getNodeFor(br->getSuccessor(0)));
       }
     } else if(const auto* sw = dyn_cast<SwitchInst>(&inst)) {
-      fatal(error() << "UNIMPLEMENTED SwitchInst in CFG contstruction");
+      for(const auto& i : sw->cases()) {
+        const ConstantInt* kase = i.getCaseValue();
+        const BasicBlock* succ = i.getCaseSuccessor();
+        node.addSuccessor(kase, getNodeFor(succ));
+      }
+      if(BasicBlock* def = sw->getDefaultDest())
+        node.addSuccessor(nullptr, getNodeFor(def));
     } else if(not(isa<ReturnInst>(inst) or isa<UnreachableInst>(inst))) {
       fatal(error() << "Unexpected instruction in CFG construction: "
                     << bb->back());
     }
   }
+  log("init");
 
-  root.reset(new Entry(getNodeFor(&f.getEntryBlock())));
-
-  unsigned cfg = 0;
-
-  {
-    std::error_code ec;
-    raw_fd_ostream fs("cfg." + std::to_string(cfg) + ".dot", ec);
-    dot(fs);
-    fs.close();
-    cfg++;
-  }
-
+  message() << "Optimize CFG\n";
+  message() << "  Strip empty blocks\n";
   // Get rid of any empty blocks but don't get rid of anything that might
   // be specialized
   bool changed = false;
   do {
     changed = false;
-    for(const BasicBlock* bb : blocks) {
+    for(const BasicBlock* bb : getBlocksInPostOrder(f)) {
       StructNode& node = getNodeFor(bb);
       if((bb->size() == 1) and isa<Block>(node)
          and (not(headers.contains(bb) or exiting.contains(bb)))
-         and (node.getNumPredecessors() == 1)
          and (node.getNumSuccessors() == 1)) {
-        StructNode& pred = node.getPredecessor();
-        long kase = pred.getSuccessorCase(node);
+        StructNode::Edges headEdges = node.getIncoming();
         StructNode& succ = node.getSuccessor();
-        if(pred != node) {
+        if(not std::any_of(
+               headEdges.begin(),
+               headEdges.end(),
+               [&](const StructNode::Edge& e) { return *e.second == node; })) {
           node.disconnect();
-          pred.addSuccessor(kase, succ);
-          changed |= true;
+          for(const StructNode::Edge& e : headEdges) {
+            const ConstantInt* kase = e.first;
+            StructNode& pred = *e.second;
+            pred.addSuccessor(kase, succ);
+            changed |= true;
+          }
         }
       }
     }
   } while(changed);
-
-  {
-    std::error_code ec;
-    raw_fd_ostream fs("cfg." + std::to_string(cfg) + ".dot", ec);
-    dot(fs);
-    fs.close();
-    cfg++;
-  }
+  log("stripped");
 
   // Do these first because it is guaranteed that everything in the tree is
   // still a Block.
+  message() << "  Identify loop exit blocks\n";
   for(const BasicBlock* bb : blocks) {
     if(exiting.contains(bb)) {
       StructNode& old = getNodeFor(bb);
       const Loop& loop = *li.getLoopFor(bb);
-      StructNode& succ0 = old.getSuccessor(0);
-      long exitCase = 0;
+      StructNode& succ0 = old.getSuccessor(ConstantInt::getFalse(llvmContext));
+      ConstantInt* exitCase = ConstantInt::getFalse(llvmContext);
       if(auto* block = dyn_cast<Block>(&succ0)) {
         // Break when the condition is true
         if(loop.contains(&block->getLLVM()))
-          exitCase = 1;
+          exitCase = ConstantInt::getTrue(llvmContext);
       } else if(auto* ift = dyn_cast<IfThenBreak>(&succ0)) {
         // Break when the condition is true
         if(loop.contains(ift->getLLVMBranchInst().getParent()))
-          exitCase = 1;
+          exitCase = ConstantInt::getTrue(llvmContext);
       } else {
         fatal(error() << "Expected successor to be a block or if-then-break\n");
       }
+      ConstantInt* invExitCase = exitCase->isZero()
+                                     ? ConstantInt::getTrue(llvmContext)
+                                     : ConstantInt::getFalse(llvmContext);
       StructNode& exit = old.getSuccessor(exitCase);
-      StructNode& cont = old.getSuccessor(not exitCase);
+      StructNode& cont = old.getSuccessor(invExitCase);
       IfThenBreak& neew = newNode<IfThenBreak>(
-          exit, cast<BranchInst>(bb->back()), exiting.at(bb));
-      Vector<std::pair<long, StructNode*>> preds = old.getIncoming();
+          exit, cast<BranchInst>(bb->back()), not exitCase);
+      Vector<std::pair<const ConstantInt*, StructNode*>> preds
+          = old.getIncoming();
 
       old.disconnect();
       for(const auto& i : preds) {
-        long kase = i.first;
+        const ConstantInt* kase = i.first;
         StructNode& pred = *i.second;
         pred.addSuccessor(kase, neew);
       }
       neew.addSuccessor(exitCase, exit);
-      neew.addSuccessor(not exitCase, cont);
+      neew.addSuccessor(invExitCase, cont);
     }
   }
+
   // Specialize nodes
+  message() << "  Identify loop headers\n";
   for(const BasicBlock* bb : blocks) {
     if(headers.contains(bb)) {
       StructNode& old = getNodeFor(bb);
       StructNode& neew = newNode<LoopHeader>(headers.at(bb));
-      Vector<std::pair<long, StructNode*>> preds = old.getIncoming();
-      Map<long, StructNode*> succs = old.getOutgoing();
+      Vector<std::pair<const ConstantInt*, StructNode*>> preds
+          = old.getIncoming();
+      StructNode::Edges succs = old.getOutgoing();
 
       old.disconnect();
       for(auto& i : preds) {
-        long kase = i.first;
+        const ConstantInt* kase = i.first;
         StructNode& pred = *i.second;
         pred.addSuccessor(kase, neew);
       }
       for(auto& i : succs) {
-        long kase = i.first;
+        const ConstantInt* kase = i.first;
         StructNode& succ = *i.second;
         neew.addSuccessor(kase, succ);
       }
     }
   }
+  log("specialized");
 
-  {
-    std::error_code ec;
-    raw_fd_ostream fs("cfg." + std::to_string(cfg) + ".dot", ec);
-    dot(fs);
-    fs.close();
-    cfg++;
-  }
+  // TODO: One case that precludes structural analysis is when loops have
+  // break statements inside non-empty conditionals. For example
+  //
+  // for(i = 0; i < n; i++) {
+  //   if(condition) {
+  //     do_something();
+  //     break;
+  //   } else if(other_condition) {
+  //     do_something_else();
+  //     break;
+  //   }
+  //   do_work();
+  // }
+  //
+  // In this case, the two exit blocks containing do_something() and
+  // do_something_else() are outside the loop. Those blocks themselves flow
+  // to the same block - so in essence, the "dedicated" exit is deferred.
+  // In any case, the analysis detecting a simplified loop fails for this
+  // case even though the loop looks like it ought to have a dedicated exit.
+  // One workaround would be to push these exit blocks back inside the loop
+  // if certain conditions are met.
 
   bool reduced = true;
   List<StructNode*> postorder = dfs(root->getEntry());
@@ -774,26 +876,25 @@ bool StructureAnalysis::runOnFunction(const Function& f) {
     reduced = tryReduce(postorder);
     if(reduced)
       postorder = dfs(root->getEntry());
-    {
-      std::error_code ec;
-      raw_fd_ostream fs("cfg." + std::to_string(cfg) + ".dot", ec);
-      dot(fs);
-      fs.close();
-      cfg++;
-    }
+    log();
   }
 
   // FIXME: Right now, if there was anything that could not be reduced in the
   // CFG, just return false. This is too extreme because there is no reason
   // why we need to resort to an all or nothing approach. For the moment,
   // this will be a known limitation that can be addressed later
-  return postorder.size() == 1;
+  if(not reductions)
+    return StructureKind::Unstructured;
+  else if(postorder.size() != 1)
+    return StructureKind::SemiStructured;
+  return StructureKind::Structured;
 }
 
 } // namespace cish
 
 StructureAnalysisWrapperPass::StructureAnalysisWrapperPass()
-    : FunctionPass(ID), structured(false), ctree(nullptr) {
+    : FunctionPass(ID), structureKind(cish::StructureKind::Unstructured),
+      ctree(nullptr) {
   ;
 }
 
@@ -803,14 +904,11 @@ StringRef StructureAnalysisWrapperPass::getPassName() const {
 
 void StructureAnalysisWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
   AU.addRequired<LoopInfoWrapperPass>();
-  AU.addRequired<DominatorTreeWrapperPass>();
-  AU.addRequired<PostDominatorTreeWrapperPass>();
-  AU.addRequired<ScalarEvolutionWrapperPass>();
   AU.setPreservesAll();
 }
 
-bool StructureAnalysisWrapperPass::isStructured() const {
-  return structured;
+cish::StructureKind StructureAnalysisWrapperPass::getStructureKind() const {
+  return structureKind;
 }
 
 const cish::StructNode& StructureAnalysisWrapperPass::getStructured() const {
@@ -818,15 +916,13 @@ const cish::StructNode& StructureAnalysisWrapperPass::getStructured() const {
 }
 
 bool StructureAnalysisWrapperPass::runOnFunction(Function& f) {
-  const LoopInfo& li = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  const DominatorTree& dt
-      = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  const PostDominatorTree& pdt
-      = getAnalysis<PostDominatorTreeWrapperPass>().getPostDomTree();
-  const ScalarEvolution& se = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
+  cish::message() << "Running " << getPassName() << " on " << f.getName()
+                  << "\n";
 
-  ctree.reset(new cish::StructureAnalysis(li, dt, pdt));
-  structured = ctree->runOnFunction(f);
+  const LoopInfo& li = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+
+  ctree.reset(new cish::StructureAnalysis(f, li));
+  structureKind = ctree->runOnFunction(f);
 
   return false;
 }

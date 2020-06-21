@@ -1,6 +1,7 @@
 #ifndef CISH_LLVM_FRONTEND_H
 #define CISH_LLVM_FRONTEND_H
 
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Pass.h>
@@ -19,10 +20,6 @@ protected:
   CishContext& context;
   const SourceInfo& si;
   LLVMBackend& be;
-
-  // Options from the command line
-  // Set<IgnoreCasts> ignoreCasts;
-  // Set<Annotations> annotations;
 
   // The values to tbe ignored when converting
   Set<const llvm::Value*> ignoreValues;
@@ -93,7 +90,7 @@ protected:
   void handle(llvm::VectorType* vty);
 
 public:
-  LLVMFrontend(CishContext& context);
+  LLVMFrontend(CishContext& context, const SourceInfo& si);
   LLVMFrontend() = delete;
   LLVMFrontend(const LLVMFrontend&) = delete;
   LLVMFrontend(LLVMFrontend&&) = delete;

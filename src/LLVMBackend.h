@@ -63,6 +63,53 @@ protected:
     return *llvm::dyn_cast<ClassT>(exprs[&val] = ast);
   }
 
+
+  template <
+      typename ClangT = clang::Stmt,
+      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
+  ClangT& get(const llvm::Value* val) {
+    return *llvm::dyn_cast<ClangT>(exprs.at(val));
+  }
+
+  template <
+      typename ClangT = clang::Stmt,
+      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
+  ClangT& get(const llvm::Value& val) {
+    return get<ClangT>(&val);
+  }
+
+  template <
+      typename ClangT,
+      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
+  ClangT& get(const llvm::Value* val) {
+    return *llvm::dyn_cast<ClangT>(get<clang::DeclRefExpr>(val).getFoundDecl());
+  }
+
+  template <
+      typename ClangT,
+      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
+  ClangT& get(const llvm::Value& val) {
+    return get<ClangT>(&val);
+  }
+
+  template <
+      typename ClangT = clang::Stmt,
+      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
+  const ClangT& get(const llvm::Value* val) const {
+    return *llvm::dyn_cast<ClangT>(exprs.at(val));
+  }
+
+  template <
+      typename ClangT = clang::Stmt,
+      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
+  const ClangT& get(const llvm::Value& val) const {
+    return get<ClangT>(&val);
+  }
+
+  clang::QualType get(llvm::Type* type) const;
+  clang::DeclRefExpr& getTemp(const llvm::Value& val) const;
+  clang::DeclRefExpr& getTemp(const llvm::Value* val) const;
+
   clang::Expr* handleIndexOperand(llvm::PointerType* ty,
                                   clang::Expr* curr,
                                   unsigned idx,
@@ -103,7 +150,7 @@ protected:
   clang::IfStmt*
   createIfStmt(clang::Expr& cond, clang::Stmt* thn, clang::Stmt* els = nullptr);
 
-  clang::GotoStmt* createGoto(clang::LabelDecl* label);
+  clang::GotoStmt* createGotoStmt(clang::LabelDecl* label);
 
   clang::CompoundStmt*
   createCompoundStmt(const cish::Vector<clang::Stmt*>& stmts);
@@ -137,6 +184,12 @@ protected:
   clang::LabelDecl* createLabelDecl(clang::FunctionDecl* f,
                                     const std::string& name);
 
+  clang::SwitchStmt* createSwitchStmt(clang::Expr& cond);
+  clang::CaseStmt* createCaseStmt(clang::Expr& value);
+  clang::DefaultStmt* createDefaultStmt(clang::Stmt* body);
+
+  void addSwitchCase(const llvm::ConstantInt* value);
+
 public:
   /// @param prefix The prefix to use when generating names
   LLVMBackend(CishContext& context);
@@ -144,6 +197,27 @@ public:
   LLVMBackend(const LLVMBackend&) = delete;
   LLVMBackend(LLVMBackend&&) = delete;
   ~LLVMBackend() = default;
+
+
+  /// @param val A llvm::Value
+  /// @returns true if the @val has a corresponding AST node
+  template <
+      typename ClangT = clang::Stmt,
+      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
+  bool has(const llvm::Value* val) const {
+    return exprs.contains(val);
+  }
+
+  template <
+      typename ClangT = clang::Stmt,
+      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
+  bool has(const llvm::Value& val) const {
+    return has<ClangT>(&val);
+  }
+
+  bool has(llvm::Type* type) const;
+  bool hasTemp(const llvm::Value& val) const;
+  bool hasTemp(const llvm::Value* val) const;
 
   void beginFunction(const llvm::Function& f);
   void endFunction(const llvm::Function& f);
@@ -232,6 +306,8 @@ public:
   void add(llvm::StructType* sty, const Vector<std::string>& elems);
 
   void addTemp(const llvm::Instruction& val, const std::string& name);
+  void addGoto(const llvm::BasicBlock& bb);
+  void addGoto(const std::string& dest, const llvm::Function& f);
   void addIfThen(const llvm::BranchInst& br, bool invert);
   void addIfThenElse(const llvm::BranchInst& br);
   void addIfThenBreak(const llvm::BranchInst& br);
@@ -242,72 +318,9 @@ public:
   void addEndlessLoop();
   void addBreak();
   void addContinue();
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value* val) {
-    return *llvm::dyn_cast<ClangT>(exprs.at(val));
-  }
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value& val) {
-    return get<ClangT>(&val);
-  }
-
-  template <
-      typename ClangT,
-      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value* val) {
-    return *llvm::dyn_cast<ClangT>(get<clang::DeclRefExpr>(val).getFoundDecl());
-  }
-
-  template <
-      typename ClangT,
-      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value& val) {
-    return get<ClangT>(&val);
-  }
-
-  /// @param val A llvm::Value
-  /// @returns true if the @val has a corresponding AST node
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  bool has(const llvm::Value* val) const {
-    return exprs.contains(val);
-  }
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  bool has(const llvm::Value& val) const {
-    return has<ClangT>(&val);
-  }
-
-  bool has(llvm::Type* type) const;
-  bool hasTemp(const llvm::Value& val) const;
-  bool hasTemp(const llvm::Value* val) const;
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  const ClangT& get(const llvm::Value* val) const {
-    return *llvm::dyn_cast<ClangT>(exprs.at(val));
-  }
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  const ClangT& get(const llvm::Value& val) const {
-    return get<ClangT>(&val);
-  }
-
-  clang::QualType get(llvm::Type* type) const;
-  clang::DeclRefExpr& getTemp(const llvm::Value& val) const;
-  clang::DeclRefExpr& getTemp(const llvm::Value* val) const;
+  void addSwitchCase(const llvm::ConstantInt& value);
+  void addSwitchDefault();
+  void addSwitchStmt(const llvm::SwitchInst& sw);
 };
 
 } // namespace cish

@@ -1,7 +1,6 @@
-#include "CishCmdLineFlags.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
-#include "FormatOptions.h"
+#include "Options.h"
 #include "Passes.h"
 #include "Set.h"
 #include "Stream.h"
@@ -37,14 +36,12 @@ void initLLVM(int argc, char* argv[]) {
     cl::Option* opt = i.second;
     if(optsKeep.contains(key))
       opt->setDescription("Display available options");
-    else if((opt->Category != &cish::cishOptionCategory)
-            and not opt->isPositional())
+    else if(not(cish::isOpt(*opt) or opt->isPositional()))
       i.second->removeArgument();
   }
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM to C-ish converter\n");
-  if(cish::optOffset > 8)
-    cish::fatal(cish::error() << "Invalid value for offset. Min 0, Max 8");
+  cish::parseOpts();
 }
 
 int main(int argc, char* argv[]) {
@@ -53,7 +50,7 @@ int main(int argc, char* argv[]) {
 
   llvm::SMDiagnostic err;
   std::unique_ptr<llvm::Module> pModule
-      = parseIRFile(cish::optFilename, err, llvmContext);
+      = parseIRFile(cish::opts().fileIn, err, llvmContext);
   if(!pModule) {
     err.print(argv[0], llvm::errs());
     return 1;
@@ -74,7 +71,7 @@ int main(int argc, char* argv[]) {
   pm.add(createCishPreparePass());
   pm.add(createCishModulePass());
   pm.add(createCishFunctionPass());
-  pm.add(createCishOutputPass(cish::optOutput));
+  pm.add(createCishOutputPass(cish::opts().fileOut));
   pm.run(*pModule);
 
   llvm::llvm_shutdown();
