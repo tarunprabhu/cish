@@ -9,12 +9,12 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 
-using namespace clang;
+using namespace llvm;
 
 namespace cish {
 
 #define UNIMPLEMENTED(TYPE)                        \
-  void LLVMBackend::add(const llvm::TYPE& inst) {  \
+  void LLVMBackend::add(const TYPE& inst) {        \
     fatal(error() << "NOT IMPLEMENTED: " << inst); \
   }
 
@@ -22,12 +22,12 @@ LLVMBackend::LLVMBackend(CishContext& context) : BackendBase(context) {
   ;
 }
 
-void LLVMBackend::beginFunction(const llvm::Function& f) {
+void LLVMBackend::beginFunction(const Function& f) {
   BackendBase::beginFunction(funcs.at(&f));
 }
 
-void LLVMBackend::endFunction(const llvm::Function& f) {
-  FunctionDecl* cf = funcs.at(&f);
+void LLVMBackend::endFunction(const Function& f) {
+  clang::FunctionDecl* cf = funcs.at(&f);
   cf->setBody(createCompoundStmt(stmts.pop()));
   BackendBase::endFunction(cf);
 }
@@ -37,228 +37,75 @@ void LLVMBackend::beginBlock() {
 }
 
 void LLVMBackend::endBlock() {
-  BackendBase::add(CompoundStmt::Create(
-      astContext, makeArrayRef(stmts.pop()), invLoc, invLoc));
+  BackendBase::add(createCompoundStmt(stmts.pop()));
 }
 
-void LLVMBackend::beginBlock(const llvm::BasicBlock& bb) {
+void LLVMBackend::beginBlock(const BasicBlock& bb) {
   BackendBase::add(createLabelStmt(blocks.at(&bb)));
 }
 
-void LLVMBackend::endBlock(const llvm::BasicBlock& bb) {
+void LLVMBackend::endBlock(const BasicBlock& bb) {
   // Nothing to do
 }
 
-DeclRefExpr* LLVMBackend::createDeclRefExpr(ValueDecl* decl) {
-  return DeclRefExpr::Create(astContext,
-                             NestedNameSpecifierLoc(),
-                             invLoc,
-                             decl,
-                             false,
-                             invLoc,
-                             decl->getType(),
-                             VK_LValue,
-                             decl);
-}
-
-LabelStmt* LLVMBackend::createLabelStmt(LabelDecl* label) {
-  return new(astContext) LabelStmt(invLoc, label, nullptr);
-}
-
-LabelDecl* LLVMBackend::createLabelDecl(FunctionDecl* f,
-                                        const std::string& name) {
-  return LabelDecl::Create(astContext, f, invLoc, &astContext.Idents.get(name));
-}
-
-DeclRefExpr* LLVMBackend::createVariable(const std::string& name,
-                                         QualType type,
-                                         DeclContext* parent) {
-  return createDeclRefExpr(VarDecl::Create(astContext,
-                                           parent,
-                                           invLoc,
-                                           invLoc,
-                                           &astContext.Idents.get(name),
-                                           type,
-                                           nullptr,
-                                           SC_None));
-}
-
-BinaryOperator* LLVMBackend::createBinaryOperator(Expr& lhs,
-                                                  Expr& rhs,
-                                                  BinaryOperator::Opcode opc,
-                                                  QualType type) {
-  return new(astContext) BinaryOperator(
-      &lhs, &rhs, opc, type, VK_RValue, OK_Ordinary, invLoc, FPOptions());
-}
-
-UnaryOperator* LLVMBackend::createUnaryOperator(Expr& lhs,
-                                                UnaryOperator::Opcode opc,
-                                                QualType type) {
-  return new(astContext)
-      UnaryOperator(&lhs, opc, type, VK_RValue, OK_Ordinary, invLoc, false);
-}
-
-ArraySubscriptExpr*
-LLVMBackend::createArraySubscriptExpr(Expr& base, Expr& idx, QualType type) {
-  return new(astContext)
-      ArraySubscriptExpr(&base, &idx, type, VK_RValue, OK_Ordinary, invLoc);
-}
-
-void LLVMBackend::add(const llvm::AllocaInst& alloca, const std::string& name) {
-  FunctionDecl* f = funcs.at(&getFunction(alloca));
-
-  DeclRefExpr* ref = createVariable(name, get(alloca.getAllocatedType()), f);
-  f->addDecl(ref->getDecl());
+void LLVMBackend::add(const AllocaInst& alloca, const std::string& name) {
+  clang::FunctionDecl* f = funcs.at(&getFunction(alloca));
+  clang::DeclRefExpr* ref
+      = createLocalVariable(name, get(alloca.getAllocatedType()), f);
 
   // The statement to declare the variable in the function
-  auto* group = new(astContext) DeclGroupRef(ref->getDecl());
-  auto* stmt = new(astContext) DeclStmt(*group, invLoc, invLoc);
-  BackendBase::add(stmt);
+  BackendBase::add(createDeclStmt(ref->getDecl()));
 
   // The alloca statement in LLVM is always a pointer type, so where the
   // variable will be used, we actually need the pointer to it to be
-  // consisten
-  add(alloca, createUnaryOperator(*ref, UO_AddrOf, get(alloca.getType())));
-}
-
-CStyleCastExpr* LLVMBackend::createCastExpr(Expr& expr, QualType qty) {
-  const Type* type = qty.getTypePtr();
-  if(not typeSrcInfo.contains(type))
-    typeSrcInfo[type] = astContext.CreateTypeSourceInfo(qty);
-  return CStyleCastExpr::Create(astContext,
-                                qty,
-                                VK_RValue,
-                                CastKind::CK_BitCast,
-                                &expr,
-                                nullptr,
-                                typeSrcInfo.at(type),
-                                invLoc,
-                                invLoc);
-}
-
-IfStmt* LLVMBackend::createIfStmt(Expr& cond, Stmt* thn, Stmt* els) {
-  return IfStmt::Create(
-      astContext, invLoc, false, nullptr, nullptr, &cond, thn, invLoc, els);
-}
-
-GotoStmt* LLVMBackend::createGotoStmt(LabelDecl* label) {
-  return new(astContext) GotoStmt(label, invLoc, invLoc);
-}
-
-CompoundStmt* LLVMBackend::createCompoundStmt(const Vector<Stmt*>& stmts) {
-  return CompoundStmt::Create(astContext, makeArrayRef(stmts), invLoc, invLoc);
-}
-
-CompoundStmt* LLVMBackend::createCompoundStmt(Stmt* stmt) {
-  return CompoundStmt::Create(
-      astContext, llvm::ArrayRef<Stmt*>(stmt), invLoc, invLoc);
-}
-
-SwitchStmt* LLVMBackend::createSwitchStmt(Expr& cond) {
-  return SwitchStmt::Create(astContext, nullptr, nullptr, &cond);
-}
-
-CaseStmt* LLVMBackend::createCaseStmt(Expr& value) {
-  return CaseStmt::Create(astContext, &value, nullptr, invLoc, invLoc, invLoc);
-}
-
-DefaultStmt* LLVMBackend::createDefaultStmt(Stmt* body) {
-  return new(astContext) DefaultStmt(invLoc, invLoc, body);
-}
-
-BreakStmt* LLVMBackend::createBreakStmt() {
-  return new(astContext) BreakStmt(invLoc);
-}
-
-ContinueStmt* LLVMBackend::createContinueStmt() {
-  return new(astContext) ContinueStmt(invLoc);
-}
-
-ReturnStmt* LLVMBackend::createReturnStmt(Expr* retExpr) {
-  return ReturnStmt::Create(astContext, invLoc, retExpr, nullptr);
-}
-
-CallExpr* LLVMBackend::createCallExpr(Expr& callee,
-                                      const Vector<Expr*>& args,
-                                      QualType type) {
-  return CallExpr::Create(
-      astContext, &callee, makeArrayRef(args), type, VK_RValue, invLoc);
-}
-
-DoStmt* LLVMBackend::createDoStmt(Stmt* body, Expr& cond) {
-  return new(astContext) DoStmt(body, &cond, invLoc, invLoc, invLoc);
-}
-
-WhileStmt* LLVMBackend::createWhileStmt(Expr& cond, Stmt* body) {
-  return WhileStmt::Create(astContext, nullptr, &cond, body, invLoc);
-}
-
-CXXBoolLiteralExpr* LLVMBackend::createBoolLiteral(bool b, QualType type) {
-  return new(astContext) CXXBoolLiteralExpr(b, type, invLoc);
-}
-
-IntegerLiteral* LLVMBackend::createIntLiteral(const llvm::APInt& i,
-                                              QualType type) {
-  return IntegerLiteral::Create(astContext, i, type, invLoc);
-}
-
-FloatingLiteral* LLVMBackend::createFloatLiteral(const llvm::APFloat& f,
-                                                 QualType type) {
-  return FloatingLiteral::Create(astContext, f, false, type, invLoc);
-}
-
-CXXNullPtrLiteralExpr* LLVMBackend::createNullptr(QualType type) {
-  return new(astContext) CXXNullPtrLiteralExpr(type, invLoc);
-}
-
-InitListExpr* LLVMBackend::createInitListExpr(const Vector<Expr*>& exprs) {
-  return new(astContext)
-      InitListExpr(astContext, invLoc, makeArrayRef(exprs), invLoc);
+  // consistent
+  add(alloca,
+      createUnaryOperator(ref, clang::UO_AddrOf, get(alloca.getType())));
 }
 
 UNIMPLEMENTED(AtomicCmpXchgInst)
 UNIMPLEMENTED(AtomicRMWInst)
 
-void LLVMBackend::add(const llvm::BinaryOperator& inst) {
-  BinaryOperator::Opcode opc = (BinaryOperator::Opcode)-1;
+void LLVMBackend::add(const BinaryOperator& inst) {
+  clang::BinaryOperator::Opcode opc;
 
   switch(inst.getOpcode()) {
-  case llvm::BinaryOperator::Add:
-  case llvm::BinaryOperator::FAdd:
-    opc = BO_Add;
+  case BinaryOperator::Add:
+  case BinaryOperator::FAdd:
+    opc = clang::BO_Add;
     break;
-  case llvm::BinaryOperator::Sub:
-  case llvm::BinaryOperator::FSub:
-    opc = BO_Sub;
+  case BinaryOperator::Sub:
+  case BinaryOperator::FSub:
+    opc = clang::BO_Sub;
     break;
-  case llvm::BinaryOperator::Mul:
-  case llvm::BinaryOperator::FMul:
-    opc = BO_Mul;
+  case BinaryOperator::Mul:
+  case BinaryOperator::FMul:
+    opc = clang::BO_Mul;
     break;
-  case llvm::BinaryOperator::UDiv:
-  case llvm::BinaryOperator::FDiv:
-  case llvm::BinaryOperator::SDiv:
-    opc = BO_Div;
+  case BinaryOperator::UDiv:
+  case BinaryOperator::FDiv:
+  case BinaryOperator::SDiv:
+    opc = clang::BO_Div;
     break;
-  case llvm::BinaryOperator::URem:
-  case llvm::BinaryOperator::SRem:
-  case llvm::BinaryOperator::FRem:
-    opc = BO_Rem;
+  case BinaryOperator::URem:
+  case BinaryOperator::SRem:
+  case BinaryOperator::FRem:
+    opc = clang::BO_Rem;
     break;
-  case llvm::BinaryOperator::Shl:
-    opc = BO_Shl;
+  case BinaryOperator::Shl:
+    opc = clang::BO_Shl;
     break;
-  case llvm::BinaryOperator::LShr:
-    opc = BO_Shr;
+  case BinaryOperator::LShr:
+    opc = clang::BO_Shr;
     break;
-  case llvm::BinaryOperator::And:
-    opc = BO_And;
+  case BinaryOperator::And:
+    opc = clang::BO_And;
     break;
-  case llvm::BinaryOperator::Or:
-    opc = BO_Or;
+  case BinaryOperator::Or:
+    opc = clang::BO_Or;
     break;
-  case llvm::BinaryOperator::Xor:
-    opc = BO_Xor;
+  case BinaryOperator::Xor:
+    opc = clang::BO_Xor;
     break;
   default:
     fatal(error() << "Unknown binary operator: " << inst);
@@ -266,84 +113,85 @@ void LLVMBackend::add(const llvm::BinaryOperator& inst) {
   }
 
   add(inst,
-      createBinaryOperator(get<Expr>(inst.getOperand(0)),
-                           get<Expr>(inst.getOperand(1)),
+      createBinaryOperator(get<clang::Expr>(inst.getOperand(0)),
+                           get<clang::Expr>(inst.getOperand(1)),
                            opc,
                            get(inst.getType())));
 }
 
-void LLVMBackend::add(const llvm::BranchInst& br) {
+void LLVMBackend::add(const BranchInst& br) {
   if(br.isConditional()) {
-    llvm::Value* cond = br.getCondition();
+    Value* cond = br.getCondition();
     auto* thn
         = createCompoundStmt(createGotoStmt(blocks.at(br.getSuccessor(0))));
     auto* els
         = createCompoundStmt(createGotoStmt(blocks.at(br.getSuccessor(1))));
-    add(br, createIfStmt(get<Expr>(cond), thn, els));
+    add(br, createIfStmt(get<clang::Expr>(cond), thn, els));
   } else {
     add(br, createGotoStmt(blocks.at(br.getSuccessor(0))));
   }
   BackendBase::add(get(br));
 }
 
-void LLVMBackend::add(const llvm::CastInst& cst) {
-  add(cst, createCastExpr(get<Expr>(cst.getOperand(0)), get(cst.getType())));
+void LLVMBackend::add(const CastInst& cst) {
+  add(cst,
+      createCastExpr(get<clang::Expr>(cst.getOperand(0)), get(cst.getType())));
 }
 
 UNIMPLEMENTED(InvokeInst)
 
-void LLVMBackend::add(const llvm::CallInst& call) {
-  Vector<Expr*> args;
-  for(const llvm::Value* arg : call.arg_operands())
-    args.push_back(&get<Expr>(arg));
+void LLVMBackend::add(const CallInst& call) {
+  Vector<clang::Expr*> args;
+  for(const Value* arg : call.arg_operands())
+    args.push_back(get<clang::Expr>(arg));
 
   add(call,
       createCallExpr(
-          get<Expr>(call.getCalledValue()), args, get(call.getType())));
+          get<clang::Expr>(call.getCalledValue()), args, get(call.getType())));
   if(call.getType()->isVoidTy())
-    BackendBase::add(get<CallExpr>(call));
+    BackendBase::add(get<clang::CallExpr>(call));
 }
 
 UNIMPLEMENTED(CatchReturnInst)
 UNIMPLEMENTED(CatchSwitchInst)
 UNIMPLEMENTED(CleanupReturnInst)
 
-void LLVMBackend::add(const llvm::CmpInst& cmp) {
-  BinaryOperator::Opcode opc = (BinaryOperator::Opcode)-1;
+void LLVMBackend::add(const CmpInst& cmp) {
+  clang::BinaryOperator::Opcode opc;
   switch(cmp.getPredicate()) {
-  case llvm::CmpInst::FCMP_OEQ:
-  case llvm::CmpInst::FCMP_UEQ:
-  case llvm::CmpInst::ICMP_EQ:
-    opc = BO_EQ;
+  case CmpInst::FCMP_OEQ:
+  case CmpInst::FCMP_UEQ:
+  case CmpInst::ICMP_EQ:
+    opc = clang::BO_EQ;
     break;
-  case llvm::CmpInst::FCMP_ONE:
-  case llvm::CmpInst::FCMP_UNE:
-  case llvm::CmpInst::ICMP_NE:
-    opc = BO_NE;
+  case CmpInst::FCMP_ONE:
+  case CmpInst::FCMP_UNE:
+  case CmpInst::ICMP_NE:
+    opc = clang::BO_NE;
     break;
-  case llvm::CmpInst::FCMP_OGT:
-  case llvm::CmpInst::FCMP_UGT:
-  case llvm::CmpInst::ICMP_UGT:
-  case llvm::CmpInst::ICMP_SGT:
-    opc = BO_GT;
+  case CmpInst::FCMP_OGT:
+  case CmpInst::FCMP_UGT:
+  case CmpInst::ICMP_UGT:
+  case CmpInst::ICMP_SGT:
+    opc = clang::BO_GT;
     break;
-  case llvm::CmpInst::FCMP_OGE:
-  case llvm::CmpInst::FCMP_UGE:
-  case llvm::CmpInst::ICMP_UGE:
-  case llvm::CmpInst::ICMP_SGE:
-    opc = BO_GE;
+  case CmpInst::FCMP_OGE:
+  case CmpInst::FCMP_UGE:
+  case CmpInst::ICMP_UGE:
+  case CmpInst::ICMP_SGE:
+    opc = clang::BO_GE;
     break;
-  case llvm::CmpInst::FCMP_OLT:
-  case llvm::CmpInst::FCMP_ULT:
-  case llvm::CmpInst::ICMP_ULT:
-  case llvm::CmpInst::ICMP_SLT:
-    opc = BO_LT;
+  case CmpInst::FCMP_OLT:
+  case CmpInst::FCMP_ULT:
+  case CmpInst::ICMP_ULT:
+  case CmpInst::ICMP_SLT:
+    opc = clang::BO_LT;
     break;
-  case llvm::CmpInst::FCMP_OLE:
-  case llvm::CmpInst::FCMP_ULE:
-  case llvm::CmpInst::ICMP_ULE:
-  case llvm::CmpInst::ICMP_SLE:
-    opc = BO_LE;
+  case CmpInst::FCMP_OLE:
+  case CmpInst::FCMP_ULE:
+  case CmpInst::ICMP_ULE:
+  case CmpInst::ICMP_SLE:
+    opc = clang::BO_LE;
     break;
   default:
     fatal(error() << "Unknown compare predicate: " << cmp);
@@ -351,8 +199,8 @@ void LLVMBackend::add(const llvm::CmpInst& cmp) {
   }
 
   add(cmp,
-      createBinaryOperator(get<Expr>(cmp.getOperand(0)),
-                           get<Expr>(cmp.getOperand(1)),
+      createBinaryOperator(get<clang::Expr>(cmp.getOperand(0)),
+                           get<clang::Expr>(cmp.getOperand(1)),
                            opc,
                            get(cmp.getType())));
 }
@@ -362,19 +210,20 @@ UNIMPLEMENTED(ExtractValueInst)
 UNIMPLEMENTED(FenceInst)
 UNIMPLEMENTED(CatchPadInst)
 
-static ArraySubscriptExpr* getAsArraySubscriptExpr(Expr* expr) {
-  if(auto* un = dyn_cast<UnaryOperator>(stripCasts(expr)))
-    return dyn_cast<ArraySubscriptExpr>(un->getSubExpr());
+static clang::ArraySubscriptExpr* getAsArraySubscriptExpr(clang::Expr* expr) {
+  if(auto* un = dyn_cast<clang::UnaryOperator>(stripCasts(expr)))
+    return dyn_cast<clang::ArraySubscriptExpr>(un->getSubExpr());
   return nullptr;
 }
 
-Expr* LLVMBackend::handleIndexOperand(llvm::PointerType* pty,
-                                      Expr* currExpr,
-                                      unsigned idx,
-                                      const Vector<const llvm::Value*>& indices,
-                                      const llvm::Instruction& inst) {
-  const llvm::Value* op = indices[idx];
-  if(const auto* cint = dyn_cast<llvm::ConstantInt>(op)) {
+clang::Expr*
+LLVMBackend::handleIndexOperand(PointerType* pty,
+                                clang::Expr* currExpr,
+                                unsigned idx,
+                                const Vector<const Value*>& indices,
+                                const Instruction& inst) {
+  const Value* op = indices[idx];
+  if(const auto* cint = dyn_cast<ConstantInt>(op)) {
     // If the current offset is zero, don't add it because it is unlikely to
     // be "useful" and just ends up complicating the resulting expression
     if(cint->getLimitedValue() == 0)
@@ -390,54 +239,57 @@ Expr* LLVMBackend::handleIndexOperand(llvm::PointerType* pty,
     // In that case, add the current offset computation to the previous
     // subscript expr.
     if(auto* arrExpr = getAsArraySubscriptExpr(currExpr)) {
-      Expr* idxExpr = arrExpr->getIdx();
-      Expr* newIdx = createBinaryOperator(
-          *idxExpr, get<Expr>(op), BO_Add, idxExpr->getType());
-      Expr* newArr = createArraySubscriptExpr(
-          *arrExpr->getBase(), *newIdx, arrExpr->getType());
-      Expr* addrOf = createUnaryOperator(*newArr, UO_AddrOf, get(pty));
-      if(auto* cst = dyn_cast<CStyleCastExpr>(currExpr))
-        return createCastExpr(*addrOf, cst->getType());
+      clang::Expr* idxExpr = arrExpr->getIdx();
+      clang::Expr* newIdx = createBinaryOperator(
+          idxExpr, get<clang::Expr>(op), clang::BO_Add, idxExpr->getType());
+      clang::Expr* newArr = createArraySubscriptExpr(
+          arrExpr->getBase(), newIdx, arrExpr->getType());
+      clang::Expr* addrOf
+          = createUnaryOperator(newArr, clang::UO_AddrOf, get(pty));
+      if(auto* cst = dyn_cast<clang::CStyleCastExpr>(currExpr))
+        return createCastExpr(addrOf, cst->getType());
       else
         return addrOf;
     }
   }
-  return createArraySubscriptExpr(*currExpr, get<Expr>(op), get(pty));
+  return createArraySubscriptExpr(currExpr, get<clang::Expr>(op), get(pty));
 }
 
-Expr* LLVMBackend::handleIndexOperand(llvm::ArrayType* aty,
-                                      Expr* currExpr,
-                                      unsigned idx,
-                                      const Vector<const llvm::Value*>& indices,
-                                      const llvm::Instruction& inst) {
-  return createArraySubscriptExpr(*currExpr, get<Expr>(indices[idx]), get(aty));
+clang::Expr*
+LLVMBackend::handleIndexOperand(ArrayType* aty,
+                                clang::Expr* currExpr,
+                                unsigned idx,
+                                const Vector<const Value*>& indices,
+                                const Instruction& inst) {
+  return createArraySubscriptExpr(
+      currExpr, get<clang::Expr>(indices[idx]), get(aty));
 }
 
-Expr* LLVMBackend::handleIndexOperand(llvm::StructType* sty,
-                                      Expr* currExpr,
-                                      unsigned field,
-                                      const llvm::Instruction& inst) {
+clang::Expr* LLVMBackend::handleIndexOperand(StructType* sty,
+                                             clang::Expr* currExpr,
+                                             unsigned field,
+                                             const Instruction& inst) {
 
-  return createBinaryOperator(*currExpr,
-                              *fields.at(sty)[field],
-                              BO_PtrMemD,
+  return createBinaryOperator(currExpr,
+                              fields.at(sty)[field],
+                              clang::BO_PtrMemD,
                               get(sty->getElementType(field)));
 }
 
-void LLVMBackend::add(const llvm::GetElementPtrInst& gep) {
-  const llvm::Value* ptr = gep.getPointerOperand();
-  llvm::Type* type = ptr->getType();
-  Expr* expr = &get<Expr>(ptr);
-  Vector<const llvm::Value*> indices(gep.idx_begin(), gep.idx_end());
+void LLVMBackend::add(const GetElementPtrInst& gep) {
+  const Value* ptr = gep.getPointerOperand();
+  Type* type = ptr->getType();
+  clang::Expr* expr = get<clang::Expr>(ptr);
+  Vector<const Value*> indices(gep.idx_begin(), gep.idx_end());
   for(unsigned i = 0; i < indices.size(); i++) {
-    if(auto* pty = dyn_cast<llvm::PointerType>(type)) {
+    if(auto* pty = dyn_cast<PointerType>(type)) {
       expr = handleIndexOperand(pty, expr, i, indices, gep);
       type = pty->getElementType();
-    } else if(auto* aty = dyn_cast<llvm::ArrayType>(type)) {
+    } else if(auto* aty = dyn_cast<ArrayType>(type)) {
       expr = handleIndexOperand(aty, expr, i, indices, gep);
       type = aty->getElementType();
-    } else if(auto* sty = dyn_cast<llvm::StructType>(type)) {
-      if(auto* cint = dyn_cast<llvm::ConstantInt>(indices[i])) {
+    } else if(auto* sty = dyn_cast<StructType>(type)) {
+      if(auto* cint = dyn_cast<ConstantInt>(indices[i])) {
         unsigned field = cint->getLimitedValue();
         expr = handleIndexOperand(sty, expr, field, gep);
         type = sty->getElementType(field);
@@ -455,10 +307,10 @@ void LLVMBackend::add(const llvm::GetElementPtrInst& gep) {
 
   // If the operand to the GEP is itself a GEP, then the AddrOf operator
   // will already be present
-  if(isa<llvm::GetElementPtrInst>(stripCasts(gep.getPointerOperand())))
+  if(isa<GetElementPtrInst>(stripCasts(gep.getPointerOperand())))
     add(gep, expr);
   else
-    add(gep, createUnaryOperator(*expr, UO_AddrOf, get(gep.getType())));
+    add(gep, createUnaryOperator(expr, clang::UO_AddrOf, get(gep.getType())));
 }
 
 UNIMPLEMENTED(IndirectBrInst)
@@ -466,64 +318,62 @@ UNIMPLEMENTED(InsertElementInst)
 UNIMPLEMENTED(InsertValueInst)
 UNIMPLEMENTED(LandingPadInst)
 
-void LLVMBackend::add(const llvm::LoadInst& load) {
+void LLVMBackend::add(const LoadInst& load) {
   add(load,
-      createUnaryOperator(
-          get<Expr>(load.getPointerOperand()), UO_Deref, get(load.getType())));
+      createUnaryOperator(get<clang::Expr>(load.getPointerOperand()),
+                          clang::UO_Deref,
+                          get(load.getType())));
 }
 
 UNIMPLEMENTED(ResumeInst)
 
-void LLVMBackend::add(const llvm::ReturnInst& ret) {
-  Expr* retExpr = nullptr;
-  if(const llvm::Value* val = ret.getReturnValue())
-    retExpr = &get<Expr>(val);
+void LLVMBackend::add(const ReturnInst& ret) {
+  clang::Expr* retExpr = nullptr;
+  if(const Value* val = ret.getReturnValue())
+    retExpr = get<clang::Expr>(val);
 
   add(ret, BackendBase::add(createReturnStmt(retExpr)));
 }
 
-void LLVMBackend::add(const llvm::SelectInst& select) {
+void LLVMBackend::add(const SelectInst& select) {
   add(select,
-      new(astContext) ConditionalOperator(&get<Expr>(select.getCondition()),
-                                          invLoc,
-                                          &get<Expr>(select.getTrueValue()),
-                                          invLoc,
-                                          &get<Expr>(select.getFalseValue()),
-                                          get(select.getType()),
-                                          VK_LValue,
-                                          OK_Ordinary));
+      createConditionalOperator(get<clang::Expr>(select.getCondition()),
+                                get<clang::Expr>(select.getTrueValue()),
+                                get<clang::Expr>(select.getFalseValue()),
+                                get(select.getType())));
 }
 
 UNIMPLEMENTED(ShuffleVectorInst)
 
-void LLVMBackend::add(const llvm::StoreInst& store) {
-  const llvm::Value* val = store.getValueOperand();
-  QualType type = get(val->getType());
-  Expr* ptr = createUnaryOperator(
-      get<Expr>(store.getPointerOperand()), UO_Deref, type);
-  auto* assign = createBinaryOperator(*ptr, get<Expr>(val), BO_Assign, type);
+void LLVMBackend::add(const StoreInst& store) {
+  const Value* val = store.getValueOperand();
+  clang::QualType type = get(val->getType());
+  clang::Expr* ptr = createUnaryOperator(
+      get<clang::Expr>(store.getPointerOperand()), clang::UO_Deref, type);
+  auto* assign = createBinaryOperator(
+      ptr, get<clang::Expr>(val), clang::BO_Assign, type);
   BackendBase::add(assign);
   add(store, assign);
 }
 
-void LLVMBackend::add(const llvm::SwitchInst& swtch) {
+void LLVMBackend::add(const SwitchInst& swtch) {
   addSwitchStmt(swtch);
   for(const auto& i : swtch.cases()) {
     BackendBase::add(
         createCompoundStmt(createGotoStmt(blocks.at(i.getCaseSuccessor()))));
     addSwitchCase(i.getCaseValue());
   };
-  if(const llvm::BasicBlock* deflt = swtch.getDefaultDest()) {
+  if(const BasicBlock* deflt = swtch.getDefaultDest()) {
     BackendBase::add(createCompoundStmt(createGotoStmt(blocks.at(deflt))));
     addSwitchDefault();
   }
 }
 
-void LLVMBackend::add(const llvm::UnaryOperator& inst) {
-  UnaryOperator::Opcode opc = (UnaryOperator::Opcode)-1;
+void LLVMBackend::add(const UnaryOperator& inst) {
+  clang::UnaryOperator::Opcode opc;
   switch(inst.getOpcode()) {
-  case llvm::UnaryOperator::FNeg:
-    opc = UO_Minus;
+  case UnaryOperator::FNeg:
+    opc = clang::UO_Minus;
     break;
   default:
     fatal(error() << "Unknown unary operator: " << inst);
@@ -532,14 +382,14 @@ void LLVMBackend::add(const llvm::UnaryOperator& inst) {
 
   add(inst,
       createUnaryOperator(
-          get<Expr>(inst.getOperand(0)), opc, get(inst.getType())));
+          get<clang::Expr>(inst.getOperand(0)), opc, get(inst.getType())));
 }
 
-void LLVMBackend::add(const llvm::UnreachableInst&) {
+void LLVMBackend::add(const UnreachableInst&) {
   // Nothing to do here
 }
 
-void LLVMBackend::add(const llvm::Argument& arg, const std::string& name) {
+void LLVMBackend::add(const Argument& arg, const std::string& name) {
   // We could look for dereferenceable bytes in the argument and then display
   // it as a byref parameter, but that gets problematic because then we would
   // also have to go in and handle anything that was originally a reference
@@ -550,190 +400,129 @@ void LLVMBackend::add(const llvm::Argument& arg, const std::string& name) {
   //
   // FIXME: Add argument attributes like const, restrict, non-null etc. that
   // were inferred by the compiler and/or were present in the original code
-  QualType type = get(arg.getType());
-  FunctionDecl* func = funcs.at(arg.getParent());
-  ParmVarDecl* param = ParmVarDecl::Create(astContext,
-                                           func,
-                                           invLoc,
-                                           invLoc,
-                                           &astContext.Idents.get(name),
-                                           type,
-                                           nullptr,
-                                           SC_None,
-                                           nullptr);
+  clang::QualType type = get(arg.getType());
+  clang::ParmVarDecl* param
+      = createParam(name, type, funcs.at(arg.getParent()));
 
   add(arg, createDeclRefExpr(param));
 }
 
-void LLVMBackend::add(const llvm::Function& f,
+void LLVMBackend::add(const Function& f,
                       const std::string& name,
                       const Vector<std::string>& argNames) {
-  QualType type = get(f.getFunctionType());
-  funcs[&f]
-      = FunctionDecl::Create(astContext,
-                             astContext.getTranslationUnitDecl(),
-                             invLoc,
-                             invLoc,
-                             DeclarationName(&astContext.Idents.get(name)),
-                             type,
-                             nullptr,
-                             SC_None);
-  astContext.getTranslationUnitDecl()->addDecl(funcs.at(&f));
+  clang::QualType type = get(f.getFunctionType());
+  clang::FunctionDecl* decl = createFunction(name, type);
 
-  std::vector<ParmVarDecl*> args;
-  for(unsigned i = 0; i < f.getFunctionType()->getNumParams(); i++) {
-    const llvm::Argument& arg = getArg(f, i);
-    if(argNames.size())
-      add(arg, argNames[i]);
-    else
-      add(arg, "");
-    args.push_back(&get<ParmVarDecl>(arg));
+  funcs[&f] = decl;
+  Vector<clang::ParmVarDecl*> args;
+  for(const Argument& arg : f.args()) {
+    add(arg, argNames[arg.getArgNo()]);
+    args.push_back(get<clang::ParmVarDecl>(arg));
   }
-  funcs.at(&f)->setParams(ArrayRef<ParmVarDecl*>(args));
+  decl->setParams(makeArrayRef<clang::ParmVarDecl*>(args));
 
-  add(f, createDeclRefExpr(funcs.at(&f)));
+  add(f, createDeclRefExpr(decl));
 }
 
-void LLVMBackend::add(const llvm::GlobalAlias& alias, const std::string& name) {
+void LLVMBackend::add(const GlobalAlias& alias, const std::string& name) {
   fatal(error() << "NOT IMPLEMENTED: " << alias);
 }
 
-void LLVMBackend::add(const llvm::GlobalVariable& g, const std::string& name) {
-  TranslationUnitDecl* tu = astContext.getTranslationUnitDecl();
-  QualType type = get(g.getType()->getElementType());
+void LLVMBackend::add(const GlobalVariable& g, const std::string& name) {
+  clang::QualType type = get(g.getType()->getElementType());
   if(g.isConstant())
     type.addConst();
-  DeclRefExpr* ref = createVariable(name, type, tu);
-  VarDecl* decl = dyn_cast<VarDecl>(ref->getDecl());
-  tu->addDecl(decl);
-  if(const llvm::Constant* init = g.getInitializer())
-    decl->setInit(&get<Expr>(init));
+  clang::DeclRefExpr* ref = createGlobalVariable(name, type);
+  clang::VarDecl* decl = cast<clang::VarDecl>(ref->getDecl());
+  if(const Constant* init = g.getInitializer())
+    decl->setInit(get<clang::Expr>(init));
   add(g, ref);
 }
 
-void LLVMBackend::add(const llvm::BasicBlock& bb, const std::string& name) {
+void LLVMBackend::add(const BasicBlock& bb, const std::string& name) {
   blocks[&bb] = createLabelDecl(funcs.at(bb.getParent()), name);
 }
 
-void LLVMBackend::add(llvm::StructType* sty, const std::string& name) {
-  RecordDecl* decl = RecordDecl::Create(astContext,
-                                        TTK_Struct,
-                                        astContext.getTranslationUnitDecl(),
-                                        invLoc,
-                                        invLoc,
-                                        &astContext.Idents.get(name));
-
-  astContext.getTranslationUnitDecl()->addDecl(decl);
+void LLVMBackend::add(StructType* sty, const std::string& name) {
+  clang::RecordDecl* decl = createStruct(name);
   udts[sty] = decl;
-  types[sty] = QualType(udts.at(sty)->getTypeForDecl(), 0);
+  types[sty] = clang::QualType(decl->getTypeForDecl(), 0);
 }
 
-void LLVMBackend::add(llvm::StructType* sty,
-                      const Vector<std::string>& elements) {
-  RecordDecl* record = udts.at(sty);
-  for(unsigned i = 0; i < sty->getNumElements(); i++) {
-    FieldDecl* field = FieldDecl::Create(astContext,
-                                         udts.at(sty),
-                                         invLoc,
-                                         invLoc,
-                                         &astContext.Idents.get(elements[i]),
-                                         get(sty->getElementType(i)),
-                                         nullptr,
-                                         nullptr,
-                                         true,
-                                         ICIS_NoInit);
-    record->addDecl(field);
-    fields[sty].push_back(DeclRefExpr::Create(astContext,
-                                              NestedNameSpecifierLoc(),
-                                              invLoc,
-                                              field,
-                                              false,
-                                              invLoc,
-                                              get(sty->getElementType(i)),
-                                              VK_RValue,
-                                              field));
-  }
+void LLVMBackend::add(StructType* sty, const Vector<std::string>& elements) {
+  for(unsigned i = 0; i < sty->getNumElements(); i++)
+    fields[sty].push_back(createDeclRefExpr(
+        createField(elements[i], get(sty->getElementType(i)), udts.at(sty))));
 
   // Not sure if adding a body to the struct will result in the underlying
-  // RecordType changing. Just in case, add the type back to the map
-  types[sty] = QualType(udts.at(sty)->getTypeForDecl(), 0);
+  // RecordType changing. Jus in case, add the type back to the map
+  types[sty] = clang::QualType(udts.at(sty)->getTypeForDecl(), 0);
 }
 
-void LLVMBackend::add(const llvm::ConstantInt& cint) {
-  llvm::Type* type = cint.getType();
+void LLVMBackend::add(const ConstantInt& cint) {
+  Type* type = cint.getType();
   if(type->isIntegerTy(1))
     add(cint, createBoolLiteral((bool)cint.getLimitedValue(), get(type)));
   else
     add(cint, createIntLiteral(cint.getValue(), get(type)));
 }
 
-void LLVMBackend::add(const llvm::ConstantFP& cfp) {
+void LLVMBackend::add(const ConstantFP& cfp) {
   add(cfp, createFloatLiteral(cfp.getValueAPF(), get(cfp.getType())));
 }
 
-void LLVMBackend::add(const llvm::ConstantPointerNull& cnull) {
+void LLVMBackend::add(const ConstantPointerNull& cnull) {
   add(cnull, createNullptr(get(cnull.getType())));
 }
 
-void LLVMBackend::add(const llvm::ConstantAggregateZero& czero) {
+void LLVMBackend::add(const ConstantAggregateZero& czero) {
   // FIXME: Implement this properly. It's not that hard. Just recursively
   // build an init list with zeros in it.
   add(czero,
-      createIntLiteral(llvm::APInt(64, 0),
-                       get(llvm::Type::getInt64Ty(czero.getContext()))));
+      createIntLiteral(APInt(64, 0),
+                       get(Type::getInt64Ty(czero.getContext()))));
 }
 
-void LLVMBackend::add(const llvm::ConstantExpr& cexpr, const llvm::Value& val) {
-  exprs[&cexpr] = &get(val);
+void LLVMBackend::add(const ConstantExpr& cexpr, const Value& val) {
+  add(cexpr, get(val));
 }
 
-void LLVMBackend::add(const llvm::ConstantDataSequential& cseq) {
+void LLVMBackend::add(const ConstantDataSequential& cseq) {
+  clang::QualType type = get(cseq.getType());
   if(cseq.isCString()) {
-    add(cseq,
-        StringLiteral::Create(astContext,
-                              cseq.getAsString(),
-                              StringLiteral::Ascii,
-                              false,
-                              get(cseq.getType()),
-                              invLoc));
+    add(cseq, createStringLiteral(cseq.getAsString(), type));
   } else if(cseq.isString()) {
-    add(cseq,
-        StringLiteral::Create(astContext,
-                              cseq.getAsString(),
-                              StringLiteral::Ascii,
-                              false,
-                              get(cseq.getType()),
-                              invLoc));
+    add(cseq, createStringLiteral(cseq.getAsString(), type));
   } else {
-    Vector<Expr*> exprs;
+    Vector<clang::Expr*> exprs;
     for(unsigned i = 0; i < cseq.getNumElements(); i++)
-      exprs.push_back(&get<Expr>(cseq.getElementAsConstant(i)));
+      exprs.push_back(get<clang::Expr>(cseq.getElementAsConstant(i)));
     add(cseq, createInitListExpr(exprs));
   }
 }
 
-void LLVMBackend::add(const llvm::ConstantStruct& cstruct) {
-  Vector<Expr*> exprs;
-  for(const llvm::Use& op : cstruct.operands())
-    exprs.push_back(&get<Expr>(op.get()));
+void LLVMBackend::add(const ConstantStruct& cstruct) {
+  Vector<clang::Expr*> exprs;
+  for(const Use& op : cstruct.operands())
+    exprs.push_back(get<clang::Expr>(op.get()));
   add(cstruct, createInitListExpr(exprs));
 }
 
-void LLVMBackend::add(const llvm::ConstantArray& carray) {
-  Vector<Expr*> exprs;
-  for(const llvm::Use& op : carray.operands())
-    exprs.push_back(&get<Expr>(op.get()));
+void LLVMBackend::add(const ConstantArray& carray) {
+  Vector<clang::Expr*> exprs;
+  for(const Use& op : carray.operands())
+    exprs.push_back(get<clang::Expr>(op.get()));
   add(carray, createInitListExpr(exprs));
 }
 
-void LLVMBackend::add(const llvm::UndefValue& cundef) {
+void LLVMBackend::add(const UndefValue& cundef) {
   add(cundef,
       createVariable("__undefined__",
                      get(cundef.getType()),
                      astContext.getTranslationUnitDecl()));
 }
 
-void LLVMBackend::add(llvm::IntegerType* ity) {
+void LLVMBackend::add(IntegerType* ity) {
   switch(ity->getBitWidth()) {
   case 1:
     types[ity] = astContext.BoolTy;
@@ -759,43 +548,43 @@ void LLVMBackend::add(llvm::IntegerType* ity) {
   }
 }
 
-void LLVMBackend::add(llvm::PointerType* pty) {
+void LLVMBackend::add(PointerType* pty) {
   types[pty] = astContext.getPointerType(get(pty->getElementType()));
 }
 
-void LLVMBackend::add(llvm::ArrayType* aty) {
-  llvm::APInt elems(64, aty->getNumElements(), false);
-  QualType ety = get(aty->getElementType());
+void LLVMBackend::add(ArrayType* aty) {
+  APInt elems(64, aty->getNumElements(), false);
+  clang::QualType ety = get(aty->getElementType());
 
-  types[aty]
-      = astContext.getConstantArrayType(ety, elems, ArrayType::Normal, 0);
+  types[aty] = astContext.getConstantArrayType(
+      ety, elems, clang::ArrayType::Normal, 0);
 }
 
-void LLVMBackend::add(llvm::FunctionType* fty) {
-  QualType ret = get(fty->getReturnType());
-  std::vector<QualType> args;
-  for(llvm::Type* param : fty->params())
+void LLVMBackend::add(FunctionType* fty) {
+  clang::QualType ret = get(fty->getReturnType());
+  std::vector<clang::QualType> args;
+  for(Type* param : fty->params())
     args.push_back(get(param));
-  FunctionProtoType::ExtProtoInfo proto;
+  clang::FunctionProtoType::ExtProtoInfo proto;
   proto.Variadic = fty->isVarArg();
 
   types[fty]
-      = astContext.getFunctionType(ret, llvm::ArrayRef<QualType>(args), proto);
+      = astContext.getFunctionType(ret, ArrayRef<clang::QualType>(args), proto);
 }
 
-void LLVMBackend::add(llvm::VectorType* vty) {
+void LLVMBackend::add(VectorType* vty) {
   types[vty] = astContext.getVectorType(get(vty->getElementType()),
                                         vty->getNumElements(),
-                                        VectorType::GenericVector);
+                                        clang::VectorType::GenericVector);
 }
 
-void LLVMBackend::add(llvm::Type* type) {
+void LLVMBackend::add(Type* type) {
   if(has(type))
     return;
 
   if(type->isVoidTy())
     types[type] = astContext.VoidTy;
-  else if(auto* ity = dyn_cast<llvm::IntegerType>(type))
+  else if(auto* ity = dyn_cast<IntegerType>(type))
     add(ity);
   else if(type->isFloatTy())
     types[type] = astContext.FloatTy;
@@ -805,60 +594,60 @@ void LLVMBackend::add(llvm::Type* type) {
     types[type] = astContext.LongDoubleTy;
   else if(type->isFP128Ty())
     types[type] = astContext.Float128Ty;
-  else if(auto* pty = dyn_cast<llvm::PointerType>(type))
+  else if(auto* pty = dyn_cast<PointerType>(type))
     add(pty);
-  else if(auto* aty = dyn_cast<llvm::ArrayType>(type))
+  else if(auto* aty = dyn_cast<ArrayType>(type))
     add(aty);
-  else if(auto* fty = dyn_cast<llvm::FunctionType>(type))
+  else if(auto* fty = dyn_cast<FunctionType>(type))
     add(fty);
   else
     fatal(error() << "COULD NOT ADD TYPE: " << *type);
 }
 
-void LLVMBackend::addTemp(const llvm::Instruction& inst,
-                          const std::string& name) {
-  QualType type = get(inst.getType());
-  DeclRefExpr* var = createVariable(name, type, funcs.at(&getFunction(inst)));
-  BinaryOperator* temp
-      = createBinaryOperator(*var, get<Expr>(inst), BO_Assign, type);
+void LLVMBackend::addTemp(const Instruction& inst, const std::string& name) {
+  clang::QualType type = get(inst.getType());
+  clang::DeclRefExpr* var
+      = createVariable(name, type, funcs.at(&getFunction(inst)));
+  clang::BinaryOperator* temp = createBinaryOperator(
+      var, get<clang::Expr>(inst), clang::BO_Assign, type);
   BackendBase::add(temp);
   add(inst, var);
 }
 
-void LLVMBackend::addIfThen(const llvm::BranchInst& br, bool invert) {
-  Stmt* thn = stmts.top().pop_back();
-  Expr* cond = &get<Expr>(br.getCondition());
+void LLVMBackend::addIfThen(const BranchInst& br, bool invert) {
+  clang::Stmt* thn = stmts.top().pop_back();
+  clang::Expr* cond = get<clang::Expr>(br.getCondition());
   if(invert)
-    cond = createUnaryOperator(*cond, UO_LNot, cond->getType());
-  BackendBase::add(createIfStmt(*cond, thn));
+    cond = createUnaryOperator(cond, clang::UO_LNot, cond->getType());
+  BackendBase::add(createIfStmt(cond, thn));
 }
 
-void LLVMBackend::addIfThenElse(const llvm::BranchInst& br) {
-  Stmt* els = stmts.top().pop_back();
-  Stmt* thn = stmts.top().pop_back();
-  BackendBase::add(createIfStmt(get<Expr>(br.getCondition()), thn, els));
+void LLVMBackend::addIfThenElse(const BranchInst& br) {
+  clang::Stmt* els = stmts.top().pop_back();
+  clang::Stmt* thn = stmts.top().pop_back();
+  BackendBase::add(createIfStmt(get<clang::Expr>(br.getCondition()), thn, els));
 }
 
-void LLVMBackend::addIfThenBreak(const llvm::BranchInst& br) {
-  Stmt* thn = createCompoundStmt(createBreakStmt());
-  BackendBase::add(createIfStmt(get<Expr>(br.getCondition()), thn));
+void LLVMBackend::addIfThenBreak(const BranchInst& br) {
+  clang::Stmt* thn = createCompoundStmt(createBreakStmt());
+  BackendBase::add(createIfStmt(get<clang::Expr>(br.getCondition()), thn));
 }
 
 void LLVMBackend::addIfThenGoto(const std::string& name,
-                                const llvm::BranchInst& br,
+                                const BranchInst& br,
                                 bool invert) {
   if(not labels.contains(name))
     labels[name] = createLabelDecl(funcs.at(br.getParent()->getParent()), name);
 
-  Stmt* stmt = createCompoundStmt(createGotoStmt(labels.at(name)));
-  Expr* cond = &get<Expr>(br.getCondition());
+  clang::Stmt* stmt = createCompoundStmt(createGotoStmt(labels.at(name)));
+  clang::Expr* cond = get<clang::Expr>(br.getCondition());
   if(invert)
-    cond = createUnaryOperator(*cond, UO_LNot, cond->getType());
+    cond = createUnaryOperator(cond, clang::UO_LNot, cond->getType());
 
-  BackendBase::add(createIfStmt(*cond, stmt));
+  BackendBase::add(createIfStmt(cond, stmt));
 }
 
-void LLVMBackend::addLabel(const std::string& name, const llvm::Function& f) {
+void LLVMBackend::addLabel(const std::string& name, const Function& f) {
   if(not labels.contains(name))
     labels[name] = createLabelDecl(funcs.at(&f), name);
   BackendBase::add(createLabelStmt(labels.at(name)));
@@ -873,20 +662,20 @@ void LLVMBackend::addContinue() {
 }
 
 void LLVMBackend::addEndlessLoop() {
-  Stmt* body = stmts.top().pop_back();
+  clang::Stmt* body = stmts.top().pop_back();
   BackendBase::add(
-      createDoStmt(body, *createBoolLiteral(true, astContext.BoolTy)));
+      createDoStmt(body, createBoolLiteral(true, astContext.BoolTy)));
 }
 
-void LLVMBackend::addSwitchStmt(const llvm::SwitchInst& sw) {
-  BackendBase::add(createSwitchStmt(get<Expr>(sw.getCondition())));
+void LLVMBackend::addSwitchStmt(const SwitchInst& sw) {
+  BackendBase::add(createSwitchStmt(get<clang::Expr>(sw.getCondition())));
 }
 
-void LLVMBackend::addSwitchCase(const llvm::ConstantInt* value) {
-  Stmt* body = stmts.top().pop_back();
-  SwitchCase* newCase = nullptr;
+void LLVMBackend::addSwitchCase(const ConstantInt* value) {
+  clang::Stmt* body = stmts.top().pop_back();
+  clang::SwitchCase* newCase = nullptr;
   if(value) {
-    CaseStmt* kase = createCaseStmt(get<Expr>(*value));
+    clang::CaseStmt* kase = createCaseStmt(get<clang::Expr>(*value));
     kase->setSubStmt(body);
     newCase = kase;
   } else {
@@ -896,19 +685,19 @@ void LLVMBackend::addSwitchCase(const llvm::ConstantInt* value) {
   // Calling SwitchStmt->addSwitchCase() ends up with the newly added case
   // becoming the first case in the switch statement. Better to maintain the
   // order here
-  auto* stmt = cast<SwitchStmt>(stmts.top().back());
-  SwitchCase* first = stmt->getSwitchCaseList();
+  auto* stmt = cast<clang::SwitchStmt>(stmts.top().back());
+  clang::SwitchCase* first = stmt->getSwitchCaseList();
   if(not first) {
     stmt->addSwitchCase(newCase);
   } else {
-    SwitchCase* last = first;
+    clang::SwitchCase* last = first;
     while(last->getNextSwitchCase())
       last = last->getNextSwitchCase();
     last->setNextSwitchCase(newCase);
   }
 }
 
-void LLVMBackend::addSwitchCase(const llvm::ConstantInt& value) {
+void LLVMBackend::addSwitchCase(const ConstantInt& value) {
   addSwitchCase(&value);
 }
 
@@ -916,21 +705,29 @@ void LLVMBackend::addSwitchDefault() {
   addSwitchCase(nullptr);
 }
 
-void LLVMBackend::addGoto(const llvm::BasicBlock& bb) {
+void LLVMBackend::addGoto(const BasicBlock& bb) {
   BackendBase::add(createGotoStmt(blocks.at(&bb)));
 }
 
-void LLVMBackend::addGoto(const std::string& dest, const llvm::Function& f) {
+void LLVMBackend::addGoto(const std::string& dest, const Function& f) {
   if(not labels.contains(dest))
     labels[dest] = createLabelDecl(funcs.at(&f), dest);
   BackendBase::add(createGotoStmt(labels.at(dest)));
 }
 
-bool LLVMBackend::has(llvm::Type* type) const {
+bool LLVMBackend::has(const Value* val) const {
+  return l2c.contains(val);
+}
+
+bool LLVMBackend::has(const Value& val) const {
+  return has(&val);
+}
+
+bool LLVMBackend::has(Type* type) const {
   return types.contains(type);
 }
 
-QualType LLVMBackend::get(llvm::Type* type) const {
+clang::QualType LLVMBackend::get(Type* type) const {
   return types.at(type);
 }
 

@@ -411,23 +411,23 @@ void LLVMFrontend::handle(const BasicBlock& bb) {
 }
 
 void LLVMFrontend::handle(const Function& f) {
+  std::string fname = getName(f);
+  cish::Vector<std::string> argNames(f.getFunctionType()->getNumParams());
   if(f.size()) {
-    cish::Vector<std::string> argNames;
-    for(const Argument& arg : f.args())
+    for(const Argument& arg : f.args()) {
+      unsigned i = arg.getArgNo();
       if(si.hasName(arg))
-        argNames.push_back(si.getName(arg));
+        argNames[i] = si.getName(arg);
       else if(arg.hasName())
-        argNames.push_back(formatLLVMName(arg.getName()));
+        argNames[i] = formatLLVMName(arg.getName());
       else
-        argNames.push_back("arg_" + std::to_string(arg.getArgNo()));
-    if(si.hasName(f))
-      be.add(f, si.getName(f), argNames);
-    else
-      be.add(f, formatLLVMName(f.getName()), argNames);
+        argNames[i] = "arg_" + std::to_string(i);
+    }
+    be.add(f, fname, argNames);
     for(const BasicBlock& bb : f)
       handle(bb);
   } else if(not isIgnoreValue(&f)) {
-    be.add(f, getName(f));
+    be.add(f, fname, argNames);
   }
 }
 

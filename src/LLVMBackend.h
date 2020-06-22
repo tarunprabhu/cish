@@ -27,7 +27,7 @@ namespace cish {
 /// and any that are generated
 class LLVMBackend : public BackendBase {
 private:
-  Map<const llvm::Value*, clang::Stmt*> exprs;
+  Map<const llvm::Value*, clang::Stmt*> l2c;
   Map<llvm::Type*, clang::QualType> types;
 
   // In SSA form, all values are "assigned" to some variable and that
@@ -52,59 +52,41 @@ private:
   Map<llvm::StructType*, Vector<clang::DeclRefExpr*>> fields;
   Map<const llvm::Function*, clang::FunctionDecl*> funcs;
   Map<const llvm::BasicBlock*, clang::LabelDecl*> blocks;
-  Map<std::string, clang::LabelDecl*> labels;
-
-  Map<const clang::Type*, clang::TypeSourceInfo*> typeSrcInfo;
 
 protected:
   template <
       typename ClassT,
       typename... Args,
       std::enable_if_t<std::is_base_of<clang::Stmt, ClassT>::value, int> = 0>
-  ClassT& add(const llvm::Value& val, ClassT* ast) {
-    return *llvm::dyn_cast<ClassT>(exprs[&val] = ast);
-  }
-
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value* val) {
-    return *llvm::dyn_cast<ClangT>(exprs.at(val));
+  ClassT* add(const llvm::Value& val, ClassT* ast) {
+    return llvm::dyn_cast<ClassT>(l2c[&val] = ast);
   }
 
   template <
       typename ClangT = clang::Stmt,
       std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value& val) {
+  ClangT* get(const llvm::Value* val) const {
+    return llvm::dyn_cast<ClangT>(l2c.at(val));
+  }
+
+  template <
+      typename ClangT = clang::Stmt,
+      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
+  ClangT* get(const llvm::Value& val) const {
     return get<ClangT>(&val);
   }
 
   template <
       typename ClangT,
       std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value* val) {
-    return *llvm::dyn_cast<ClangT>(get<clang::DeclRefExpr>(val).getFoundDecl());
+  ClangT* get(const llvm::Value* val) const {
+    return llvm::dyn_cast<ClangT>(get<clang::DeclRefExpr>(val)->getFoundDecl());
   }
 
   template <
       typename ClangT,
       std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
-  ClangT& get(const llvm::Value& val) {
-    return get<ClangT>(&val);
-  }
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  const ClangT& get(const llvm::Value* val) const {
-    return *llvm::dyn_cast<ClangT>(exprs.at(val));
-  }
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  const ClangT& get(const llvm::Value& val) const {
+  ClangT* get(const llvm::Value& val) const {
     return get<ClangT>(&val);
   }
 
@@ -129,71 +111,9 @@ protected:
                                   unsigned field,
                                   const llvm::Instruction& inst);
 
-  clang::DeclRefExpr* createVariable(const std::string& name,
-                                     clang::QualType type,
-                                     clang::DeclContext* parent);
-
-  clang::BinaryOperator* createBinaryOperator(clang::Expr& lhs,
-                                              clang::Expr& rhs,
-                                              clang::BinaryOperator::Opcode op,
-                                              clang::QualType type);
-
-  clang::UnaryOperator* createUnaryOperator(clang::Expr& lhs,
-                                            clang::UnaryOperator::Opcode op,
-                                            clang::QualType type);
-
-  clang::ArraySubscriptExpr* createArraySubscriptExpr(clang::Expr& arr,
-                                                      clang::Expr& idx,
-                                                      clang::QualType type);
-
-  clang::CStyleCastExpr* createCastExpr(clang::Expr& expr,
-                                        clang::QualType type);
-
-  clang::IfStmt*
-  createIfStmt(clang::Expr& cond, clang::Stmt* thn, clang::Stmt* els = nullptr);
-
-  clang::GotoStmt* createGotoStmt(clang::LabelDecl* label);
-
-  clang::CompoundStmt*
-  createCompoundStmt(const cish::Vector<clang::Stmt*>& stmts);
-
-  clang::CompoundStmt* createCompoundStmt(clang::Stmt* stmt);
-
-  clang::BreakStmt* createBreakStmt();
-
-  clang::ContinueStmt* createContinueStmt();
-
-  clang::ReturnStmt* createReturnStmt(clang::Expr* retExpr);
-
-  clang::DeclRefExpr* createDeclRefExpr(clang::ValueDecl* decl);
-
-  clang::CallExpr* createCallExpr(clang::Expr& callee,
-                                  const Vector<clang::Expr*>& args,
-                                  clang::QualType type);
-
-  clang::DoStmt* createDoStmt(clang::Stmt* body, clang::Expr& cond);
-  clang::WhileStmt* createWhileStmt(clang::Expr& cond, clang::Stmt* body);
-
-  clang::CXXBoolLiteralExpr* createBoolLiteral(bool b, clang::QualType type);
-  clang::IntegerLiteral* createIntLiteral(const llvm::APInt& i,
-                                          clang::QualType type);
-  clang::FloatingLiteral* createFloatLiteral(const llvm::APFloat& f,
-                                             clang::QualType type);
-  clang::CXXNullPtrLiteralExpr* createNullptr(clang::QualType type);
-  clang::InitListExpr* createInitListExpr(const Vector<clang::Expr*>& exprs);
-
-  clang::LabelStmt* createLabelStmt(clang::LabelDecl* label);
-  clang::LabelDecl* createLabelDecl(clang::FunctionDecl* f,
-                                    const std::string& name);
-
-  clang::SwitchStmt* createSwitchStmt(clang::Expr& cond);
-  clang::CaseStmt* createCaseStmt(clang::Expr& value);
-  clang::DefaultStmt* createDefaultStmt(clang::Stmt* body);
-
   void addSwitchCase(const llvm::ConstantInt* value);
 
 public:
-  /// @param prefix The prefix to use when generating names
   LLVMBackend(CishContext& context);
   LLVMBackend() = delete;
   LLVMBackend(const LLVMBackend&) = delete;
@@ -201,22 +121,8 @@ public:
   ~LLVMBackend() = default;
 
 
-  /// @param val A llvm::Value
-  /// @returns true if the @val has a corresponding AST node
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  bool has(const llvm::Value* val) const {
-    return exprs.contains(val);
-  }
-
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  bool has(const llvm::Value& val) const {
-    return has<ClangT>(&val);
-  }
-
+  bool has(const llvm::Value* v) const;
+  bool has(const llvm::Value& v) const;
   bool has(llvm::Type* type) const;
   bool hasTemp(const llvm::Value& val) const;
   bool hasTemp(const llvm::Value* val) const;
@@ -287,7 +193,7 @@ public:
 
   void add(const llvm::Function& f,
            const std::string& name,
-           const Vector<std::string>& argNames = {});
+           const Vector<std::string>& argNames);
   void add(const llvm::GlobalVariable& g, const std::string& name);
   void add(const llvm::GlobalAlias& g, const std::string& name);
   void add(const llvm::Argument& arg, const std::string& name);
