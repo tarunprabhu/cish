@@ -442,6 +442,7 @@ bool CishFunctionPass::runOnFunction(Function& f) {
   case cish::StructureKind::SemiStructured:
     cish::WalkSemiStructured(fe, be, f).walk(&analysis.getStructured());
     break;
+  case cish::StructureKind::PerfectlyStructured:
   case cish::StructureKind::Structured:
     cish::WalkStructured(fe, be, f).walk(&analysis.getStructured());
     break;

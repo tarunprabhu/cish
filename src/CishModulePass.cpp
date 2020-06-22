@@ -1,8 +1,8 @@
-#include "CishCmdLineFlags.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
 #include "LLVMBackend.h"
 #include "LLVMFrontend.h"
+#include "Options.h"
 #include "SourceInfo.h"
 
 using namespace llvm;
@@ -53,7 +53,6 @@ bool CishModulePass::runOnModule(Module& m) {
   cish::LLVMFrontend& fe = context.getLLVMFrontend();
   cish::LLVMBackend& be = context.getLLVMBackend();
 
-
   if(cish::opts().log) {
     std::string buf;
     raw_string_ostream filename(buf);
@@ -72,7 +71,8 @@ bool CishModulePass::runOnModule(Module& m) {
       fs.close();
       cish::message() << "Wrote prepare LLVM IR to " << filename.str() << "\n";
     } else {
-      cish::warning() << "Could not write to log file " << filename.str() << "\n";
+      cish::warning() << "Could not write to log file " << filename.str()
+                      << "\n";
     }
   }
 

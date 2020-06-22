@@ -40,6 +40,7 @@ private:
   const Function& func;
   const LoopInfo& li;
 
+  bool hasGoto;
   unsigned reductions;
   unsigned labelId;
   std::unique_ptr<Entry> root;
@@ -104,8 +105,8 @@ public:
 };
 
 StructureAnalysis::StructureAnalysis(const Function& func, const LoopInfo& li)
-    : llvmContext(func.getContext()), func(func), li(li), reductions(0),
-      labelId(0) {
+    : llvmContext(func.getContext()), func(func), li(li), hasGoto(false),
+      reductions(0), labelId(0) {
   ;
 }
 
@@ -393,6 +394,7 @@ bool StructureAnalysis::reduceIfThenGoto(StructNode& dest) {
 
   message() << ++reductions << ": Reducing to IfThenGoto with target "
             << dest.getId() << "\n";
+  hasGoto = true;
 
   return true;
 }
@@ -887,7 +889,10 @@ StructureKind StructureAnalysis::runOnFunction(const Function& f) {
     return StructureKind::Unstructured;
   else if(postorder.size() != 1)
     return StructureKind::SemiStructured;
-  return StructureKind::Structured;
+  else if(hasGoto)
+    return StructureKind::Structured;
+  else
+    return StructureKind::PerfectlyStructured;
 }
 
 } // namespace cish

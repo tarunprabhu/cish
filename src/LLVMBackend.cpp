@@ -121,14 +121,17 @@ void LLVMBackend::add(const llvm::AllocaInst& alloca, const std::string& name) {
   add(alloca, createUnaryOperator(*ref, UO_AddrOf, get(alloca.getType())));
 }
 
-CStyleCastExpr* LLVMBackend::createCastExpr(Expr& expr, QualType type) {
+CStyleCastExpr* LLVMBackend::createCastExpr(Expr& expr, QualType qty) {
+  const Type* type = qty.getTypePtr();
+  if(not typeSrcInfo.contains(type))
+    typeSrcInfo[type] = astContext.CreateTypeSourceInfo(qty);
   return CStyleCastExpr::Create(astContext,
-                                type,
+                                qty,
                                 VK_RValue,
                                 CastKind::CK_BitCast,
                                 &expr,
                                 nullptr,
-                                nullptr,
+                                typeSrcInfo.at(type),
                                 invLoc,
                                 invLoc);
 }
@@ -894,11 +897,11 @@ void LLVMBackend::addSwitchCase(const llvm::ConstantInt* value) {
   // becoming the first case in the switch statement. Better to maintain the
   // order here
   auto* stmt = cast<SwitchStmt>(stmts.top().back());
-  clang::SwitchCase* first = stmt->getSwitchCaseList();
+  SwitchCase* first = stmt->getSwitchCaseList();
   if(not first) {
     stmt->addSwitchCase(newCase);
   } else {
-    clang::SwitchCase* last = first;
+    SwitchCase* last = first;
     while(last->getNextSwitchCase())
       last = last->getNextSwitchCase();
     last->setNextSwitchCase(newCase);

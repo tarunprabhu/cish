@@ -14,6 +14,7 @@ enum class StructureKind {
   Unstructured,
   SemiStructured,
   Structured,
+  PerfectlyStructured,
 };
 
 } // namespace cish

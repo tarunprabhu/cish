@@ -54,6 +54,8 @@ private:
   Map<const llvm::BasicBlock*, clang::LabelDecl*> blocks;
   Map<std::string, clang::LabelDecl*> labels;
 
+  Map<const clang::Type*, clang::TypeSourceInfo*> typeSrcInfo;
+
 protected:
   template <
       typename ClassT,
