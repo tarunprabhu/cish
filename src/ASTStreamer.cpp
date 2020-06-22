@@ -24,7 +24,8 @@ static std::string formatArrayDims(const ConstantArrayType* aty) {
   return ss.str();
 }
 
-ASTStreamer::ASTStreamer(const clang::ASTContext& astContext, llvm::raw_ostream& os)
+ASTStreamer::ASTStreamer(const clang::ASTContext& astContext,
+                         llvm::raw_ostream& os)
     : astContext(astContext), os(os), ilevel(0) {
   if(opts().indentOffset == 0)
     tabStr = "\t";

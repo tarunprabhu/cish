@@ -13,8 +13,8 @@
 #include "List.h"
 #include "Map.h"
 #include "Set.h"
-#include "Vector.h"
 #include "SourceInfo.h"
+#include "Vector.h"
 
 #include <regex>
 

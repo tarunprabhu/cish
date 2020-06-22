@@ -120,7 +120,6 @@ public:
   LLVMBackend(LLVMBackend&&) = delete;
   ~LLVMBackend() = default;
 
-
   bool has(const llvm::Value* v) const;
   bool has(const llvm::Value& v) const;
   bool has(llvm::Type* type) const;

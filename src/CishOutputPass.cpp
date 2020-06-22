@@ -1,6 +1,6 @@
+#include "ASTStreamer.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
-#include "ASTStreamer.h"
 #include "Vector.h"
 
 #include <llvm/Pass.h>

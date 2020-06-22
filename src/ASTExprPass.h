@@ -28,7 +28,7 @@ protected:
   virtual clang::Expr* process(clang::IntegerLiteral* intLiteral);
   virtual clang::Expr* process(clang::FloatingLiteral* floatLiteral);
   virtual clang::Expr* process(clang::StringLiteral* stringLiteral);
-  virtual clang::Expr* process(clang::CXXNullPtrLiteralExpr *nullLiteral);
+  virtual clang::Expr* process(clang::CXXNullPtrLiteralExpr* nullLiteral);
   virtual clang::Expr* process(clang::DeclRefExpr* declRefExpr);
   virtual clang::Expr* process(clang::InitListExpr* initList);
   virtual clang::Expr* process(clang::BinaryOperator* binOp);

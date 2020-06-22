@@ -139,7 +139,6 @@ Options::Options()
       set(ann);
   else
     set(Annotations::None);
-
 }
 
 void Options::set(StripCasts cst) {

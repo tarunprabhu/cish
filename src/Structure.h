@@ -44,7 +44,7 @@ public:
   public:
     succ_iterator_t() : IteratorT() {}
     succ_iterator_t(IteratorT i) : IteratorT(i) {}
-    auto& operator->() {
+    auto& operator-> () {
       return IteratorT::operator->()->second;
     }
     auto& operator*() {
