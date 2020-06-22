@@ -1,9 +1,8 @@
 #include "CishContext.h"
 #include "Diagnostics.h"
+#include "IRPasses.h"
 #include "Options.h"
-#include "Passes.h"
 #include "Set.h"
-#include "Stream.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -71,6 +70,7 @@ int main(int argc, char* argv[]) {
   pm.add(createCishPreparePass());
   pm.add(createCishModulePass());
   pm.add(createCishFunctionPass());
+  pm.add(createCishASTSimplifyPass());
   pm.add(createCishOutputPass(cish::opts().fileOut));
   pm.run(*pModule);
 

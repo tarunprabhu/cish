@@ -1,5 +1,6 @@
 #include "Options.h"
 #include "Diagnostics.h"
+#include "Set.h"
 
 using namespace llvm;
 namespace cl = llvm::cl;
@@ -20,7 +21,6 @@ static cl::list<cish::StripCasts> optStripCasts(
         clEnumValN(cish::StripCasts::Vector,
                    "vector",
                    "Strip casts to vector types"),
-        clEnumValN(cish::StripCasts::Never, "never", "Never strip casts"),
         clEnumValN(cish::StripCasts::All, "all", "Strip all casts")),
     cl::cat(cishOptionCategory));
 
@@ -124,6 +124,10 @@ Options::Options()
     : stripCasts(0), annotations(0), fileIn(optFilename), fileOut(optOutput),
       prefix(optPrefix), indentStyle(optIndentStyle), indentOffset(optOffset),
       parens(optParens), verbose(optVerbose), log(optLog), logDir(optLogDir) {
+  // Sanity checks
+  if(indentOffset > 8)
+    fatal(error() << "Invalid value for offset. Min 0, Max 8");
+
   if(optStripCasts.size())
     for(StripCasts cst : optStripCasts)
       set(cst);
@@ -136,9 +140,6 @@ Options::Options()
   else
     set(Annotations::None);
 
-  // Sanity checks
-  if(indentOffset > 8)
-    fatal(error() << "Invalid value for offset. Min 0, Max 8");
 }
 
 void Options::set(StripCasts cst) {

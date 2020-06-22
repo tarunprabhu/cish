@@ -1,6 +1,6 @@
 #include "CishContext.h"
 #include "Diagnostics.h"
-#include "Stream.h"
+#include "ASTStreamer.h"
 #include "Vector.h"
 
 #include <llvm/Pass.h>
@@ -16,7 +16,7 @@ private:
   std::string outFile;
 
 private:
-  void run(llvm::raw_ostream& os);
+  void run(clang::ASTContext& astContext, raw_ostream& os);
 
 public:
   explicit CishOutputPass(const std::string& outFile);
@@ -40,12 +40,8 @@ void CishOutputPass::getAnalysisUsage(AnalysisUsage& AU) const {
   AU.setPreservesAll();
 }
 
-void CishOutputPass::run(llvm::raw_ostream& os) {
-  const cish::CishContext& context
-      = getAnalysis<CishContextWrapperPass>().getCishContext();
-  clang::ASTContext& astContext = context.getASTContext();
-
-  cish::Stream stream(astContext, os);
+void CishOutputPass::run(clang::ASTContext& astContext, raw_ostream& os) {
+  cish::ASTStreamer stream(astContext, os);
 
   cish::Vector<const clang::RecordDecl*> structs;
   cish::Vector<const clang::VarDecl*> globals;
@@ -92,15 +88,19 @@ void CishOutputPass::run(llvm::raw_ostream& os) {
 }
 
 bool CishOutputPass::runOnModule(Module& m) {
+  const cish::CishContext& context
+      = getAnalysis<CishContextWrapperPass>().getCishContext();
+  clang::ASTContext& astContext = context.getASTContext();
+
   if(outFile == "-") {
-    run(llvm::outs());
+    run(astContext, outs());
   } else {
     std::error_code ec;
-    llvm::raw_fd_ostream fs(outFile, ec);
+    raw_fd_ostream fs(outFile, ec);
     if(ec) {
       cish::fatal(cish::error() << ec.message());
     } else {
-      run(fs);
+      run(astContext, fs);
       fs.close();
     }
   }

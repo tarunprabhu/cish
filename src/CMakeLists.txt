@@ -1,6 +1,11 @@
 set(SOURCES
+  ASTExprPass.cpp
+  ASTSimplifyOperatorsPass.cpp
+  ASTStreamer.cpp
+  ASTStripCastsPass.cpp
   cish.cpp
   BackendBase.cpp
+  CishASTSimplifyPass.cpp
   CishContext.cpp
   CishFunctionPass.cpp
   CishModulePass.cpp
@@ -13,7 +18,6 @@ set(SOURCES
   LLVMUtils.cpp
   Options.cpp
   SourceInfo.cpp
-  Stream.cpp
   Structure.cpp
   StructureAnalysis.cpp)
 
