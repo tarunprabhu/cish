@@ -1,4 +1,7 @@
 set(SOURCES
+  ASTBuilder.cpp
+  ASTDeadCodeEliminationPass.cpp
+  ASTDefUseInfo.cpp
   ASTExprPass.cpp
   ASTSimplifyOperatorsPass.cpp
   ASTStreamer.cpp
@@ -24,7 +27,7 @@ set(SOURCES
 set(CISH cish)
 add_executable(${CISH} ${SOURCES})
 target_link_directories(${CISH} PUBLIC ${LLVM_LIBRARY_DIR} ${Clang_DIR})
-target_link_libraries(${CISH} clangAST clangBasic LLVM)
+target_link_libraries(${CISH} clangAST clangBasic clangAnalysis LLVM)
 set_target_properties(${CISH}
   PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_PROJECT_BINDIR})

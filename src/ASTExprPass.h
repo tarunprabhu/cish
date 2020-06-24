@@ -34,8 +34,9 @@ protected:
   virtual clang::Expr* process(clang::BinaryOperator* binOp);
   virtual clang::Expr* process(clang::UnaryOperator* unOp);
   virtual clang::Expr* process(clang::ConditionalOperator* cond);
-  virtual clang::Expr* process(clang::CallExpr* call);
-  virtual clang::Expr* process(clang::CStyleCastExpr* cexpr);
+  virtual clang::Expr* process(clang::CallExpr* callExpr);
+  virtual clang::Expr* process(clang::MemberExpr* memberExpr);
+  virtual clang::Expr* process(clang::CStyleCastExpr* castExpr);
   virtual clang::Expr* process(clang::ArraySubscriptExpr* arrayExpr);
   virtual clang::Expr* process(clang::Expr* expr);
 

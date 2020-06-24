@@ -5,6 +5,8 @@
 
 using namespace llvm;
 
+namespace cish {
+
 const Argument& getArg(const Function& f, unsigned i) {
   for(const Argument& a : f.args())
     if(a.getArgNo() == i)
@@ -33,3 +35,5 @@ const Value* stripCasts(const Value* v) {
     return stripCasts(cst->getOperand(0));
   return v;
 }
+
+} // namespace cish

@@ -7,5 +7,6 @@
 
 cish::ASTFunctionPass* createASTStripCastsPass(clang::ASTContext&);
 cish::ASTFunctionPass* createASTSimplifyOperatorsPass(clang::ASTContext&);
+cish::ASTFunctionPass* createASTDeadCodeEliminationPass(clang::ASTContext&);
 
 #endif // CISH_AST_PASSES_H

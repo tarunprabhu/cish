@@ -2,6 +2,8 @@
 
 using namespace clang;
 
+namespace cish {
+
 const Type* getBaseType(const ArrayType* aty) {
   const Type* ety = aty->getElementType().getTypePtr();
   if(const auto* bty = dyn_cast<ArrayType>(ety))
@@ -14,3 +16,5 @@ clang::Expr* stripCasts(clang::Expr* expr) {
     return stripCasts(cst->getSubExpr());
   return expr;
 }
+
+} // namespace cish

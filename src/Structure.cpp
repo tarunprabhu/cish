@@ -174,7 +174,7 @@ StructNode& StructNode::getSuccessor(const ConstantInt* kase) const {
         return *p.second;
   } else {
     for(const std::pair<const ConstantInt*, StructNode*>& p : out)
-      if(p.first->getLimitedValue() == kase->getLimitedValue())
+      if(p.first and (p.first->getLimitedValue() == kase->getLimitedValue()))
         return *p.second;
   }
   fatal(error() << "No successor for " << *kase << " in " << getId());
@@ -287,14 +287,21 @@ const StructNode& IfThenElse::getElse() const {
   return els;
 }
 
-IfThenBreak::IfThenBreak(StructNode& exit, const BranchInst& br, bool invert)
-    : StructNode(StructNode::S_IfThenBreak), exit(exit), br(br),
-      invert(invert) {
+IfThenBreak::IfThenBreak(StructNode& exit,
+                         const BranchInst& br,
+                         bool invert,
+                         bool unique)
+    : StructNode(StructNode::S_IfThenBreak), exit(exit), br(br), invert(invert),
+      unique(unique) {
   ;
 }
 
 bool IfThenBreak::isInverted() const {
   return invert;
+}
+
+bool IfThenBreak::isInLoopWithUniqueExit() const {
+  return unique;
 }
 
 StructNode& IfThenBreak::getExit() {

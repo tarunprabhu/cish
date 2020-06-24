@@ -68,7 +68,6 @@ protected:
   ASTStreamer& operator<<(const clang::VectorType*);
   ASTStreamer& operator<<(clang::QualType);
 
-  ASTStreamer& operator<<(const clang::Stmt*);
   ASTStreamer& operator<<(const clang::DeclStmt*);
   ASTStreamer& operator<<(const clang::CompoundStmt*);
   ASTStreamer& operator<<(const clang::LabelStmt*);
@@ -78,6 +77,7 @@ protected:
   ASTStreamer& operator<<(const clang::UnaryOperator*);
   ASTStreamer& operator<<(const clang::ConditionalOperator*);
   ASTStreamer& operator<<(const clang::CallExpr*);
+  ASTStreamer& operator<<(const clang::MemberExpr*);
   ASTStreamer& operator<<(const clang::CStyleCastExpr*);
   ASTStreamer& operator<<(const clang::ArraySubscriptExpr*);
   ASTStreamer& operator<<(const clang::ForStmt*);
@@ -115,6 +115,7 @@ public:
   ASTStreamer& operator<<(const clang::VarDecl*);
   ASTStreamer& operator<<(const clang::FunctionDecl*);
   ASTStreamer& operator<<(const clang::RecordDecl*);
+  ASTStreamer& operator<<(const clang::Stmt*);
 };
 
 } // namespace cish

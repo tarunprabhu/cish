@@ -61,25 +61,13 @@ void CishPreparePass::getAnalysisUsage(AnalysisUsage& AU) const {
 }
 
 bool CishPreparePass::shouldPromote(AllocaInst* alloca) {
-  // The only allocas we want to remove are those introduced by reg2mem and
-  // the only uses they should have are stores and loads. If we get rid of
-  // any others along the way, no real harm done. If the alloca was only
-  // written to once and then read from multiple times, it should be
-  // removed.
-  cish::Vector<StoreInst*> stores;
-  cish::Vector<LoadInst*> loads;
+  // The safest ones to remove are those that are local to a basic block
+  cish::Set<BasicBlock*> bbs;
   for(Use& u : alloca->uses())
-    if(auto* store = dyn_cast<StoreInst>(u.getUser()))
-      stores.push_back(store);
-    else if(auto* load = dyn_cast<LoadInst>(u.getUser()))
-      loads.push_back(load);
-    else
-      return false;
+    if(auto* inst = dyn_cast<Instruction>(u.getUser()))
+      bbs.insert(inst->getParent());
 
-  if(stores.size() != 1)
-    return false;
-
-  return true;
+  return bbs.size() <= 1;
 }
 
 std::string CishPreparePass::registerVar(const std::string& var) {

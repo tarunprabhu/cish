@@ -74,7 +74,8 @@ ASTStreamer& ASTStreamer::parenthetize(const Stmt* stmt) {
   if(isa<CXXBoolLiteralExpr>(stmt) or isa<IntegerLiteral>(stmt)
      or isa<FloatingLiteral>(stmt) or isa<CXXNullPtrLiteralExpr>(stmt)
      or isa<CharacterLiteral>(stmt) or isa<StringLiteral>(stmt)
-     or isa<DeclRefExpr>(stmt) or isa<InitListExpr>(stmt)) {
+     or isa<DeclRefExpr>(stmt) or isa<InitListExpr>(stmt)
+     or isa<ArraySubscriptExpr>(stmt)) {
     *this << stmt;
   } else if(opts().parens == Parens::Smart) {
     if(const auto* op = dyn_cast<BinaryOperator>(stmt))
@@ -376,7 +377,13 @@ ASTStreamer& ASTStreamer::operator<<(const FunctionDecl* f) {
   *this << ")";
 
   if(f->hasBody()) {
-    *this << f->getBody();
+    beginBlock("");
+    for(const Decl* d : f->decls())
+      if(const auto* var = dyn_cast<VarDecl>(d))
+        *this << tab() << var << endl();
+    *this << endl();
+    process(cast<CompoundStmt>(f->getBody()), false);
+    endBlock(false);
   } else {
     endst(false);
   }
@@ -459,103 +466,52 @@ ASTStreamer& ASTStreamer::operator<<(const DeclRefExpr* declRefExpr) {
   fatal(error() << "Unknown decl in declRef: " << decl->getDeclKindName());
 }
 
-ASTStreamer& ASTStreamer::operator<<(UnaryOperator::Opcode opc) {
-  switch(opc) {
-  case UO_Minus:
-    return *this << "-";
-  case UO_Not:
-    return *this << "~";
-  case UO_LNot:
-    return *this << "!";
-  case UO_AddrOf:
-    return *this << "&";
-  case UO_Deref:
-    return *this << "*";
-  default:
-    return *this << "<<UNKNOWN UNARY OPERATOR>>";
-  }
-}
-
-ASTStreamer& ASTStreamer::operator<<(BinaryOperator::Opcode opc) {
-  switch(opc) {
-  case BO_Add:
-    return *this << "+";
-  case BO_Sub:
-    return *this << "-";
-  case BO_Mul:
-    return *this << "*";
-  case BO_Div:
-    return *this << "/";
-  case BO_Rem:
-    return *this << "%";
-  case BO_Shl:
-    return *this << "<<";
-  case BO_Shr:
-    return *this << ">>";
-  case BO_And:
-    return *this << "&";
-  case BO_Or:
-    return *this << "|";
-  case BO_Xor:
-    return *this << "^";
-  case BO_EQ:
-    return *this << "==";
-  case BO_NE:
-    return *this << "!=";
-  case BO_GT:
-    return *this << ">";
-  case BO_GE:
-    return *this << ">=";
-  case BO_LT:
-    return *this << "<";
-  case BO_LE:
-    return *this << "<=";
-  case BO_Assign:
-    return *this << "=";
-  case BO_PtrMemD:
-    return *this << ".";
-  case BO_PtrMemI:
-    return *this << "->";
-  case BO_Comma:
-    return *this << ", ";
-  default:
-    return *this << "<<UNKNOWN BINARY OPERATOR>>";
-  }
-}
-
 ASTStreamer& ASTStreamer::operator<<(const BinaryOperator* binOp) {
   const Expr* lhs = binOp->getLHS();
   const Expr* rhs = binOp->getRHS();
-  BinaryOperator::Opcode opc = binOp->getOpcode();
-  switch(opc) {
+  switch(binOp->getOpcode()) {
   case BO_Assign:
-    return *this << lhs << " " << opc << " " << rhs;
+  case BO_AddAssign:
+  case BO_SubAssign:
+  case BO_MulAssign:
+  case BO_DivAssign:
+  case BO_RemAssign:
+  case BO_ShlAssign:
+  case BO_ShrAssign:
+  case BO_AndAssign:
+  case BO_OrAssign:
+  case BO_XorAssign:
+    *this << lhs << " " << binOp->getOpcodeStr() << " " << rhs;
     break;
   case BO_PtrMemI:
   case BO_PtrMemD:
-    return *this << lhs << opc << rhs;
+    *this << lhs << binOp->getOpcodeStr() << rhs;
+    break;
   default:
+    *this << parenthetize(lhs) << " ";
     if(const auto* vty = dyn_cast<VectorType>(binOp->getType().getTypePtr())) {
       unsigned num = vty->getNumElements();
-      *this << parenthetize(lhs) << " ";
       for(unsigned i = 0; i < num / 2; i++)
         *this << "<";
-      *this << opc;
+      *this << binOp->getOpcodeStr();
       for(unsigned i = 0; i < num / 2; i++)
         *this << ">";
-      return *this << " " << parenthetize(rhs);
     } else {
-      return *this << parenthetize(lhs) << " " << opc << " "
-                   << parenthetize(rhs);
+      *this << binOp->getOpcodeStr();
     }
+    *this << " " << parenthetize(rhs);
   }
+
+  return *this;
 }
 
 ASTStreamer& ASTStreamer::operator<<(const UnaryOperator* unOp) {
-  if(unOp->getOpcode() == UO_Deref)
-    *this << unOp->getOpcode() << unOp->getSubExpr();
+  UnaryOperator::Opcode opc = unOp->getOpcode();
+  if(opc == UO_Deref)
+    *this << UnaryOperator::getOpcodeStr(opc) << unOp->getSubExpr();
   else
-    *this << unOp->getOpcode() << parenthetize(unOp->getSubExpr());
+    *this << UnaryOperator::getOpcodeStr(opc)
+          << parenthetize(unOp->getSubExpr());
 
   return *this;
 }
@@ -578,6 +534,14 @@ ASTStreamer& ASTStreamer::operator<<(const CallExpr* callExpr) {
   return *this;
 }
 
+ASTStreamer& ASTStreamer::operator<<(const MemberExpr* memberExpr) {
+  *this << parenthetize(memberExpr->getBase())
+        << (memberExpr->isArrow() ? "->" : ".")
+        << memberExpr->getMemberDecl()->getName();
+
+  return *this;
+}
+
 ASTStreamer& ASTStreamer::operator<<(const CStyleCastExpr* castExpr) {
   const Type* type = castExpr->getType().getTypePtr();
   const Expr* expr = castExpr->getSubExpr();
@@ -587,11 +551,11 @@ ASTStreamer& ASTStreamer::operator<<(const CStyleCastExpr* castExpr) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const ArraySubscriptExpr* arrExpr) {
-  if(not isa<DeclRefExpr>(arrExpr))
-    *this << parenthetize(arrExpr->getLHS());
+  if(not isa<DeclRefExpr>(arrExpr->getBase()))
+    *this << "(" << arrExpr->getBase() << ")";
   else
     *this << arrExpr->getLHS();
-  *this << "[" << arrExpr->getRHS() << "]";
+  *this << "[" << arrExpr->getIdx() << "]";
 
   return *this;
 }
@@ -823,6 +787,8 @@ ASTStreamer& ASTStreamer::operator<<(const Stmt* stmt) {
     *this << condOp;
   else if(const auto* callExpr = dyn_cast<CallExpr>(stmt))
     *this << callExpr;
+  else if(const auto* memberExpr = dyn_cast<MemberExpr>(stmt))
+    *this << memberExpr;
   else if(const auto* castExpr = dyn_cast<CStyleCastExpr>(stmt))
     *this << castExpr;
   else if(const auto* arrExpr = dyn_cast<ArraySubscriptExpr>(stmt))

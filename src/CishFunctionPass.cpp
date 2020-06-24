@@ -229,7 +229,9 @@ protected:
   Set<const StructNode*> seen;
 
 protected:
+  bool isUnstructured(const StructNode& node) const;
   virtual void walk(const IfThenBreak& iftb) override;
+  virtual void walk(const Block& block) override;
   virtual void walk(const StructNode& node) override;
 
 public:
@@ -256,9 +258,56 @@ void WalkSemiStructured::setNodeNames(const StructNode* node) {
   }
 }
 
+bool WalkSemiStructured::isUnstructured(const StructNode& node) const {
+  return node.getNumPredecessors() or node.getNumSuccessors();
+}
+
+void WalkSemiStructured::walk(const Block& block) {
+  WalkStructured::walk(block);
+
+  if(isUnstructured(block) and (block.getNumSuccessors() > 1)) {
+    const BasicBlock& bb = block.getLLVM();
+    if(const auto* swtch = dyn_cast<SwitchInst>(&bb.back())) {
+      be.addSwitchStmt(*swtch);
+      for(const auto& i : swtch->cases()) {
+        be.beginBlock();
+        be.addGoto(nodeNames.at(&block.getSuccessor(i.getCaseValue())), func);
+        be.endBlock();
+
+        be.addSwitchCase(*i.getCaseValue());
+      };
+      if(const BasicBlock* deflt = swtch->getDefaultDest()) {
+        be.beginBlock();
+        be.addGoto(nodeNames.at(&block.getSuccessor(nullptr)), func);
+        be.endBlock();
+
+        be.addSwitchDefault();
+      }
+    } else if(const auto* br = dyn_cast<BranchInst>(&bb.back())) {
+      LLVMContext& llvmContext = func.getContext();
+      be.beginBlock();
+      be.addGoto(
+          nodeNames.at(&block.getSuccessor(ConstantInt::getTrue(llvmContext))),
+          func);
+      be.endBlock();
+
+      be.beginBlock();
+      be.addGoto(
+          nodeNames.at(&block.getSuccessor(ConstantInt::getFalse(llvmContext))),
+          func);
+      be.endBlock();
+
+      be.addIfThenElse(*br);
+    } else {
+      fatal(error()
+            << "Unexpected terminator instruction in semi structured block: "
+            << bb.back());
+    }
+  }
+}
+
 void WalkSemiStructured::walk(const IfThenBreak& iftb) {
-  bool unstructured = (iftb.getNumPredecessors() or iftb.getNumSuccessors());
-  if(unstructured) {
+  if(isUnstructured(iftb)) {
     const auto& br = iftb.getLLVMBranchInst();
     handle(br);
 
@@ -288,51 +337,15 @@ void WalkSemiStructured::walk(const StructNode* node) {
 
   // In the semi-structured case, the nodes may have a predecessor and
   // successor. Any disconnected nodes are structured
-  bool unstructured = node->getNumPredecessors() or node->getNumSuccessors();
-  if(unstructured)
+  if(isUnstructured(*node))
     be.addLabel(nodeNames.at(node), func);
 
   WalkStructured::walk(node);
   seen.insert(node);
 
-  if(unstructured) {
-    unsigned succs = node->getNumSuccessors();
-    if(succs == 1) {
+  if(isUnstructured(*node)) {
+    if(node->getNumSuccessors() == 1) {
       be.addGoto(nodeNames.at(&node->getSuccessor()), func);
-    } else if(succs == 2) {
-      const auto& block = *cast<Block>(node);
-      LLVMContext& llvmContext = func.getContext();
-      be.beginBlock();
-      be.addGoto(
-          nodeNames.at(&block.getSuccessor(ConstantInt::getTrue(llvmContext))),
-          func);
-      be.endBlock();
-
-      be.beginBlock();
-      be.addGoto(
-          nodeNames.at(&block.getSuccessor(ConstantInt::getFalse(llvmContext))),
-          func);
-      be.endBlock();
-
-      be.addIfThenElse(cast<BranchInst>(block.getLLVM().back()));
-    } else if(succs > 2) {
-      const auto& block = *cast<Block>(node);
-      const auto& swtch = cast<SwitchInst>(block.getLLVM().back());
-      be.addSwitchStmt(swtch);
-      for(const auto& i : swtch.cases()) {
-        be.beginBlock();
-        be.addGoto(nodeNames.at(&block.getSuccessor(i.getCaseValue())), func);
-        be.endBlock();
-
-        be.addSwitchCase(*i.getCaseValue());
-      };
-      if(const llvm::BasicBlock* deflt = swtch.getDefaultDest()) {
-        be.beginBlock();
-        be.addGoto(nodeNames.at(&block.getSuccessor(nullptr)), func);
-        be.endBlock();
-
-        be.addSwitchDefault();
-      }
     }
   }
 

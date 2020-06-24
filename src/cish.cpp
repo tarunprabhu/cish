@@ -66,7 +66,7 @@ int main(int argc, char* argv[]) {
   // Now that the clang AST Context has been set up, get down to business
   llvm::legacy::PassManager pm;
   pm.add(llvm::createDemoteRegisterToMemoryPass());
-  pm.add(llvm::createLoopSimplifyCFGPass());
+  // pm.add(llvm::createLoopSimplifyCFGPass());
   pm.add(createCishPreparePass());
   pm.add(createCishModulePass());
   pm.add(createCishFunctionPass());

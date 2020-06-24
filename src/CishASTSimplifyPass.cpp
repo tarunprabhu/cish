@@ -46,6 +46,7 @@ bool CishASTSimplifyPass::runOnModule(Module& m) {
   cish::Vector<cish::ASTFunctionPass*> passes;
   passes.push_back(createASTStripCastsPass(astContext));
   passes.push_back(createASTSimplifyOperatorsPass(astContext));
+  passes.push_back(createASTDeadCodeEliminationPass(astContext));
 
   for(cish::ASTFunctionPass* pass : passes)
     for(clang::FunctionDecl* f : funcs)

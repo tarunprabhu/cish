@@ -213,9 +213,14 @@ private:
   StructNode& exit;
   const llvm::BranchInst& br;
   bool invert;
+  // True if the loop to which this belongs has a single exit block
+  bool unique;
 
 public:
-  IfThenBreak(StructNode& exit, const llvm::BranchInst& br, bool invert);
+  IfThenBreak(StructNode& exit,
+              const llvm::BranchInst& br,
+              bool invert,
+              bool unique);
   IfThenBreak(const IfThenBreak&) = delete;
   IfThenBreak(IfThenBreak&&) = delete;
   virtual ~IfThenBreak() = default;
@@ -226,6 +231,7 @@ public:
   const StructNode& getContinue() const;
   const llvm::BranchInst& getLLVMBranchInst() const;
   bool isInverted() const;
+  bool isInLoopWithUniqueExit() const;
 
 public:
   static bool classof(const StructNode* ct) {

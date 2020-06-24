@@ -40,7 +40,9 @@ void ASTExprPass::process(WhileStmt* whileStmt) {
 
 void ASTExprPass::process(SwitchStmt* switchStmt) {
   switchStmt->setCond(process(switchStmt->getCond()));
-  process(switchStmt->getBody());
+  for(SwitchCase* kase = switchStmt->getSwitchCaseList(); kase;
+      kase = kase->getNextSwitchCase())
+    process(kase);
 }
 
 void ASTExprPass::process(CaseStmt* castStmt) {
@@ -183,13 +185,18 @@ Expr* ASTExprPass::process(ConditionalOperator* condOp) {
                                                newTrue->getType(),
                                                VK_RValue,
                                                OK_Ordinary);
-  return cond;
+  return condOp;
 }
 
 Expr* ASTExprPass::process(CallExpr* callExpr) {
   for(unsigned i = 0; i < callExpr->getNumArgs(); i++)
     callExpr->setArg(i, process(callExpr->getArg(i)));
   return callExpr;
+}
+
+Expr* ASTExprPass::process(MemberExpr* memberExpr) {
+  memberExpr->setBase(process(memberExpr->getBase()));
+  return memberExpr;
 }
 
 Expr* ASTExprPass::process(CStyleCastExpr* castExpr) {
@@ -226,6 +233,8 @@ Expr* ASTExprPass::process(Expr* expr) {
     return process(condOp);
   else if(auto* callExpr = dyn_cast<CallExpr>(expr))
     return process(callExpr);
+  else if(auto* memberExpr = dyn_cast<MemberExpr>(expr))
+    return process(memberExpr);
   else if(auto* castExpr = dyn_cast<CStyleCastExpr>(expr))
     return process(castExpr);
   else if(auto* arrExpr = dyn_cast<ArraySubscriptExpr>(expr))

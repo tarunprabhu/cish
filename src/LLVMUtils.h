@@ -8,6 +8,8 @@
 // A collection of utilities to because LLVM's API is inconsistent across
 // versions and missing some useful functions in some versions
 
+namespace cish {
+
 /// @param f The llvm::Function
 /// @param i The argument requested
 /// @returns Returns the @i'th argument of function @f
@@ -40,5 +42,7 @@ template <typename T>
 llvm::ArrayRef<T> makeArrayRef(const cish::Vector<T>& vec) {
   return llvm::ArrayRef<T>(vec.data(), vec.size());
 }
+
+} // namespace cish
 
 #endif // CISH_LLVM_UTILS_H

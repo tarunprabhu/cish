@@ -49,7 +49,7 @@ private:
 
   // Decls
   Map<llvm::StructType*, clang::RecordDecl*> udts;
-  Map<llvm::StructType*, Vector<clang::DeclRefExpr*>> fields;
+  Map<llvm::StructType*, Vector<clang::FieldDecl*>> fields;
   Map<const llvm::Function*, clang::FunctionDecl*> funcs;
   Map<const llvm::BasicBlock*, clang::LabelDecl*> blocks;
 
