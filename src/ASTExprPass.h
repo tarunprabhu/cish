@@ -24,7 +24,7 @@ protected:
     template <typename T>
     static constexpr auto check(T*) -> typename std::is_same<
         decltype(std::declval<T>().process(std::declval<ClangExpr>())),
-      clang::Expr*>::type;
+        clang::Expr*>::type;
 
     template <typename>
     static constexpr std::false_type check(...);
@@ -64,7 +64,7 @@ private:
     return nullptr;
   }
 
-  template<typename ClangExpr>
+  template <typename ClangExpr>
   clang::Expr* maybeReplaceDerived(ClangExpr* expr) {
     clang::Expr* ret = processDerived(expr);
     changed |= (ret != expr);

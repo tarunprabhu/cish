@@ -285,8 +285,7 @@ protected:
   }
 
 public:
-  ASTFunctionAnalysisPass(CishContext& context)
-      : ASTFunctionPass(context) {
+  ASTFunctionAnalysisPass(CishContext& context) : ASTFunctionPass(context) {
     ;
   }
 

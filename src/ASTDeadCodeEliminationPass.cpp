@@ -1,6 +1,6 @@
 #include "ASTBuilder.h"
-#include "DefUse.h"
 #include "ASTFunctionPass.h"
+#include "DefUse.h"
 #include "Diagnostics.h"
 
 #include <llvm/Support/raw_ostream.h>
@@ -90,7 +90,8 @@ bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
   Map<Stmt*, CompoundStmt*> parents;
   Map<CompoundStmt*, Stmt*> constructs;
   Set<std::pair<CompoundStmt*, Stmt*>> containers;
-  associateStmts(cast<CompoundStmt>(f->getBody()), nullptr, parents, constructs);
+  associateStmts(
+      cast<CompoundStmt>(f->getBody()), nullptr, parents, constructs);
   for(Stmt* stmt : removeStmts)
     containers.emplace(parents.at(stmt), constructs.at(parents.at(stmt)));
 

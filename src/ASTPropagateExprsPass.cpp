@@ -1,6 +1,6 @@
-#include "DefUse.h"
 #include "ASTFunctionPass.h"
 #include "ASTStreamer.h"
+#include "DefUse.h"
 #include "Diagnostics.h"
 #include "Map.h"
 #include "Set.h"

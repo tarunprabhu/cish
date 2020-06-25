@@ -37,7 +37,7 @@ static bool identical(const Expr* e1, const Expr* e2) {
 
 Expr* ASTSimplifyOperatorsPass::process(MemberExpr* memberExpr) {
   bool arrow = isa<PointerType>(memberExpr->getBase()->getType().getTypePtr());
-  changed |= (arrow  != memberExpr->isArrow());
+  changed |= (arrow != memberExpr->isArrow());
   memberExpr->setArrow(arrow);
   return memberExpr;
 }
