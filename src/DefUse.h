@@ -45,9 +45,6 @@ public:
   bool hasZeroUses(const clang::VarDecl* var) const;
   clang::Stmt* getSingleDef(const clang::VarDecl* var) const;
   clang::Stmt* getSingleUse(const clang::VarDecl* var) const;
-  bool allUsesInLoop(const clang::VarDecl* var, clang::DoStmt* stmt) const;
-  bool allUsesInLoop(const clang::VarDecl* var, clang::ForStmt* stmt) const;
-  bool allUsesInLoop(const clang::VarDecl* var, clang::WhileStmt* stmt) const;
 
   bool runOnFunction(clang::FunctionDecl* f);
 

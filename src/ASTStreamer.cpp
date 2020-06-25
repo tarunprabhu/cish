@@ -635,7 +635,8 @@ ASTStreamer& ASTStreamer::operator<<(const SwitchStmt* sw) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const IfStmt* ifStmt) {
-  *this << "if (" << ifStmt->getCond() << ")" << ifStmt->getThen();
+  *this << endl() << tab() << "if (" << ifStmt->getCond() << ")"
+        << ifStmt->getThen();
   if(const Stmt* then = ifStmt->getElse()) {
     switch(opts().indentStyle) {
     case IndentStyle::KR:
@@ -648,6 +649,7 @@ ASTStreamer& ASTStreamer::operator<<(const IfStmt* ifStmt) {
     }
     *this << then;
   }
+  *this << endl();
 
   return *this;
 }
@@ -708,7 +710,7 @@ ASTStreamer& ASTStreamer::operator<<(const CompoundStmt* compoundStmt) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const DoStmt* doStmt) {
-  *this << "do" << doStmt->getBody();
+  *this << endl() << tab() << "do" << doStmt->getBody();
   switch(opts().indentStyle) {
   case IndentStyle::KR:
     *this << " while";

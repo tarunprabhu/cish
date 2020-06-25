@@ -10,11 +10,15 @@ ASTFunctionPass::ASTFunctionPass(CishContext& context)
   ;
 }
 
-DefUse& ASTFunctionPass::getDefUse() {
-  return passMgr.getDefUse();
+bool ASTFunctionPass::modifiesAST() const {
+  return false;
 }
 
-DefUse& ASTFunctionPass::getDefUse() const {
+ASTLookup& ASTFunctionPass::getASTLookup() {
+  return passMgr.getASTLookup();
+}
+
+DefUse& ASTFunctionPass::getDefUse() {
   return passMgr.getDefUse();
 }
 

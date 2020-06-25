@@ -138,28 +138,22 @@ Expr* ASTSimplifyOperatorsPass::process(UnaryOperator* unOp) {
       switch(binOp->getOpcode()) {
       case BO_EQ:
         binOp->setOpcode(BO_NE);
-        changed |= true;
-        break;
+        return binOp;
       case BO_NE:
         binOp->setOpcode(BO_EQ);
-        changed |= true;
-        break;
+        return binOp;
       case BO_GT:
         binOp->setOpcode(BO_LE);
-        changed |= true;
-        break;
+        return binOp;
       case BO_GE:
         binOp->setOpcode(BO_LT);
-        changed |= true;
-        break;
+        return binOp;
       case BO_LT:
         binOp->setOpcode(BO_GE);
-        changed |= true;
-        break;
+        return binOp;
       case BO_LE:
         binOp->setOpcode(BO_GT);
-        changed |= true;
-        break;
+        return binOp;
       default:
         break;
       }

@@ -48,7 +48,10 @@ bool CishASTSimplifyPass::runOnModule(Module& m) {
   passMgr.addPass(createASTStripCastsPass(cishContext));
   passMgr.addPass(createASTSimplifyOperatorsPass(cishContext));
   passMgr.addPass(createASTPropagateExprsPass(cishContext));
+  passMgr.addPass(createASTSimplifyLoopsPass(cishContext));
+  passMgr.addPass(createASTConstantFoldingPass(cishContext));
   passMgr.addPass(createASTDeadCodeEliminationPass(cishContext));
+  passMgr.addPass(createASTRenameVarsPass(cishContext));
 
   for(clang::FunctionDecl* f : funcs)
     passMgr.runOnFunction(f);

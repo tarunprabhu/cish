@@ -5,6 +5,7 @@
 
 namespace cish {
 
+class ASTLookup;
 class ASTPassManager;
 class CishContext;
 class DefUse;
@@ -19,7 +20,7 @@ private:
 
 protected:
   DefUse& getDefUse();
-  DefUse& getDefUse() const;
+  ASTLookup& getASTLookup();
 
 public:
   ASTFunctionPass(CishContext& context);
@@ -27,6 +28,7 @@ public:
   ASTFunctionPass(ASTFunctionPass&&) = delete;
   virtual ~ASTFunctionPass() = default;
 
+  virtual bool modifiesAST() const;
   virtual llvm::StringRef getPassName() const;
   virtual bool runOnFunction(clang::FunctionDecl* f) = 0;
 };

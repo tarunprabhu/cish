@@ -10,6 +10,10 @@ ASTBuilder::ASTBuilder(ASTContext& astContext) : astContext(astContext) {
   ;
 }
 
+DeclarationName ASTBuilder::createDeclName(const std::string& name) {
+  return DeclarationName(&astContext.Idents.get(name));
+}
+
 DeclRefExpr* ASTBuilder::createDeclRefExpr(ValueDecl* decl) {
   return DeclRefExpr::Create(astContext,
                              NestedNameSpecifierLoc(),
@@ -257,6 +261,10 @@ DoStmt* ASTBuilder::createDoStmt(Stmt* body, Expr* cond) {
 
 WhileStmt* ASTBuilder::createWhileStmt(Expr* cond, Stmt* body) {
   return WhileStmt::Create(astContext, nullptr, cond, body, invLoc);
+}
+
+CXXBoolLiteralExpr* ASTBuilder::createBoolLiteral(bool b) {
+  return createBoolLiteral(b, astContext.BoolTy);
 }
 
 CXXBoolLiteralExpr* ASTBuilder::createBoolLiteral(bool b, QualType type) {

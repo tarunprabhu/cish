@@ -1,5 +1,6 @@
 #include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
+#include "ASTLookup.h"
 #include "DefUse.h"
 #include "Diagnostics.h"
 
@@ -20,6 +21,7 @@ public:
   virtual ~ASTDCEPass() = default;
 
   virtual llvm::StringRef getPassName() const override;
+  virtual bool modifiesAST() const override;
   virtual bool runOnFunction(FunctionDecl* f) override;
 };
 
@@ -32,39 +34,13 @@ llvm::StringRef ASTDCEPass::getPassName() const {
   return "Cish AST Dead Code Elimination Pass";
 }
 
-static void associateStmts(CompoundStmt* body,
-                           Stmt* construct,
-                           Map<Stmt*, CompoundStmt*>& parents,
-                           Map<CompoundStmt*, Stmt*>& constructs) {
-  constructs[body] = construct;
-  for(Stmt* stmt : body->body()) {
-    if(auto* ifStmt = dyn_cast<IfStmt>(stmt)) {
-      auto* thn = cast<CompoundStmt>(ifStmt->getThen());
-      associateStmts(thn, ifStmt, parents, constructs);
-      if(auto* els = cast_or_null<CompoundStmt>(ifStmt->getElse()))
-        associateStmts(els, ifStmt, parents, constructs);
-    } else if(auto* doStmt = dyn_cast<DoStmt>(stmt)) {
-      auto* body = cast<CompoundStmt>(doStmt->getBody());
-      associateStmts(body, doStmt, parents, constructs);
-    } else if(auto* forStmt = dyn_cast<ForStmt>(stmt)) {
-      auto* body = cast<CompoundStmt>(forStmt->getBody());
-      associateStmts(body, forStmt, parents, constructs);
-    } else if(auto* whileStmt = dyn_cast<WhileStmt>(stmt)) {
-      auto* body = cast<CompoundStmt>(whileStmt->getBody());
-      associateStmts(body, whileStmt, parents, constructs);
-    } else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt)) {
-      for(SwitchCase* kase = switchStmt->getSwitchCaseList(); kase;
-          kase = kase->getNextSwitchCase()) {
-        auto* body = cast<CompoundStmt>(kase->getSubStmt());
-        associateStmts(body, kase, parents, constructs);
-      }
-    }
-    parents[stmt] = body;
-  }
+bool ASTDCEPass::modifiesAST() const {
+  return true;
 }
 
 bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
   DefUse& du = getDefUse();
+  ASTLookup& ast = getASTLookup();
 
   Set<Stmt*> removeStmts;
   Set<const VarDecl*> removeVars;
@@ -87,13 +63,9 @@ bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
     }
   } while(changed);
 
-  Map<Stmt*, CompoundStmt*> parents;
-  Map<CompoundStmt*, Stmt*> constructs;
   Set<std::pair<CompoundStmt*, Stmt*>> containers;
-  associateStmts(
-      cast<CompoundStmt>(f->getBody()), nullptr, parents, constructs);
   for(Stmt* stmt : removeStmts)
-    containers.emplace(parents.at(stmt), constructs.at(parents.at(stmt)));
+    containers.emplace(ast.getCompoundStmtFor(stmt), ast.getConstructFor(stmt));
 
   for(auto& i : containers) {
     CompoundStmt* body = i.first;

@@ -12,5 +12,8 @@ cish::ASTFunctionPass* createASTStripCastsPass(cish::CishContext&);
 cish::ASTFunctionPass* createASTSimplifyOperatorsPass(cish::CishContext&);
 cish::ASTFunctionPass* createASTDeadCodeEliminationPass(cish::CishContext&);
 cish::ASTFunctionPass* createASTPropagateExprsPass(cish::CishContext&);
+cish::ASTFunctionPass* createASTRenameVarsPass(cish::CishContext&);
+cish::ASTFunctionPass* createASTSimplifyLoopsPass(cish::CishContext&);
+cish::ASTFunctionPass* createASTConstantFoldingPass(cish::CishContext&);
 
 #endif // CISH_AST_PASSES_H

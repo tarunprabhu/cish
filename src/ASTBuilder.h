@@ -18,6 +18,8 @@ public:
   ASTBuilder(const ASTBuilder&) = delete;
   ASTBuilder(ASTBuilder&&) = delete;
 
+  clang::DeclarationName createDeclName(const std::string& name);
+
   clang::RecordDecl* createStruct(const std::string& name);
   clang::FieldDecl* createField(const std::string& name,
                                 clang::QualType type,
@@ -65,6 +67,7 @@ public:
                                       clang::QualType type);
   clang::DoStmt* createDoStmt(clang::Stmt* body, clang::Expr* cond);
   clang::WhileStmt* createWhileStmt(clang::Expr* cond, clang::Stmt* body);
+  clang::CXXBoolLiteralExpr* createBoolLiteral(bool b);
   clang::CXXBoolLiteralExpr* createBoolLiteral(bool b, clang::QualType type);
   clang::IntegerLiteral* createIntLiteral(const llvm::APInt& i,
                                           clang::QualType type);

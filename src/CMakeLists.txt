@@ -1,9 +1,13 @@
 set(SOURCES
   ASTBuilder.cpp
+  ASTConstantFoldingPass.cpp
   ASTDeadCodeEliminationPass.cpp
   ASTFunctionPass.cpp
+  ASTLookup.cpp
   ASTPassManager.cpp
   ASTPropagateExprsPass.cpp
+  ASTRenameVarsPass.cpp
+  ASTSimplifyLoopsPass.cpp
   ASTSimplifyOperatorsPass.cpp
   ASTStreamer.cpp
   ASTStripCastsPass.cpp
