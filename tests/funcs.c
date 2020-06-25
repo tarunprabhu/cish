@@ -1,4 +1,6 @@
-#include <stdlib.h>
+int f(int);
+void g(int);
+int h(void*);
 
 void empty() {
     ;
@@ -21,17 +23,28 @@ int return_arg(int n) {
 }
 
 void funcall() {
-  srand(389);
+  g(389);
 }
 
 int return_funcall_with_alloca(unsigned int init) {
   unsigned int seed = init;
-  return rand_r(&seed);
+  return h(&seed);
 }
 
 void funcall_stmts() {
-  srand(1);
-  srand(2);
-  srand(3);
-  srand(4);
+  g(1);
+  g(2);
+  g(3);
+  g(4);
+}
+
+void mutate(int *i) {
+  *i = 3;
+}
+
+int indirect_mutate(int a) {
+  int r;
+  mutate(&a);
+  r = a + 1;
+  return r;
 }

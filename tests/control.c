@@ -40,11 +40,52 @@ int return_br_if(int a, int b, int c) {
   return d;
 }
 
+void switch_wtf(int a) {
+  switch(a) {
+    srand(a);
+  }
+}
+
+void switch_empty(int a) {
+  switch(a) {
+    ;
+  }
+}
+
+void switch_empty_cases(int a) {
+  switch(a) {
+  case 3: break;
+  case 2: break;
+  case 1: break;
+  case 0: break;
+  }
+}
+
+void switch_some_empty_cases(int a) {
+  switch(a) {
+  case 7:
+    srand(1);
+    break;
+  case 6:
+    break;
+  case 5:
+    break;
+  case 4:
+    srand(2);
+    break;
+  default:
+    srand(4);
+    break;
+  }
+}
+
 int switch_no_fallthrough(int a, int b, int c) {
   int d;
   switch(a) {
   case 1:
     d = b + rand();
+    break;
+  case 10:
     break;
   case 2:
     d = c + rand();
@@ -57,6 +98,33 @@ int switch_no_fallthrough(int a, int b, int c) {
     break;
   }
   return d;
+}
+
+void switch_loops_fallthrough(int a, int b, int c) {
+  switch(a) {
+  case 1:
+    for(int i = 0; i < b; i++)
+      srand(i);
+  case 2:
+    for(int i = 0; i < b; i += c)
+      srand(i + a);
+    break;
+  case 3:
+    while(rand())
+      srand(rand());
+    break;
+  }
+}
+
+void switch_endless(int a, int b) {
+  switch(a) {
+  case 1:
+    while(1);
+  case 2:
+    for(int i = 0; i < b; i++)
+      srand(i + b);
+    break;
+  }
 }
 
 int switch_fallthrough(int a, int b, int c) {
@@ -75,169 +143,6 @@ int switch_fallthrough(int a, int b, int c) {
     break;
   }
   return d;
-}
-
-void infinite_while_empty() {
-  while(1);
-}
-
-void infinite_while_body(int a) {
-  while(1) {
-    srand(a);
-  }
-}
-
-void infinite_while_body_br(int a, int b) {
-  while(1) {
-    if(a)
-      srand(1);
-    if(b)
-      srand(3);
-    else
-      srand(4);
-  }
-}
-
-void for_loop_infinite(int a) {
-  for(long i; ; i++)
-    if(i > 0)
-      srand(a + i);
-}
-
-void for_loop(int a) {
-  for(int i = 0; i < a; i++)
-    srand(i);
-}
-
-void for_loop_2(int a, int b) {
-  for(int i = 0; i < a; i++)
-    if(i == rand())
-      srand(a);
-    else
-      srand(b);
-}
-
-void for_loop_nest_perfect(int a, int b, int c) {
-  for(int i = 0; i < a; i++)
-    for(int j = 0; j < b; j++)
-      for(int k = 0; k < c; k++)
-        srand(i * j * k);
-}
-
-void for_loop_nest_imperfect(int a, int b, int c) {
-  for(int i = 0; i < a; i++) {
-    for(int j = 0; j < b; j++)
-      srand(i * j);
-    for(int k = 0; k < c; k++)
-      srand(k * i);
-  }
-}
-
-void while_loop(int a) {
-  while(1) {
-    srand(1);
-    if(a == rand())
-      break;
-    srand(2);
-  }
-}
-
-void for_loop_continue(int a) {
-  for(int i = 0; i < a; i++) {
-    srand(a + 1);
-    if(i == rand())
-      continue;
-    else
-      srand(i + 1);
-    srand(a + 2);
-  }
-}
-
-void while_loop_break_continue(int a) {
-  srand(6);
-  while(1) {
-    srand(1);
-    if(a == rand()) {
-      srand(3);
-      continue;
-    } else if(rand() > 100) {
-      srand(4);
-      break;
-    }
-    srand(2);
-  }
-  srand(5);
-}
-
-void for_loop_break_continue(int a) {
-  srand(6);
-  for(int i = 0; i < a; i++) {
-    srand(1);
-    /* if(a == rand()) { */
-    /*   srand(3); */
-    /*   continue; */
-    /* } else */ if(rand() > 100) {
-      srand(4);
-      break;
-    }
-    srand(2);
-  }
-  srand(5);
-}
-
-void for_loop_multiple_contine(int a) {
-  srand(6);
-  for(int i = 0; i < a;) {
-    srand(1);
-    if(i == rand()) {
-      i++;
-      continue;
-    } else if(a == rand()) {
-      srand(3);
-      continue;
-    } else if((a + i) == rand()) {
-      srand(4);
-      continue;
-    }
-    srand(2);
-  }
-  srand(5);
-}
-
-void for_loop_multiple_break(int a) {
-  srand(6);
-  for(int i = 0; i < a; ) {
-    srand(1);
-    if(i == rand()) {
-      srand(3);
-      break;
-    } else if(a == rand()) {
-      srand(4);
-      break;
-    } else if((a + i) == rand()) {
-      srand(7);
-      break;
-    }
-    srand(2);
-  }
-  srand(5);
-}
-
-void loop_unconditional_break(int a) {
-  srand(1);
-  for(int i = 0; i < a; i++) {
-    srand(2);
-    break;
-  }
-  srand(3);
-}
-
-void for_loop_diff_init(int a, int b, int c, int d) {
-  int i = a;
-  if(rand())
-    i = rand() + b;
-  for(; i < c; i += d)
-    srand(i);
 }
 
 // From "Advanced Compiler Design and Implementation: Steven Muchnick".

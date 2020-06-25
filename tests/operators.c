@@ -79,3 +79,53 @@ bool return_ge(int a, int b) {
 int return_neg(int a) {
   return -a;
 }
+
+int return_add_assign(int a, int b) {
+  a += b;
+  return a;
+}
+
+int return_sub_assign(int a, int b) {
+  a -= b;
+  return a;
+}
+
+int return_mul_assign(int a, int b) {
+  a *= b;
+  return a;
+}
+
+int return_div_assign(int a, int b) {
+  a /= b;
+  return a;
+}
+
+int return_rem_assign(int a, int b) {
+  a %= b;
+  return a;
+}
+
+int return_shl_assign(int a, int b) {
+  a <<= b;
+  return a;
+}
+
+int return_shr_assign(int a, int b) {
+  a >>= b;
+  return a;
+}
+
+int return_and_assign(int a, int b) {
+  a &= b;
+  return a;
+}
+
+int return_or_assign(int a, int b) {
+  a |= b;
+  return a;
+}
+
+int return_xor_assign(int a, int b) {
+  a ^= b;
+  return a;
+}
