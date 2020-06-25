@@ -1,5 +1,6 @@
 #include <llvm/Pass.h>
 
+#include "ASTPassManager.h"
 #include "ASTPasses.h"
 #include "CishContext.h"
 
@@ -32,7 +33,7 @@ void CishASTSimplifyPass::getAnalysisUsage(AnalysisUsage& AU) const {
 }
 
 bool CishASTSimplifyPass::runOnModule(Module& m) {
-  const cish::CishContext& cishContext
+  cish::CishContext& cishContext
       = getAnalysis<CishContextWrapperPass>().getCishContext();
 
   clang::ASTContext& astContext = cishContext.getASTContext();
@@ -43,14 +44,14 @@ bool CishASTSimplifyPass::runOnModule(Module& m) {
       if(fdecl->hasBody())
         funcs.push_back(fdecl);
 
-  cish::Vector<cish::ASTFunctionPass*> passes;
-  passes.push_back(createASTStripCastsPass(astContext));
-  passes.push_back(createASTSimplifyOperatorsPass(astContext));
-  passes.push_back(createASTDeadCodeEliminationPass(astContext));
+  cish::ASTPassManager& passMgr = cishContext.getASTPassManager();
+  passMgr.addPass(createASTStripCastsPass(cishContext));
+  passMgr.addPass(createASTSimplifyOperatorsPass(cishContext));
+  passMgr.addPass(createASTPropagateExprsPass(cishContext));
+  passMgr.addPass(createASTDeadCodeEliminationPass(cishContext));
 
-  for(cish::ASTFunctionPass* pass : passes)
-    for(clang::FunctionDecl* f : funcs)
-      pass->runOnFunction(f);
+  for(clang::FunctionDecl* f : funcs)
+    passMgr.runOnFunction(f);
 
   return false;
 }

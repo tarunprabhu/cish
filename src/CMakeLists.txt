@@ -1,8 +1,9 @@
 set(SOURCES
   ASTBuilder.cpp
   ASTDeadCodeEliminationPass.cpp
-  ASTDefUseInfo.cpp
-  ASTExprPass.cpp
+  ASTFunctionPass.cpp
+  ASTPassManager.cpp
+  ASTPropagateExprsPass.cpp
   ASTSimplifyOperatorsPass.cpp
   ASTStreamer.cpp
   ASTStripCastsPass.cpp
@@ -15,6 +16,7 @@ set(SOURCES
   CishOutputPass.cpp
   CishPreparePass.cpp
   ClangUtils.cpp
+  DefUse.cpp
   Diagnostics.cpp
   LLVMBackend.cpp
   LLVMFrontend.cpp

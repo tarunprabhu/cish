@@ -5,21 +5,30 @@
 
 namespace cish {
 
+class ASTPassManager;
+class CishContext;
+class DefUse;
+
 class ASTFunctionPass {
 protected:
   clang::ASTContext& astContext;
   clang::FullSourceLoc invLoc;
 
+private:
+  ASTPassManager& passMgr;
+
+protected:
+  DefUse& getDefUse();
+  DefUse& getDefUse() const;
+
 public:
-  ASTFunctionPass(clang::ASTContext& astContext) : astContext(astContext) {
-    ;
-  }
+  ASTFunctionPass(CishContext& context);
   ASTFunctionPass(const ASTFunctionPass&) = delete;
   ASTFunctionPass(ASTFunctionPass&&) = delete;
   virtual ~ASTFunctionPass() = default;
 
-  virtual llvm::StringRef getPassName() const = 0;
-  virtual void runOnFunction(clang::FunctionDecl* f) = 0;
+  virtual llvm::StringRef getPassName() const;
+  virtual bool runOnFunction(clang::FunctionDecl* f) = 0;
 };
 
 } // namespace cish

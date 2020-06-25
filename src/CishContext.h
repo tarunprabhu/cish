@@ -8,6 +8,7 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/Basic/Builtins.h>
 
+#include "ASTPassManager.h"
 #include "LLVMBackend.h"
 #include "LLVMFrontend.h"
 #include "SourceInfo.h"
@@ -37,6 +38,7 @@ protected:
   std::unique_ptr<clang::ASTContext> astContext;
   std::unique_ptr<LLVMFrontend> fe;
   std::unique_ptr<LLVMBackend> be;
+  std::unique_ptr<ASTPassManager> passMgr;
 
 public:
   CishContext(const llvm::Module& m, const SourceInfo& si);
@@ -45,8 +47,9 @@ public:
 
   llvm::LLVMContext& getLLVMContext() const;
   clang::ASTContext& getASTContext() const;
-  cish::LLVMFrontend& getLLVMFrontend() const;
-  cish::LLVMBackend& getLLVMBackend() const;
+  ASTPassManager& getASTPassManager() const;
+  LLVMFrontend& getLLVMFrontend() const;
+  LLVMBackend& getLLVMBackend() const;
 };
 
 } // namespace cish
@@ -61,7 +64,7 @@ private:
 public:
   CishContextWrapperPass();
 
-  const cish::CishContext& getCishContext() const;
+  cish::CishContext& getCishContext() const;
 
   virtual llvm::StringRef getPassName() const override;
   virtual void getAnalysisUsage(llvm::AnalysisUsage& AU) const override;

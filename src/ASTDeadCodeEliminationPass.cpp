@@ -1,5 +1,5 @@
 #include "ASTBuilder.h"
-#include "ASTDefUseInfo.h"
+#include "DefUse.h"
 #include "ASTFunctionPass.h"
 #include "Diagnostics.h"
 
@@ -12,17 +12,19 @@ namespace cish {
 class ASTDCEPass : public ASTFunctionPass {
 protected:
   ASTBuilder builder;
-  ASTDefUseInfo du;
 
 public:
-  ASTDCEPass(ASTContext& astContext);
+  ASTDCEPass(CishContext& context);
+  ASTDCEPass(const ASTDCEPass&) = delete;
+  ASTDCEPass(ASTDCEPass&&) = delete;
+  virtual ~ASTDCEPass() = default;
 
   virtual llvm::StringRef getPassName() const override;
-  virtual void runOnFunction(FunctionDecl* f) override;
+  virtual bool runOnFunction(FunctionDecl* f) override;
 };
 
-ASTDCEPass::ASTDCEPass(ASTContext& astContext)
-    : ASTFunctionPass(astContext), builder(astContext), du(astContext) {
+ASTDCEPass::ASTDCEPass(CishContext& context)
+    : ASTFunctionPass(context), builder(astContext) {
   ;
 }
 
@@ -30,8 +32,39 @@ llvm::StringRef ASTDCEPass::getPassName() const {
   return "Cish AST Dead Code Elimination Pass";
 }
 
-void ASTDCEPass::runOnFunction(FunctionDecl* f) {
-  du.runOnFunction(f);
+static void associateStmts(CompoundStmt* body,
+                           Stmt* construct,
+                           Map<Stmt*, CompoundStmt*>& parents,
+                           Map<CompoundStmt*, Stmt*>& constructs) {
+  constructs[body] = construct;
+  for(Stmt* stmt : body->body()) {
+    if(auto* ifStmt = dyn_cast<IfStmt>(stmt)) {
+      auto* thn = cast<CompoundStmt>(ifStmt->getThen());
+      associateStmts(thn, ifStmt, parents, constructs);
+      if(auto* els = cast_or_null<CompoundStmt>(ifStmt->getElse()))
+        associateStmts(els, ifStmt, parents, constructs);
+    } else if(auto* doStmt = dyn_cast<DoStmt>(stmt)) {
+      auto* body = cast<CompoundStmt>(doStmt->getBody());
+      associateStmts(body, doStmt, parents, constructs);
+    } else if(auto* forStmt = dyn_cast<ForStmt>(stmt)) {
+      auto* body = cast<CompoundStmt>(forStmt->getBody());
+      associateStmts(body, forStmt, parents, constructs);
+    } else if(auto* whileStmt = dyn_cast<WhileStmt>(stmt)) {
+      auto* body = cast<CompoundStmt>(whileStmt->getBody());
+      associateStmts(body, whileStmt, parents, constructs);
+    } else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt)) {
+      for(SwitchCase* kase = switchStmt->getSwitchCaseList(); kase;
+          kase = kase->getNextSwitchCase()) {
+        auto* body = cast<CompoundStmt>(kase->getSubStmt());
+        associateStmts(body, kase, parents, constructs);
+      }
+    }
+    parents[stmt] = body;
+  }
+}
+
+bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
+  DefUse& du = getDefUse();
 
   Set<Stmt*> removeStmts;
   Set<const VarDecl*> removeVars;
@@ -45,7 +78,7 @@ void ASTDCEPass::runOnFunction(FunctionDecl* f) {
           List<Stmt*> remove(defs.begin(), defs.end());
           changed |= remove.size();
           for(Stmt* def : remove) {
-            du.remove(def);
+            du.removeDef(var, def);
             removeStmts.insert(def);
           }
           removeVars.insert(var);
@@ -54,9 +87,12 @@ void ASTDCEPass::runOnFunction(FunctionDecl* f) {
     }
   } while(changed);
 
+  Map<Stmt*, CompoundStmt*> parents;
+  Map<CompoundStmt*, Stmt*> constructs;
   Set<std::pair<CompoundStmt*, Stmt*>> containers;
+  associateStmts(cast<CompoundStmt>(f->getBody()), nullptr, parents, constructs);
   for(Stmt* stmt : removeStmts)
-    containers.insert(du.getContainer(stmt));
+    containers.emplace(parents.at(stmt), constructs.at(parents.at(stmt)));
 
   for(auto& i : containers) {
     CompoundStmt* body = i.first;
@@ -87,11 +123,23 @@ void ASTDCEPass::runOnFunction(FunctionDecl* f) {
       fatal(error() << "Unexpected container statement: "
                     << container->getStmtClassName());
   }
+
+  Set<VarDecl*> orphanVars;
+  for(auto* decl : f->decls())
+    if(auto* var = dyn_cast<VarDecl>(decl))
+      if(du.hasZeroDefs(var) and du.hasZeroUses(var))
+        orphanVars.insert(var);
+  for(VarDecl* var : orphanVars) {
+    du.removeVar(var);
+    f->removeDecl(var);
+  }
+
+  return removeStmts.size() or removeVars.size() or orphanVars.size();
 }
 
 } // namespace cish
 
 cish::ASTFunctionPass*
-createASTDeadCodeEliminationPass(ASTContext& astContext) {
-  return new cish::ASTDCEPass(astContext);
+createASTDeadCodeEliminationPass(cish::CishContext& context) {
+  return new cish::ASTDCEPass(context);
 }

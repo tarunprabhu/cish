@@ -24,6 +24,7 @@ CishContext::CishContext(const Module& m, const SourceInfo& si)
   astContext->InitBuiltinTypes(*targetInfo);
   be.reset(new LLVMBackend(*this));
   fe.reset(new LLVMFrontend(*this, si));
+  passMgr.reset(new ASTPassManager(*this));
 }
 
 LLVMContext& CishContext::getLLVMContext() const {
@@ -42,6 +43,10 @@ LLVMBackend& CishContext::getLLVMBackend() const {
   return *be;
 }
 
+ASTPassManager& CishContext::getASTPassManager() const {
+  return *passMgr;
+}
+
 } // namespace cish
 
 CishContextWrapperPass::CishContextWrapperPass()
@@ -58,7 +63,7 @@ void CishContextWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
   AU.setPreservesAll();
 }
 
-const cish::CishContext& CishContextWrapperPass::getCishContext() const {
+cish::CishContext& CishContextWrapperPass::getCishContext() const {
   return *context;
 }
 

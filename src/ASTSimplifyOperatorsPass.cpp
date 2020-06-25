@@ -1,28 +1,29 @@
 #include "ASTExprPass.h"
 #include "ASTStreamer.h"
 
-#include <clang/Analysis/Analyses/ExprMutationAnalyzer.h>
-
 #include <llvm/Support/raw_ostream.h>
 
 using namespace clang;
 
 namespace cish {
 
-class ASTSimplifyOperatorsPass : public ASTExprPass {
-protected:
-  virtual Expr* process(BinaryOperator* binOp) override;
-  virtual Expr* process(UnaryOperator* unOp) override;
-  virtual Expr* process(MemberExpr* memberExpr) override;
+class ASTSimplifyOperatorsPass : public ASTExprPass<ASTSimplifyOperatorsPass> {
+public:
+  Expr* process(BinaryOperator* binOp);
+  Expr* process(UnaryOperator* unOp);
+  Expr* process(MemberExpr* memberExpr);
 
 public:
-  ASTSimplifyOperatorsPass(ASTContext& astContext);
+  ASTSimplifyOperatorsPass(CishContext& context);
+  ASTSimplifyOperatorsPass(const ASTSimplifyOperatorsPass&) = delete;
+  ASTSimplifyOperatorsPass(ASTSimplifyOperatorsPass&&) = delete;
+  virtual ~ASTSimplifyOperatorsPass() = default;
 
   virtual llvm::StringRef getPassName() const override;
 };
 
-ASTSimplifyOperatorsPass::ASTSimplifyOperatorsPass(ASTContext& astContext)
-    : ASTExprPass(astContext) {
+ASTSimplifyOperatorsPass::ASTSimplifyOperatorsPass(CishContext& context)
+    : ASTExprPass(context) {
   ;
 }
 
@@ -35,16 +36,13 @@ static bool identical(const Expr* e1, const Expr* e2) {
 }
 
 Expr* ASTSimplifyOperatorsPass::process(MemberExpr* memberExpr) {
-  ASTExprPass::process(memberExpr);
-
-  memberExpr->setArrow(
-      isa<PointerType>(memberExpr->getBase()->getType().getTypePtr()));
+  bool arrow = isa<PointerType>(memberExpr->getBase()->getType().getTypePtr());
+  changed |= (arrow  != memberExpr->isArrow());
+  memberExpr->setArrow(arrow);
   return memberExpr;
 }
 
 Expr* ASTSimplifyOperatorsPass::process(BinaryOperator* binOp) {
-  ASTExprPass::process(binOp);
-
   BinaryOperator::Opcode opc = binOp->getOpcode();
   Expr* lhs = binOp->getLHS();
   Expr* rhs = binOp->getRHS();
@@ -58,34 +56,52 @@ Expr* ASTSimplifyOperatorsPass::process(BinaryOperator* binOp) {
         case BO_Add:
           binOp->setOpcode(BO_AddAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
           break;
         case BO_Sub:
           binOp->setOpcode(BO_SubAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_Mul:
           binOp->setOpcode(BO_MulAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_Div:
           binOp->setOpcode(BO_DivAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_Rem:
           binOp->setOpcode(BO_RemAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_Shl:
           binOp->setOpcode(BO_ShlAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_Shr:
           binOp->setOpcode(BO_ShrAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_And:
           binOp->setOpcode(BO_AndAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_Or:
           binOp->setOpcode(BO_OrAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
+          break;
         case BO_Xor:
           binOp->setOpcode(BO_XorAssign);
           binOp->setRHS(rhs1);
+          changed |= true;
           break;
         default:
           break;
@@ -103,8 +119,6 @@ Expr* ASTSimplifyOperatorsPass::process(BinaryOperator* binOp) {
 }
 
 Expr* ASTSimplifyOperatorsPass::process(UnaryOperator* unOp) {
-  ASTExprPass::process(unOp);
-
   UnaryOperator::Opcode op = unOp->getOpcode();
   if(op == UO_Deref) {
     // Cancel out consecutive occurences of * and &
@@ -124,22 +138,28 @@ Expr* ASTSimplifyOperatorsPass::process(UnaryOperator* unOp) {
       switch(binOp->getOpcode()) {
       case BO_EQ:
         binOp->setOpcode(BO_NE);
-        return binOp;
+        changed |= true;
+        break;
       case BO_NE:
         binOp->setOpcode(BO_EQ);
-        return binOp;
+        changed |= true;
+        break;
       case BO_GT:
         binOp->setOpcode(BO_LE);
-        return binOp;
+        changed |= true;
+        break;
       case BO_GE:
         binOp->setOpcode(BO_LT);
-        return binOp;
+        changed |= true;
+        break;
       case BO_LT:
         binOp->setOpcode(BO_GE);
-        return binOp;
+        changed |= true;
+        break;
       case BO_LE:
         binOp->setOpcode(BO_GT);
-        return binOp;
+        changed |= true;
+        break;
       default:
         break;
       }
@@ -151,6 +171,7 @@ Expr* ASTSimplifyOperatorsPass::process(UnaryOperator* unOp) {
 
 } // namespace cish
 
-cish::ASTFunctionPass* createASTSimplifyOperatorsPass(ASTContext& astContext) {
-  return new cish::ASTSimplifyOperatorsPass(astContext);
+cish::ASTFunctionPass*
+createASTSimplifyOperatorsPass(cish::CishContext& context) {
+  return new cish::ASTSimplifyOperatorsPass(context);
 }

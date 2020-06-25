@@ -1,12 +1,16 @@
 #ifndef CISH_AST_PASSES_H
 #define CISH_AST_PASSES_H
 
-#include <clang/AST/ASTContext.h>
+namespace cish {
 
-#include "ASTFunctionPass.h"
+class ASTFunctionPass;
+class CishContext;
 
-cish::ASTFunctionPass* createASTStripCastsPass(clang::ASTContext&);
-cish::ASTFunctionPass* createASTSimplifyOperatorsPass(clang::ASTContext&);
-cish::ASTFunctionPass* createASTDeadCodeEliminationPass(clang::ASTContext&);
+} // namespace cish
+
+cish::ASTFunctionPass* createASTStripCastsPass(cish::CishContext&);
+cish::ASTFunctionPass* createASTSimplifyOperatorsPass(cish::CishContext&);
+cish::ASTFunctionPass* createASTDeadCodeEliminationPass(cish::CishContext&);
+cish::ASTFunctionPass* createASTPropagateExprsPass(cish::CishContext&);
 
 #endif // CISH_AST_PASSES_H
