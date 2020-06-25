@@ -66,13 +66,33 @@ def main() -> int:
                     help='The indentation style to use')
     ap.add_argument('-indent-offset', type=int,
                     help='The indentation offset to use')
+    ap.add_argument('-parens', type=str,
+                    help='How to parenthetize')
     ap.add_argument('-annotate', type=str,
                     help='Which annotations to use in the output')
+    ap.add_argument('-log', action='store_true',
+                    help='Create logs of the conversion '
+                    '(WARNING - Creates many files in the current directory)')
+    ap.add_argument('-log-dir',
+                    help='Create the log files in the specified directory')
+    ap.add_argument('-verbose', action='store_true',
+                    help='Print messages during the conversion')
     ap.add_argument('-o', type=str,
                     help='File in which to write the output')
     ap.add_argument('file', type=str,
                     help='The input file')
+
+    # Disallowed compiler options
+    # FIXME: There are probably more flags that are incompatible
+    incompatible = ['c', 'S', 'E', 'emit-llvm']
+    for flag in incompatible:
+        ap.add_argument('-' + flag, action='store_true')
+
     cish_args, compiler_args = ap.parse_known_args()
+
+    for flag in incompatible:
+        if getattr(cish_args, flag.replace('-', '_')):
+            error('Incompatible flag -{}'.format(flag))
 
     with NamedTemporaryFile(delete=False) as tmpf:
         tmp = shlex.quote(tmpf.name)
