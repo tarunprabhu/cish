@@ -1,5 +1,29 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #include "CishContext.h"
+#include "AST.h"
+#include "ASTPassManager.h"
 #include "Diagnostics.h"
+#include "IRSourceInfo.h"
+#include "LLVMBackend.h"
+#include "LLVMFrontend.h"
 
 using namespace llvm;
 
@@ -24,7 +48,20 @@ CishContext::CishContext(const Module& m, const SourceInfo& si)
   astContext->InitBuiltinTypes(*targetInfo);
   be.reset(new LLVMBackend(*this));
   fe.reset(new LLVMFrontend(*this, si));
-  passMgr.reset(new ASTPassManager(*this));
+}
+
+AST& CishContext::addAST(clang::FunctionDecl* f) {
+  asts.emplace(f, new AST(*this, f));
+
+  return getAST(f);
+}
+
+AST& CishContext::getAST(clang::FunctionDecl* f) {
+  return *asts.at(f);
+}
+
+const AST& CishContext::getAST(clang::FunctionDecl* f) const {
+  return *asts.at(f);
 }
 
 LLVMContext& CishContext::getLLVMContext() const {
@@ -35,6 +72,10 @@ clang::ASTContext& CishContext::getASTContext() const {
   return *astContext;
 }
 
+const clang::LangOptions& CishContext::getLangOptions() const {
+  return langOpts;
+}
+
 LLVMFrontend& CishContext::getLLVMFrontend() const {
   return *fe;
 }
@@ -43,8 +84,8 @@ LLVMBackend& CishContext::getLLVMBackend() const {
   return *be;
 }
 
-ASTPassManager& CishContext::getASTPassManager() const {
-  return *passMgr;
+CishContext::func_range CishContext::funcs() {
+  return asts.keys();
 }
 
 } // namespace cish
@@ -59,7 +100,7 @@ StringRef CishContextWrapperPass::getPassName() const {
 }
 
 void CishContextWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
-  AU.addRequired<SourceInfoWrapperPass>();
+  AU.addRequired<IRSourceInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
@@ -71,7 +112,7 @@ bool CishContextWrapperPass::runOnModule(Module& m) {
   cish::message() << "Running " << getPassName() << "\n";
 
   const cish::SourceInfo& si
-      = getAnalysis<SourceInfoWrapperPass>().getSourceInfo();
+      = getAnalysis<IRSourceInfoWrapperPass>().getSourceInfo();
 
   context.reset(new cish::CishContext(m, si));
 

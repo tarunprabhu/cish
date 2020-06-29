@@ -1,32 +1,31 @@
 set(SOURCES
+  cish.cpp
+  AST.cpp
   ASTBuilder.cpp
   ASTConstantFoldingPass.cpp
   ASTDeadCodeEliminationPass.cpp
+  ASTDefUseCalculatorPass.cpp
   ASTFunctionPass.cpp
-  ASTLookup.cpp
-  ASTPassManager.cpp
   ASTPropagateExprsPass.cpp
   ASTRenameVarsPass.cpp
   ASTSimplifyLoopsPass.cpp
   ASTSimplifyOperatorsPass.cpp
   ASTStreamer.cpp
   ASTStripCastsPass.cpp
-  cish.cpp
   BackendBase.cpp
-  CishASTSimplifyPass.cpp
   CishContext.cpp
-  CishFunctionPass.cpp
-  CishModulePass.cpp
-  CishOutputPass.cpp
-  CishPreparePass.cpp
+  CishASTPassesDriverPass.cpp
+  CishASTWriterPass.cpp
+  CishFunctionConvertPass.cpp
+  CishModuleConvertPass.cpp
   ClangUtils.cpp
-  DefUse.cpp
   Diagnostics.cpp
   LLVMBackend.cpp
   LLVMFrontend.cpp
   LLVMUtils.cpp
+  IRPreparePass.cpp
+  IRSourceInfo.cpp
   Options.cpp
-  SourceInfo.cpp
   Structure.cpp
   StructureAnalysis.cpp)
 

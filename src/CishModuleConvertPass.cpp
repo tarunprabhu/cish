@@ -1,34 +1,53 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #include "CishContext.h"
 #include "Diagnostics.h"
+#include "IRSourceInfo.h"
 #include "LLVMBackend.h"
 #include "LLVMFrontend.h"
 #include "Options.h"
-#include "SourceInfo.h"
 
 using namespace llvm;
 
-class CishModulePass : public ModulePass {
+class CishModuleConvertPass : public ModulePass {
 public:
   static char ID;
 
 public:
-  CishModulePass();
+  CishModuleConvertPass();
 
   virtual StringRef getPassName() const override;
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
   virtual bool runOnModule(Module& m) override;
 };
 
-CishModulePass::CishModulePass() : ModulePass(ID) {
+CishModuleConvertPass::CishModuleConvertPass() : ModulePass(ID) {
   ;
 }
 
-StringRef CishModulePass::getPassName() const {
+StringRef CishModuleConvertPass::getPassName() const {
   return "Cish Module Pass";
 }
 
-void CishModulePass::getAnalysisUsage(AnalysisUsage& AU) const {
-  AU.addRequired<SourceInfoWrapperPass>();
+void CishModuleConvertPass::getAnalysisUsage(AnalysisUsage& AU) const {
+  AU.addRequired<IRSourceInfoWrapperPass>();
   AU.addRequired<CishContextWrapperPass>();
   AU.setPreservesAll();
 }
@@ -43,11 +62,11 @@ static bool isMetadataFunction(const Function& f) {
   return false;
 }
 
-bool CishModulePass::runOnModule(Module& m) {
+bool CishModuleConvertPass::runOnModule(Module& m) {
   cish::message() << "Running " << getPassName() << "\n";
 
   const cish::SourceInfo& si
-      = getAnalysis<SourceInfoWrapperPass>().getSourceInfo();
+      = getAnalysis<IRSourceInfoWrapperPass>().getSourceInfo();
   const cish::CishContext& context
       = getAnalysis<CishContextWrapperPass>().getCishContext();
   cish::LLVMFrontend& fe = context.getLLVMFrontend();
@@ -122,11 +141,11 @@ bool CishModulePass::runOnModule(Module& m) {
   return false;
 }
 
-char CishModulePass::ID = 0;
+char CishModuleConvertPass::ID = 0;
 
-static RegisterPass<CishModulePass>
+static RegisterPass<CishModuleConvertPass>
     X("cish-module", "Cish Module Pass", true, true);
 
-Pass* createCishModulePass() {
-  return new CishModulePass();
+Pass* createCishModuleConvertPass() {
+  return new CishModuleConvertPass();
 }

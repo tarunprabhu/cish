@@ -1,4 +1,23 @@
-#include "SourceInfo.h"
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
+#include "IRSourceInfo.h"
 #include "Diagnostics.h"
 #include "LLVMUtils.h"
 #include "Options.h"
@@ -438,23 +457,24 @@ void SourceInfo::runOnModule(const Module& m) {
 
 } // namespace cish
 
-SourceInfoWrapperPass::SourceInfoWrapperPass() : ModulePass(ID), si(nullptr) {
+IRSourceInfoWrapperPass::IRSourceInfoWrapperPass()
+    : ModulePass(ID), si(nullptr) {
   ;
 }
 
-StringRef SourceInfoWrapperPass::getPassName() const {
+StringRef IRSourceInfoWrapperPass::getPassName() const {
   return "Cish Source Info Wrapper Pass";
 }
 
-void SourceInfoWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
+void IRSourceInfoWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
   AU.setPreservesAll();
 }
 
-const cish::SourceInfo& SourceInfoWrapperPass::getSourceInfo() const {
+const cish::SourceInfo& IRSourceInfoWrapperPass::getSourceInfo() const {
   return *si;
 }
 
-bool SourceInfoWrapperPass::runOnModule(Module& m) {
+bool IRSourceInfoWrapperPass::runOnModule(Module& m) {
   cish::message() << "Running " << getPassName() << "\n";
 
   si.reset(new cish::SourceInfo(m));
@@ -462,11 +482,7 @@ bool SourceInfoWrapperPass::runOnModule(Module& m) {
   return false;
 }
 
-char SourceInfoWrapperPass::ID = 0;
+char IRSourceInfoWrapperPass::ID = 0;
 
-static RegisterPass<SourceInfoWrapperPass>
+static RegisterPass<IRSourceInfoWrapperPass>
     X("cish-source-info", "Parses debug info", true, true);
-
-Pass* createNewSourceInfoWrapperPass() {
-  return new SourceInfoWrapperPass();
-}

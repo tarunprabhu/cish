@@ -1,3 +1,22 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #ifndef CISH_BACKEND_BASE_H
 #define CISH_BACKEND_BASE_H
 
@@ -13,19 +32,20 @@ namespace cish {
 class CishContext;
 
 class BackendBase {
-private:
-  std::string varPrefix;
-  uint64_t varSuffix;
-
 protected:
+  CishContext& cishContext;
   clang::ASTContext& astContext;
 
-  ASTBuilder ast;
+  ASTBuilder builder;
 
   // The statements comprising the body of the current function being
   // converted
   Stack<Vector<clang::Stmt*>> stmts;
   Map<std::string, clang::LabelDecl*> labels;
+
+private:
+  std::string varPrefix;
+  uint64_t varSuffix;
 
 protected:
   BackendBase(CishContext& context);

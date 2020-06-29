@@ -1,3 +1,22 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Function.h>
@@ -10,10 +29,10 @@
 #include <llvm/Transforms/Utils/PromoteMemToReg.h>
 
 #include "Diagnostics.h"
+#include "IRSourceInfo.h"
 #include "List.h"
 #include "Map.h"
 #include "Set.h"
-#include "SourceInfo.h"
 #include "Vector.h"
 
 #include <regex>
@@ -24,7 +43,7 @@ using namespace llvm;
 /// The intention is to make it to try and recreate a reasonable approximation
 /// of the control flow in the result C-ish program without having to resort
 /// to gotos everwhere
-class CishPreparePass : public FunctionPass {
+class IRPreparePass : public FunctionPass {
 public:
   static char ID;
 
@@ -38,29 +57,29 @@ private:
   std::string getNewVar(const std::string& var, bool forceSuffix);
 
 public:
-  CishPreparePass();
+  IRPreparePass();
 
   virtual StringRef getPassName() const override;
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
   virtual bool runOnFunction(Function& f) override;
 };
 
-CishPreparePass::CishPreparePass() : FunctionPass(ID) {
+IRPreparePass::IRPreparePass() : FunctionPass(ID) {
   ;
 }
 
-StringRef CishPreparePass::getPassName() const {
+StringRef IRPreparePass::getPassName() const {
   return "Cish Prepare Pass";
 }
 
-void CishPreparePass::getAnalysisUsage(AnalysisUsage& AU) const {
-  AU.addRequired<SourceInfoWrapperPass>();
+void IRPreparePass::getAnalysisUsage(AnalysisUsage& AU) const {
+  AU.addRequired<IRSourceInfoWrapperPass>();
   AU.addRequired<AssumptionCacheTracker>();
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.addRequired<LoopInfoWrapperPass>();
 }
 
-bool CishPreparePass::shouldPromote(AllocaInst* alloca) {
+bool IRPreparePass::shouldPromote(AllocaInst* alloca) {
   // The safest ones to remove are those that are local to a basic block
   cish::Set<BasicBlock*> bbs;
   for(Use& u : alloca->uses())
@@ -70,15 +89,14 @@ bool CishPreparePass::shouldPromote(AllocaInst* alloca) {
   return bbs.size() <= 1;
 }
 
-std::string CishPreparePass::registerVar(const std::string& var) {
+std::string IRPreparePass::registerVar(const std::string& var) {
   vars.insert(var);
   suffixes[var] = 0;
 
   return var;
 }
 
-std::string CishPreparePass::getNewVar(const std::string& var,
-                                       bool forceSuffix) {
+std::string IRPreparePass::getNewVar(const std::string& var, bool forceSuffix) {
   if(not vars.contains(var) and (not forceSuffix))
     return registerVar(var);
 
@@ -105,14 +123,14 @@ static cish::Set<Loop*> collectLoops(LoopInfo& li) {
   return loops;
 }
 
-bool CishPreparePass::runOnFunction(Function& f) {
+bool IRPreparePass::runOnFunction(Function& f) {
   cish::message() << "Running " << getPassName() << " on " << f.getName()
                   << "\n";
 
   LLVMContext& context = f.getContext();
 
   const cish::SourceInfo& si
-      = getAnalysis<SourceInfoWrapperPass>().getSourceInfo();
+      = getAnalysis<IRSourceInfoWrapperPass>().getSourceInfo();
   DominatorTree& dt = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   AssumptionCache& ac
       = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(f);
@@ -229,11 +247,11 @@ bool CishPreparePass::runOnFunction(Function& f) {
   return true;
 }
 
-char CishPreparePass::ID = 0;
+char IRPreparePass::ID = 0;
 
-static RegisterPass<CishPreparePass>
+static RegisterPass<IRPreparePass>
     X("cish-prepare", "Prepare code for cish", false, false);
 
-Pass* createCishPreparePass() {
-  return new CishPreparePass();
+Pass* createIRPreparePass() {
+  return new IRPreparePass();
 }

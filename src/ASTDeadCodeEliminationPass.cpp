@@ -1,7 +1,25 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
+#include "AST.h"
 #include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
-#include "ASTLookup.h"
-#include "DefUse.h"
 #include "Diagnostics.h"
 
 #include <llvm/Support/raw_ostream.h>
@@ -10,7 +28,7 @@ using namespace clang;
 
 namespace cish {
 
-class ASTDCEPass : public ASTFunctionPass {
+class ASTDCEPass : public ASTFunctionPass<ASTDCEPass> {
 protected:
   ASTBuilder builder;
 
@@ -21,8 +39,7 @@ public:
   virtual ~ASTDCEPass() = default;
 
   virtual llvm::StringRef getPassName() const override;
-  virtual bool modifiesAST() const override;
-  virtual bool runOnFunction(FunctionDecl* f) override;
+  bool process(FunctionDecl* f);
 };
 
 ASTDCEPass::ASTDCEPass(CishContext& context)
@@ -34,14 +51,7 @@ llvm::StringRef ASTDCEPass::getPassName() const {
   return "Cish AST Dead Code Elimination Pass";
 }
 
-bool ASTDCEPass::modifiesAST() const {
-  return true;
-}
-
-bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
-  DefUse& du = getDefUse();
-  ASTLookup& ast = getASTLookup();
-
+bool ASTDCEPass::process(FunctionDecl* f) {
   Set<Stmt*> removeStmts;
   Set<const VarDecl*> removeVars;
   bool changed = false;
@@ -49,12 +59,12 @@ bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
     changed = false;
     for(Decl* decl : f->decls()) {
       if(auto* var = dyn_cast<VarDecl>(decl)) {
-        if(not du.isUsed(var)) {
-          auto defs = du.defs(var);
+        if(not ast->isUsed(var)) {
+          auto defs = ast->defs(var);
           List<Stmt*> remove(defs.begin(), defs.end());
           changed |= remove.size();
           for(Stmt* def : remove) {
-            du.removeDef(var, def);
+            ast->removeDef(var, def);
             removeStmts.insert(def);
           }
           removeVars.insert(var);
@@ -65,7 +75,7 @@ bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
 
   Set<std::pair<CompoundStmt*, Stmt*>> containers;
   for(Stmt* stmt : removeStmts)
-    containers.emplace(ast.getCompoundStmtFor(stmt), ast.getConstructFor(stmt));
+    containers.emplace(ast->getBodyFor(stmt), ast->getConstructFor(stmt));
 
   for(auto& i : containers) {
     CompoundStmt* body = i.first;
@@ -100,10 +110,10 @@ bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
   Set<VarDecl*> orphanVars;
   for(auto* decl : f->decls())
     if(auto* var = dyn_cast<VarDecl>(decl))
-      if(du.hasZeroDefs(var) and du.hasZeroUses(var))
+      if(ast->hasZeroDefs(var) and ast->hasZeroUses(var))
         orphanVars.insert(var);
   for(VarDecl* var : orphanVars) {
-    du.removeVar(var);
+    ast->removeVar(var);
     f->removeDecl(var);
   }
 
@@ -112,7 +122,6 @@ bool ASTDCEPass::runOnFunction(FunctionDecl* f) {
 
 } // namespace cish
 
-cish::ASTFunctionPass*
-createASTDeadCodeEliminationPass(cish::CishContext& context) {
+cish::ASTPass* createASTDeadCodeEliminationPass(cish::CishContext& context) {
   return new cish::ASTDCEPass(context);
 }

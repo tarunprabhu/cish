@@ -1,14 +1,34 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
-#include "ASTStreamer.h"
-#include "DefUse.h"
+#include "Map.h"
 #include "Vector.h"
+
+#include <clang/Analysis/CFG.h>
 
 using namespace clang;
 
 namespace cish {
 
-class ASTRenameVarsPass : public ASTFunctionPass {
+class ASTRenameVarsPass : public ASTFunctionPass<ASTRenameVarsPass> {
 protected:
   ASTBuilder builder;
   Map<std::string, unsigned> varNames;
@@ -25,7 +45,7 @@ public:
   virtual ~ASTRenameVarsPass() = default;
 
   virtual llvm::StringRef getPassName() const override;
-  virtual bool runOnFunction(FunctionDecl* f) override;
+  bool process(FunctionDecl* f);
 };
 
 ASTRenameVarsPass::ASTRenameVarsPass(CishContext& context)
@@ -70,10 +90,8 @@ std::string ASTRenameVarsPass::getName(const std::string& base) {
   return ss.str();
 }
 
-bool ASTRenameVarsPass::runOnFunction(FunctionDecl* f) {
+bool ASTRenameVarsPass::process(FunctionDecl* f) {
   bool changed = false;
-
-  DefUse& du = getDefUse();
 
   Vector<VarDecl*> vars;
   for(Decl* decl : f->decls()) {
@@ -87,8 +105,8 @@ bool ASTRenameVarsPass::runOnFunction(FunctionDecl* f) {
   do {
     varChanged = false;
     for(VarDecl* var : vars) {
-      if(var->getName().startswith("_") and du.hasSingleDef(var)) {
-        Stmt* def = cast<BinaryOperator>(du.getSingleDef(var))->getRHS();
+      if(var->getName().startswith("_") and ast->hasSingleDef(var)) {
+        Stmt* def = cast<BinaryOperator>(ast->getSingleDef(var))->getRHS();
         Vector<std::string> pieces = parse(def);
         if(pieces.size()) {
           if(pieces.size() == 1)
@@ -108,6 +126,6 @@ bool ASTRenameVarsPass::runOnFunction(FunctionDecl* f) {
 
 } // namespace cish
 
-cish::ASTFunctionPass* createASTRenameVarsPass(cish::CishContext& context) {
+cish::ASTPass* createASTRenameVarsPass(cish::CishContext& context) {
   return new cish::ASTRenameVarsPass(context);
 }

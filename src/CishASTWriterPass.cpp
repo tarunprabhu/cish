@@ -1,3 +1,22 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #include "ASTStreamer.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
@@ -8,7 +27,7 @@
 
 using namespace llvm;
 
-class CishOutputPass : public ModulePass {
+class CishASTWriterPass : public ModulePass {
 public:
   static char ID;
 
@@ -19,28 +38,28 @@ private:
   void run(clang::ASTContext& astContext, raw_ostream& os);
 
 public:
-  explicit CishOutputPass(const std::string& outFile);
+  explicit CishASTWriterPass(const std::string& outFile);
 
   virtual StringRef getPassName() const override;
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
   virtual bool runOnModule(Module& m) override;
 };
 
-CishOutputPass::CishOutputPass(const std::string& outFile)
+CishASTWriterPass::CishASTWriterPass(const std::string& outFile)
     : ModulePass(ID), outFile(outFile) {
   ;
 }
 
-StringRef CishOutputPass::getPassName() const {
+StringRef CishASTWriterPass::getPassName() const {
   return "Cish Printer Pass";
 }
 
-void CishOutputPass::getAnalysisUsage(AnalysisUsage& AU) const {
+void CishASTWriterPass::getAnalysisUsage(AnalysisUsage& AU) const {
   AU.addRequired<CishContextWrapperPass>();
   AU.setPreservesAll();
 }
 
-void CishOutputPass::run(clang::ASTContext& astContext, raw_ostream& os) {
+void CishASTWriterPass::run(clang::ASTContext& astContext, raw_ostream& os) {
   cish::ASTStreamer stream(astContext, os);
 
   cish::Vector<const clang::RecordDecl*> structs;
@@ -87,7 +106,7 @@ void CishOutputPass::run(clang::ASTContext& astContext, raw_ostream& os) {
     stream << f << stream.endl() << stream.endl();
 }
 
-bool CishOutputPass::runOnModule(Module& m) {
+bool CishASTWriterPass::runOnModule(Module& m) {
   const cish::CishContext& context
       = getAnalysis<CishContextWrapperPass>().getCishContext();
   clang::ASTContext& astContext = context.getASTContext();
@@ -108,8 +127,8 @@ bool CishOutputPass::runOnModule(Module& m) {
   return false;
 }
 
-char CishOutputPass::ID = 0;
+char CishASTWriterPass::ID = 0;
 
-Pass* createCishOutputPass(const std::string& outFile) {
-  return new CishOutputPass(outFile);
+Pass* createCishASTWriterPass(const std::string& outFile) {
+  return new CishASTWriterPass(outFile);
 }

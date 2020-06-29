@@ -1,3 +1,22 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/IR/Dominators.h>
@@ -7,8 +26,9 @@
 
 #include "CishContext.h"
 #include "Diagnostics.h"
+#include "LLVMBackend.h"
+#include "LLVMFrontend.h"
 #include "Set.h"
-#include "SourceInfo.h"
 #include "StructureAnalysis.h"
 #include "Vector.h"
 
@@ -409,33 +429,33 @@ void WalkUnstructured::walk(const StructNode*) {
 
 } // namespace cish
 
-class CishFunctionPass : public FunctionPass {
+class CishFunctionConvertPass : public FunctionPass {
 public:
   static char ID;
 
 public:
-  CishFunctionPass();
+  CishFunctionConvertPass();
 
   virtual StringRef getPassName() const override;
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
   virtual bool runOnFunction(Function& f) override;
 };
 
-CishFunctionPass::CishFunctionPass() : FunctionPass(ID) {
+CishFunctionConvertPass::CishFunctionConvertPass() : FunctionPass(ID) {
   ;
 }
 
-StringRef CishFunctionPass::getPassName() const {
+StringRef CishFunctionConvertPass::getPassName() const {
   return "Cish Function Pass";
 }
 
-void CishFunctionPass::getAnalysisUsage(AnalysisUsage& AU) const {
+void CishFunctionConvertPass::getAnalysisUsage(AnalysisUsage& AU) const {
   AU.addRequired<CishContextWrapperPass>();
   AU.addRequired<StructureAnalysisWrapperPass>();
   AU.setPreservesAll();
 }
 
-bool CishFunctionPass::runOnFunction(Function& f) {
+bool CishFunctionConvertPass::runOnFunction(Function& f) {
   cish::message() << "Running " << getPassName() << " on " << f.getName()
                   << "\n";
 
@@ -466,11 +486,11 @@ bool CishFunctionPass::runOnFunction(Function& f) {
   return false;
 }
 
-char CishFunctionPass::ID = 0;
+char CishFunctionConvertPass::ID = 0;
 
-static RegisterPass<CishFunctionPass>
+static RegisterPass<CishFunctionConvertPass>
     X("cish-functions", "Cish Function Pass", true, true);
 
-Pass* createCishFunctionPass() {
-  return new CishFunctionPass();
+Pass* createCishFunctionConvertPass() {
+  return new CishFunctionConvertPass();
 }

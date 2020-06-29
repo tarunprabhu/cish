@@ -146,7 +146,7 @@ public:
     return _impl.find(e);
   }
 
-  bool contains(const T& e) const {
+  bool contains(const_reference e) const {
     return (_impl.find(e) != _impl.end());
   }
 

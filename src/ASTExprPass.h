@@ -1,3 +1,22 @@
+//  ---------------------------------------------------------------------------
+//  Copyright (C) 2020 Tarun Prabhu <tarun.prabhu@acm.org>
+//
+//  This file is part of Cish.
+//
+//  Cish is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  Cish is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
+//  ---------------------------------------------------------------------------
+
 #ifndef CISH_AST_EXPR_PASS_H
 #define CISH_AST_EXPR_PASS_H
 
@@ -12,7 +31,7 @@ using clang::dyn_cast;
 namespace cish {
 
 template <typename DerivedT>
-class ASTExprPass : public ASTFunctionPass {
+class ASTExprPass : public ASTFunctionPass<ASTExprPass<DerivedT>> {
 protected:
   bool changed;
   ASTBuilder builder;
@@ -322,7 +341,7 @@ protected:
 
 public:
   ASTExprPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext), changed(false),
+      : ASTFunctionPass<ASTExprPass<DerivedT>>(cishContext), changed(false),
         builder(cishContext.getASTContext()) {
     ;
   }
@@ -333,7 +352,7 @@ public:
 
   virtual llvm::StringRef getPassName() const override = 0;
 
-  virtual bool runOnFunction(clang::FunctionDecl* f) override {
+  bool process(clang::FunctionDecl* f) {
     changed = false;
     process(f->getBody());
 
