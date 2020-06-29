@@ -45,7 +45,7 @@ namespace cish {
   }
 
 static std::string formatLLVMName(const std::string& s) {
-  static const Set<char> repl = {'.', ':', '"'};
+  static const Set<char> repl = {'.', '"'};
   std::string name = s;
   for(size_t i = 0; i < name.length(); i++)
     if(repl.contains(name[i]))

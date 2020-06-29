@@ -20,6 +20,7 @@
 #ifndef CISH_AST_H
 #define CISH_AST_H
 
+#include "ASTBuilder.h"
 #include "List.h"
 #include "Map.h"
 #include "Set.h"
@@ -29,6 +30,7 @@
 #include <clang/AST/ParentMap.h>
 #include <clang/Analysis/CFG.h>
 #include <clang/Analysis/CFGStmtMap.h>
+#include <clang/Analysis/Analyses/Dominators.h>
 
 #include <llvm/ADT/iterator_range.h>
 
@@ -61,12 +63,14 @@ protected:
 
 private:
   ASTPass* defUseCalculator;
+  ASTBuilder builder;
 
 protected:
   clang::CFG::BuildOptions cfgBuildOpts;
   std::unique_ptr<clang::ParentMap> stmtParents;
   std::unique_ptr<clang::CFG> cfg;
   std::unique_ptr<clang::CFGStmtMap> cfgStmtMap;
+  std::unique_ptr<clang::DominatorTree> dt;
 
   // The loops in the function because those are usually "interesting" and
   // therefore worthy of keeping separately
@@ -146,7 +150,10 @@ protected:
   void addDef(clang::VarDecl* var, clang::Stmt* stmt);
   void addUse(clang::VarDecl* var, clang::Stmt* stmt);
   void addTopLevelDef(clang::VarDecl* var, clang::Stmt* stmt);
+  void addTopLevelDef(clang::Expr* expr, clang::Stmt* stmt);
   void addTopLevelUse(clang::VarDecl* var, clang::Stmt* stmt);
+
+  bool replaceBody(clang::Stmt* ctrl, clang::Stmt* old, clang::Stmt* neew);
 
   bool replace(clang::Expr* expr, clang::VarDecl* var);
   bool
@@ -178,6 +185,10 @@ protected:
                clang::Expr* repl);
   bool replace(clang::Stmt* dst, clang::VarDecl* var, clang::Expr* repl);
 
+  void recalculateCFG();
+  void recalculateStructure();
+  void recalculateDefUse();
+
 public:
   AST(CishContext& cishContext, clang::FunctionDecl* decl);
   AST(const AST&) = delete;
@@ -189,8 +200,13 @@ public:
   void removeDef(clang::VarDecl* var, clang::Stmt* stmt);
   void removeVar(clang::VarDecl* var);
   bool replaceAllUsesWith(clang::VarDecl* var, clang::Expr* expr);
+  bool replaceStmtWith(clang::Stmt* old, clang::Stmt* repl);
+  bool eraseStmt(clang::Stmt* stmt);
 
+  const clang::DominatorTree& getDominatorTree() const;
+  clang::CFG* getCFG() const;
   clang::CFGBlock* getCFGBlock(clang::Stmt* stmt) const;
+  const clang::CFG::BuildOptions& getCFGBuildOpts() const;
 
   bool hasAddressTaken(clang::VarDecl* var) const;
 
@@ -238,7 +254,7 @@ public:
   tldef_range tldefs(clang::VarDecl* var) const;
   child_range children(clang::Stmt* stmt) const;
 
-  void recalculate();
+  void recalculate(bool defUseOnly);
 
 public:
   friend class ASTDefUseCalculatorPass;

@@ -52,7 +52,7 @@ void BackendBase::beginFunction(FunctionDecl*) {
 void BackendBase::endFunction(FunctionDecl* f) {
   varSuffix = 0;
   stmts.clear();
-  cishContext.addAST(f).recalculate();
+  cishContext.addAST(f).recalculate(false);
 }
 
 Stmt* BackendBase::add(Stmt* stmt) {

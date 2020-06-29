@@ -19,7 +19,6 @@
 
 #include "CishContext.h"
 #include "AST.h"
-#include "ASTPassManager.h"
 #include "Diagnostics.h"
 #include "IRSourceInfo.h"
 #include "LLVMBackend.h"

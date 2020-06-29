@@ -18,14 +18,13 @@
 //  ---------------------------------------------------------------------------
 
 #include "ASTFunctionPass.h"
-#include "ASTPassManager.h"
 #include "CishContext.h"
 
 namespace cish {
 
-ASTPass::ASTPass(CishContext& cishContext)
+ASTPass::ASTPass(CishContext& cishContext, bool modifiesAST)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      ast(nullptr) {
+      ast(nullptr), modifiesAST(modifiesAST) {
   ;
 }
 

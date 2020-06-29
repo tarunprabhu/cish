@@ -83,6 +83,7 @@ protected:
         if(defs.contains(stmt)) {
           defSeen |= true;
         } else if(uses.contains(stmt)) {
+          uses.erase(stmt);
           if(defSeen)
             return true;
         }
@@ -90,9 +91,10 @@ protected:
         fatal(error() << "Unexpected CFG element kind");
       }
     }
+
     seen.insert(block);
     for(CFGBlock* succ : block->succs())
-      if(isDefBeforeUseInBlock(defs, succ, defSeen, seen, uses))
+      if(succ and isDefBeforeUseInBlock(defs, succ, defSeen, seen, uses))
         return true;
 
     return false;
@@ -163,6 +165,11 @@ protected:
   bool canPropagateCopy(VarDecl* lhs, VarDecl* rhs, Stmt* lhsDef) {
     Set<Stmt*> defs = ast->getTopLevelDefsSet(rhs);
     Set<Stmt*> uses = ast->getTopLevelUsesSet(lhs);
+    if(uses.size() == 0)
+      return true;
+
+    llvm::errs() << lhs->getName() << " = " << toString(lhsDef, astContext)
+                 << "\n";
     CFGBlock* rootBlock = ast->getCFGBlock(lhsDef);
 
     if(isDefBeforeUseInRootBlock(defs, rootBlock, lhsDef, uses))
@@ -174,17 +181,28 @@ protected:
     // Look at the rest of the graph
     Set<CFGBlock*> seen = {rootBlock};
     for(CFGBlock* succ : rootBlock->succs())
-      if(isDefBeforeUseInBlock(defs, succ, false, seen, uses))
+      if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
         return false;
 
     // There should be no uses left
     if(uses.size())
-      fatal(error() << "Did not encounter all uses");
+      fatal(error() << "Did not encounter all uses: " << lhs->getName());
 
     return true;
   }
 
-  bool canPropagateExpr(VarDecl* lhs, Stmt* lhsDef) {
+  bool isRecursiveExpr(VarDecl* lhs, Stmt* lhsDef) {
+    for(VarDecl* var : getVarsInStmt(lhsDef)) {
+      for(Stmt* def : ast->defs(var)) {
+        Expr* rhs = cast<BinaryOperator>(def)->getRHS();
+        if(getVarsInStmt(rhs).contains(lhs))
+          return true;
+      }
+    }
+    return false;
+  }
+
+  bool isLHSDefConstantForAllUses(VarDecl* lhs, Stmt* lhsDef) {
     Set<Stmt*> uses = ast->getTopLevelUsesSet(lhs);
     CFGBlock* rootBlock = ast->getCFGBlock(lhsDef);
 
@@ -199,23 +217,27 @@ protected:
         // Look at the rest of the graph
         Set<CFGBlock*> seen = {rootBlock};
         for(CFGBlock* succ : rootBlock->succs())
-          if(isDefBeforeUseInBlock(defs, succ, false, seen, uses))
+          if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
             return false;
 
         // There should be no uses left
         if(uses.size())
-          fatal(error() << "Did not encounter all uses");
+          fatal(error() << "Did not encounter all uses: " << lhs->getName());
       }
     }
 
     return true;
   }
 
+  bool canPropagateExpr(VarDecl* lhs, Stmt* lhsDef) {
+    if(isRecursiveExpr(lhs, lhsDef) or isLHSDefConstantForAllUses(lhs, lhsDef))
+      return true;
+    return false;
+  }
+
 public:
   bool process(FunctionDecl* f) {
     bool changed = false;
-
-    // Ideally, the variable being replaced should have
 
     // Finding vars to be propagated that have more than one definition is
     // possible, but is more difficult because a more complicated
@@ -275,7 +297,8 @@ public:
   }
 
 public:
-  ASTPropagateExprsPass(CishContext& context) : ASTFunctionPass(context) {
+  ASTPropagateExprsPass(CishContext& cishContext)
+      : ASTFunctionPass(cishContext) {
     ;
   }
 
@@ -290,6 +313,6 @@ public:
 
 } // namespace cish
 
-cish::ASTPass* createASTPropagateExprsPass(cish::CishContext& context) {
-  return new cish::ASTPropagateExprsPass(context);
+cish::ASTPass* createASTPropagateExprsPass(cish::CishContext& cishContext) {
+  return new cish::ASTPropagateExprsPass(cishContext);
 }

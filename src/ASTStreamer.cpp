@@ -485,6 +485,10 @@ ASTStreamer& ASTStreamer::operator<<(const DeclRefExpr* declRefExpr) {
   fatal(error() << "Unknown decl in declRef: " << decl->getDeclKindName());
 }
 
+ASTStreamer& ASTStreamer::operator<<(const NullStmt*) {
+  return *this;
+}
+
 ASTStreamer& ASTStreamer::operator<<(const BinaryOperator* binOp) {
   const Expr* lhs = binOp->getLHS();
   const Expr* rhs = binOp->getRHS();
@@ -745,7 +749,9 @@ ASTStreamer& ASTStreamer::operator<<(const DoStmt* doStmt) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const ForStmt* forStmt) {
-  fatal(error() << "NOT IMPLEMENTED: " << forStmt->getStmtClassName());
+  *this << "for(" << forStmt->getInit() << "; " << forStmt->getCond() << "; "
+        << forStmt->getInc() << ")" << forStmt->getBody();
+
   return *this;
 }
 
@@ -772,6 +778,8 @@ ASTStreamer& ASTStreamer::operator<<(const Stmt* stmt) {
     *this << initList;
   else if(const auto* declRefExpr = dyn_cast<DeclRefExpr>(stmt))
     *this << declRefExpr;
+  else if(const auto* nullStmt = dyn_cast<NullStmt>(stmt))
+    *this << nullStmt;
   else if(const auto* declStmt = dyn_cast<DeclStmt>(stmt))
     *this << declStmt;
   else if(const auto* compoundStmt = dyn_cast<CompoundStmt>(stmt))

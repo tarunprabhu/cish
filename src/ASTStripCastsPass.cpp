@@ -31,54 +31,48 @@ namespace cish {
 
 class ASTStripCastsPass : public ASTExprPass<ASTStripCastsPass> {
 public:
-  Expr* process(CStyleCastExpr* cexpr);
+  Expr* process(CStyleCastExpr* castExpr) {
+    const Type* type = castExpr->getType().getTypePtr();
+    Expr* expr = castExpr->getSubExpr();
+    if(opts().has(StripCasts::Never)) {
+      return castExpr;
+    } else if(opts().has(StripCasts::All)) {
+      return expr;
+    } else if(const auto* pty = dyn_cast<PointerType>(type)) {
+      if(isa<FunctionProtoType>(pty->getPointeeType())) {
+        if(opts().has(StripCasts::Function))
+          return expr;
+      } else if(isa<VectorType>(pty->getPointeeType())) {
+        if(opts().has(StripCasts::Vector))
+          return expr;
+      } else {
+        if(opts().has(StripCasts::Pointer))
+          return expr;
+      }
+    } else if(type->isScalarType()) {
+      if(opts().has(StripCasts::Scalar))
+        return expr;
+    } else if(isa<VectorType>(type)) {
+      if(opts().has(StripCasts::Vector))
+        return expr;
+    }
+
+    return castExpr;
+  }
 
 public:
-  ASTStripCastsPass(CishContext& context);
+  ASTStripCastsPass(CishContext& cishContext) : ASTExprPass(cishContext) {
+    ;
+  }
+
   ASTStripCastsPass(const ASTStripCastsPass&) = delete;
   ASTStripCastsPass(ASTStripCastsPass&&) = delete;
   virtual ~ASTStripCastsPass() = default;
 
-  virtual llvm::StringRef getPassName() const override;
-};
-
-ASTStripCastsPass::ASTStripCastsPass(CishContext& cishContext)
-    : ASTExprPass(cishContext) {
-  ;
-}
-
-llvm::StringRef ASTStripCastsPass::getPassName() const {
-  return "AST Strip Casts Pass";
-}
-
-Expr* ASTStripCastsPass::process(CStyleCastExpr* castExpr) {
-  const Type* type = castExpr->getType().getTypePtr();
-  Expr* expr = castExpr->getSubExpr();
-  if(opts().has(StripCasts::Never)) {
-    return castExpr;
-  } else if(opts().has(StripCasts::All)) {
-    return expr;
-  } else if(const auto* pty = dyn_cast<PointerType>(type)) {
-    if(isa<FunctionProtoType>(pty->getPointeeType())) {
-      if(opts().has(StripCasts::Function))
-        return expr;
-    } else if(isa<VectorType>(pty->getPointeeType())) {
-      if(opts().has(StripCasts::Vector))
-        return expr;
-    } else {
-      if(opts().has(StripCasts::Pointer))
-        return expr;
-    }
-  } else if(type->isScalarType()) {
-    if(opts().has(StripCasts::Scalar))
-      return expr;
-  } else if(isa<VectorType>(type)) {
-    if(opts().has(StripCasts::Vector))
-      return expr;
+  virtual llvm::StringRef getPassName() const override {
+    return "AST Strip Casts Pass";
   }
-
-  return castExpr;
-}
+};
 
 } // namespace cish
 

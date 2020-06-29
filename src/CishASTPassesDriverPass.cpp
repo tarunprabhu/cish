@@ -32,48 +32,44 @@ public:
   static char ID;
 
 public:
-  CishASTPassesDriverPass();
-
-  virtual StringRef getPassName() const override;
-  virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
-  virtual bool runOnModule(Module& m) override;
-};
-
-CishASTPassesDriverPass::CishASTPassesDriverPass() : ModulePass(ID) {
-  ;
-}
-
-StringRef CishASTPassesDriverPass::getPassName() const {
-  return "Cish AST Simplify Pass";
-}
-
-void CishASTPassesDriverPass::getAnalysisUsage(AnalysisUsage& AU) const {
-  AU.addRequired<CishContextWrapperPass>();
-  AU.setPreservesAll();
-}
-
-bool CishASTPassesDriverPass::runOnModule(Module& m) {
-  cish::CishContext& cishContext
-      = getAnalysis<CishContextWrapperPass>().getCishContext();
-
-  cish::Vector<cish::ASTPass*> passes = {
-      createASTStripCastsPass(cishContext),
-      createASTSimplifyOperatorsPass(cishContext),
-      createASTPropagateExprsPass(cishContext),
-      createASTSimplifyLoopsPass(cishContext),
-      createASTConstantFoldingPass(cishContext),
-      createASTDeadCodeEliminationPass(cishContext),
-      createASTRenameVarsPass(cishContext),
-  };
-
-  for(clang::FunctionDecl* f : cishContext.funcs()) {
-    for(cish::ASTPass* pass : passes) {
-      pass->runOnFunction(f);
-    }
+  CishASTPassesDriverPass() : ModulePass(ID) {
+    ;
   }
 
-  return false;
-}
+  virtual StringRef getPassName() const override {
+    return "Cish AST Simplify Pass";
+  }
+
+  virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
+    AU.addRequired<CishContextWrapperPass>();
+    AU.setPreservesAll();
+  }
+
+  virtual bool runOnModule(Module& m) override {
+    cish::CishContext& cishContext
+        = getAnalysis<CishContextWrapperPass>().getCishContext();
+
+    cish::Vector<cish::ASTPass*> passes = {
+        createASTStripCastsPass(cishContext),
+        createASTSimplifyOperatorsPass(cishContext),
+        createASTPropagateExprsPass(cishContext),
+        createASTSimplifyLoopsPass(cishContext),
+        createASTConstantFoldingPass(cishContext),
+        createASTDeadCodeEliminationPass(cishContext),
+        createASTRenameVarsPass(cishContext),
+    };
+
+    for(clang::FunctionDecl* f : cishContext.funcs()) {
+      for(cish::ASTPass* pass : passes) {
+        pass->runOnFunction(f);
+        // llvm::errs() << cish::toString(f, cishContext.getASTContext()) << "\n";
+        // llvm::errs().flush();
+      }
+    }
+
+    return false;
+  }
+};
 
 char CishASTPassesDriverPass::ID = 0;
 

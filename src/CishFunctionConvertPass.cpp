@@ -434,57 +434,51 @@ public:
   static char ID;
 
 public:
-  CishFunctionConvertPass();
-
-  virtual StringRef getPassName() const override;
-  virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
-  virtual bool runOnFunction(Function& f) override;
-};
-
-CishFunctionConvertPass::CishFunctionConvertPass() : FunctionPass(ID) {
-  ;
-}
-
-StringRef CishFunctionConvertPass::getPassName() const {
-  return "Cish Function Pass";
-}
-
-void CishFunctionConvertPass::getAnalysisUsage(AnalysisUsage& AU) const {
-  AU.addRequired<CishContextWrapperPass>();
-  AU.addRequired<StructureAnalysisWrapperPass>();
-  AU.setPreservesAll();
-}
-
-bool CishFunctionConvertPass::runOnFunction(Function& f) {
-  cish::message() << "Running " << getPassName() << " on " << f.getName()
-                  << "\n";
-
-  const cish::CishContext& context
-      = getAnalysis<CishContextWrapperPass>().getCishContext();
-  cish::LLVMFrontend& fe = context.getLLVMFrontend();
-  cish::LLVMBackend& be = context.getLLVMBackend();
-
-  const auto& analysis = getAnalysis<StructureAnalysisWrapperPass>();
-
-  be.beginFunction(f);
-
-  switch(analysis.getStructureKind()) {
-  case cish::StructureKind::Unstructured:
-    cish::WalkUnstructured(fe, be, f).walk(nullptr);
-    break;
-  case cish::StructureKind::SemiStructured:
-    cish::WalkSemiStructured(fe, be, f).walk(&analysis.getStructured());
-    break;
-  case cish::StructureKind::PerfectlyStructured:
-  case cish::StructureKind::Structured:
-    cish::WalkStructured(fe, be, f).walk(&analysis.getStructured());
-    break;
+  CishFunctionConvertPass() : FunctionPass(ID) {
+    ;
   }
 
-  be.endFunction(f);
+  virtual StringRef getPassName() const override {
+    return "Cish Function Pass";
+  }
 
-  return false;
-}
+  virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
+    AU.addRequired<CishContextWrapperPass>();
+    AU.addRequired<StructureAnalysisWrapperPass>();
+    AU.setPreservesAll();
+  }
+
+  virtual bool runOnFunction(Function& f) override {
+    cish::message() << "Running " << getPassName() << " on " << f.getName()
+                    << "\n";
+
+    const cish::CishContext& context
+        = getAnalysis<CishContextWrapperPass>().getCishContext();
+    cish::LLVMFrontend& fe = context.getLLVMFrontend();
+    cish::LLVMBackend& be = context.getLLVMBackend();
+
+    const auto& analysis = getAnalysis<StructureAnalysisWrapperPass>();
+
+    be.beginFunction(f);
+
+    switch(analysis.getStructureKind()) {
+    case cish::StructureKind::Unstructured:
+      cish::WalkUnstructured(fe, be, f).walk(nullptr);
+      break;
+    case cish::StructureKind::SemiStructured:
+      cish::WalkSemiStructured(fe, be, f).walk(&analysis.getStructured());
+      break;
+    case cish::StructureKind::PerfectlyStructured:
+    case cish::StructureKind::Structured:
+      cish::WalkStructured(fe, be, f).walk(&analysis.getStructured());
+      break;
+    }
+
+    be.endFunction(f);
+
+    return false;
+  }
+};
 
 char CishFunctionConvertPass::ID = 0;
 

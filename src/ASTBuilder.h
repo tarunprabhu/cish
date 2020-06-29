@@ -69,6 +69,7 @@ public:
                                                       clang::QualType type);
   clang::CStyleCastExpr* createCastExpr(clang::Expr* expr,
                                         clang::QualType type);
+  clang::NullStmt* createNullStmt();
   clang::IfStmt*
   createIfStmt(clang::Expr* cond, clang::Stmt* thn, clang::Stmt* els = nullptr);
   clang::GotoStmt* createGotoStmt(clang::LabelDecl* label);
@@ -86,6 +87,8 @@ public:
                                       clang::QualType type);
   clang::DoStmt* createDoStmt(clang::Stmt* body, clang::Expr* cond);
   clang::WhileStmt* createWhileStmt(clang::Expr* cond, clang::Stmt* body);
+  clang::ForStmt* createForStmt(clang::Stmt* init, clang::Expr* cond,
+                                clang::Expr* inc, clang::Stmt* body = nullptr);
   clang::CXXBoolLiteralExpr* createBoolLiteral(bool b);
   clang::CXXBoolLiteralExpr* createBoolLiteral(bool b, clang::QualType type);
   clang::IntegerLiteral* createIntLiteral(const llvm::APInt& i,

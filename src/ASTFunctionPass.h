@@ -67,9 +67,10 @@ protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
   AST* ast;
+  bool modifiesAST;
 
 protected:
-  ASTPass(CishContext& cishContext);
+  ASTPass(CishContext& cishContext, bool modifiesAST = false);
   ASTPass(const ASTPass&) = delete;
   ASTPass(ASTPass&&) = delete;
   virtual ~ASTPass() = default;
@@ -200,10 +201,15 @@ protected:
     return changed;
   }
 
+  bool process(clang::NullStmt*) {
+    return false;
+  }
+
   bool process(clang::LabelStmt* labelStmt) {
     bool changed = false;
 
     changed |= derived_process(labelStmt);
+    changed |= process(labelStmt->getSubStmt());
 
     return changed;
   }
@@ -403,6 +409,8 @@ protected:
       return process(defaultStmt);
     else if(auto* retStmt = dyn_cast<clang::ReturnStmt>(stmt))
       return process(retStmt);
+    else if(auto* nullStmt = dyn_cast<clang::NullStmt>(stmt))
+      return process(nullStmt);
     else if(auto* breakStmt = dyn_cast<clang::BreakStmt>(stmt))
       return process(breakStmt);
     else if(auto* continueStmt = dyn_cast<clang::ContinueStmt>(stmt))
@@ -459,9 +467,11 @@ protected:
   }
 
 public:
-  ASTFunctionPass(CishContext& cishContext) : ASTPass(cishContext) {
+  ASTFunctionPass(CishContext& cishContext, bool modifiesAST = false)
+      : ASTPass(cishContext, modifiesAST) {
     ;
   }
+
   ASTFunctionPass(const ASTFunctionPass&) = delete;
   ASTFunctionPass(ASTFunctionPass&&) = delete;
   virtual ~ASTFunctionPass() = default;
@@ -474,8 +484,9 @@ public:
 
     changed |= process(f);
 
+    bool defUseOnly = not modifiesAST;
     if(changed)
-      ast->recalculate();
+      ast->recalculate(defUseOnly);
 
     return changed;
   }

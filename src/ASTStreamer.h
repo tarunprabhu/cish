@@ -87,6 +87,7 @@ protected:
   ASTStreamer& operator<<(const clang::VectorType*);
   ASTStreamer& operator<<(clang::QualType);
 
+  ASTStreamer& operator<<(const clang::NullStmt*);
   ASTStreamer& operator<<(const clang::DeclStmt*);
   ASTStreamer& operator<<(const clang::CompoundStmt*);
   ASTStreamer& operator<<(const clang::LabelStmt*);

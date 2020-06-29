@@ -51,7 +51,8 @@ public:
 
 AST::AST(CishContext& cishContext, FunctionDecl* decl)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      decl(decl), defUseCalculator(createASTDefUseCalculatorPass(cishContext)) {
+      decl(decl), defUseCalculator(createASTDefUseCalculatorPass(cishContext)),
+      builder(astContext), dt(new DominatorTree()) {
   for(ParmVarDecl* param : decl->parameters()) {
     defMap[param].clear();
     useMap[param].clear();
@@ -101,8 +102,20 @@ FunctionDecl* AST::getFunction() const {
   return decl;
 }
 
+const DominatorTree& AST::getDominatorTree() const {
+  return *dt;
+}
+
+CFG* AST::getCFG() const {
+  return cfg.get();
+}
+
 CFGBlock* AST::getCFGBlock(Stmt* stmt) const {
   return cfgStmtMap->getBlock(stmt);
+}
+
+const CFG::BuildOptions& AST::getCFGBuildOpts() const {
+  return cfgBuildOpts;
 }
 
 void AST::addChild(Stmt* stmt,
@@ -137,19 +150,14 @@ void AST::associateStmts(CompoundStmt* body, Stmt* ctrl, unsigned depth) {
     } else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt)) {
       for(SwitchCase* kase = switchStmt->getSwitchCaseList(); kase;
           kase = kase->getNextSwitchCase()) {
-        addChild(kase,
-                 cast<CompoundStmt>(switchStmt->getBody()),
-                 switchStmt,
-                 depth + 1);
+        // addChild(kase,
+        //          cast<CompoundStmt>(switchStmt->getBody()),
+        //          switchStmt,
+        //          depth + 1);
         associateStmts(cast<CompoundStmt>(kase->getSubStmt()), kase, depth + 1);
       }
     }
   }
-}
-
-static bool isConstruct(const Stmt* stmt) {
-  return isa<IfStmt>(stmt) or isa<DoStmt>(stmt) or isa<ForStmt>(stmt)
-         or isa<WhileStmt>(stmt);
 }
 
 void AST::addDef(VarDecl* var, Stmt* stmt) {
@@ -164,12 +172,13 @@ void AST::addTopLevelDef(VarDecl* var, Stmt* stmt) {
   tlDefMap[var].insert(stmt);
 }
 
+void AST::addTopLevelDef(Expr* expr, Stmt* stmt) {
+  if(auto* ref = dyn_cast<DeclRefExpr>(expr))
+    if(auto* var = dyn_cast<VarDecl>(ref->getFoundDecl()))
+      tlDefMap[var].insert(stmt);
+}
+
 void AST::addTopLevelUse(VarDecl* var, Stmt* stmt) {
-  if(auto* binOp = dyn_cast<BinaryOperator>(stmt))
-    if(binOp->getOpcode() == BO_Assign)
-      if(auto* ref = dyn_cast<DeclRefExpr>(binOp->getLHS()))
-        if(ref->getFoundDecl() == var)
-          return addTopLevelDef(var, stmt);
   tlUseMap[var].insert(stmt);
 }
 
@@ -365,6 +374,33 @@ bool AST::replace(Stmt* stmt, VarDecl* var, Expr* repl) {
   return false;
 }
 
+bool AST::replaceBody(Stmt* ctrl, Stmt* oldBody, Stmt* newBody) {
+  if(not ctrl)
+    decl->setBody(newBody);
+  else if(auto* ifStmt = dyn_cast<IfStmt>(ctrl))
+    if(ifStmt->getThen() == oldBody)
+      ifStmt->setThen(newBody);
+    else
+      ifStmt->setElse(newBody);
+  else if(auto* doStmt = dyn_cast<DoStmt>(ctrl))
+    doStmt->setBody(newBody);
+  else if(auto* forStmt = dyn_cast<ForStmt>(ctrl))
+    forStmt->setBody(newBody);
+  else if(auto* whileStmt = dyn_cast<WhileStmt>(ctrl))
+    whileStmt->setBody(newBody);
+  else if(auto* caseStmt = dyn_cast<CaseStmt>(ctrl))
+    caseStmt->setSubStmt(newBody);
+  else if(auto* defaultStmt = dyn_cast<DefaultStmt>(ctrl))
+    defaultStmt->setSubStmt(newBody);
+  else
+    fatal(error() << "Unknown statement parent to replace: "
+                  << ctrl->getStmtClassName());
+  ctrls[cast<CompoundStmt>(newBody)] = ctrl;
+  recalculateCFG();
+
+  return true;
+}
+
 bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
   bool changed = false;
 
@@ -374,6 +410,32 @@ bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
   }
 
   return changed;
+}
+
+bool AST::replaceStmtWith(Stmt* old, Stmt* repl) {
+  auto* parent = cast<CompoundStmt>(stmtParents->getParent(old));
+  Vector<Stmt*> body;
+  for(Stmt* stmt : parent->body())
+    if(stmt != old)
+      body.push_back(stmt);
+    else
+      body.push_back(repl);
+
+  replaceBody(ctrls.at(parent), parent, builder.createCompoundStmt(body));
+
+  return true;
+}
+
+bool AST::eraseStmt(Stmt* key) {
+  auto* parent = cast<CompoundStmt>(stmtParents->getParent(key));
+  Vector<Stmt*> body;
+  for(Stmt* stmt : parent->body())
+    if(stmt != key)
+      body.push_back(stmt);
+
+  replaceBody(ctrls.at(parent), parent, builder.createCompoundStmt(body));
+
+  return true;
 }
 
 Vector<VarDecl*> AST::getVars() const {
@@ -510,18 +572,25 @@ unsigned AST::getNumTopLevelUses(VarDecl* var) const {
   return tlUseMap.at(var).size();
 }
 
-void AST::recalculate() {
-  addrTaken.clear();
-  stmtInfo.clear();
-  ctrls.clear();
-  loopStmts.clear();
-  subStmts.clear();
-  descendants.clear();
+static bool isConstruct(const Stmt* stmt) {
+  return isa<IfStmt>(stmt) or isa<DoStmt>(stmt) or isa<ForStmt>(stmt)
+         or isa<WhileStmt>(stmt);
+}
+
+void AST::recalculateCFG() {
+  stmtParents.reset(nullptr);
+  cfg.reset(nullptr);
+  cfgStmtMap.reset(nullptr);
 
   Stmt* body = decl->getBody();
   stmtParents.reset(new ParentMap(body));
   cfg = CFG::buildCFG(decl, body, &astContext, cfgBuildOpts);
   cfgStmtMap.reset(CFGStmtMap::Build(cfg.get(), stmtParents.get()));
+  // dt->getBase().recalculate(*cfg);
+}
+
+void AST::recalculateDefUse() {
+  addrTaken.clear();
 
   // Compute statement-level use-def information
   // This will associate a variable with the statement in which it is used
@@ -550,6 +619,16 @@ void AST::recalculate() {
         addTopLevelUse(var, switchStmt);
     } else if(auto* switchCase = dyn_cast<SwitchCase>(stmt)) {
       ;
+
+    } else if(auto* binOp = dyn_cast<BinaryOperator>(stmt)) {
+      if(binOp->getOpcode() == BO_Assign) {
+        addTopLevelDef(binOp->getLHS(), binOp);
+        for(VarDecl* var : getVarsInStmt(binOp->getRHS()))
+          addTopLevelUse(var, binOp);
+      } else {
+        for(VarDecl* var : getVarsInStmt(binOp))
+          addTopLevelUse(var, binOp);
+      }
     } else {
       for(VarDecl* var : getVarsInStmt(stmt))
         addTopLevelUse(var, stmt);
@@ -558,6 +637,14 @@ void AST::recalculate() {
 
   // Find variables who address is taken. These can never be optimized safely
   FindVarsAddressTaken(addrTaken).TraverseDecl(decl);
+}
+
+void AST::recalculateStructure() {
+  stmtInfo.clear();
+  ctrls.clear();
+  loopStmts.clear();
+  subStmts.clear();
+  descendants.clear();
 
   // Compute a map from parent to child. This is for faster lookups because
   // although each Stmt has a children() property, it only iterates over them
@@ -565,9 +652,10 @@ void AST::recalculate() {
   // in the other direction, but it's not terribly useful.
   associateStmts(cast<CompoundStmt>(decl->getBody()), nullptr, 0);
 
-  // Compute the closure of the children of each statement. This makes it easier
-  // to query parent-descendant relationships. Mostly useful when determining
-  // whether or a not a statement is in a (potentially deeply nested) loop
+  // Compute the closure of the children of each statement. This makes it
+  // easier to query parent-descendant relationships. Mostly useful when
+  // determining whether or a not a statement is in a (potentially deeply
+  // nested) loop
   unsigned maxDepth
       = (*std::max_element(stmtInfo.values().begin(),
                            stmtInfo.values().end(),
@@ -584,6 +672,17 @@ void AST::recalculate() {
           descendants[stmt].insert(descendants.at(j));
   for(auto& j : subStmts.at(nullptr))
     descendants[nullptr].insert(descendants.at(j));
+}
+
+void AST::recalculate(bool defUseOnly) {
+  // // If we only need to update the def-use information, then the structure
+  // // hasn't changed and we don't need to recalculate the parent-child
+  // // relationships between statements or the CFG
+  // if(not defUseOnly) {
+    recalculateStructure();
+    recalculateCFG();
+  // }
+  recalculateDefUse();
 }
 
 } // namespace cish

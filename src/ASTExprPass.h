@@ -90,7 +90,7 @@ private:
     return ret;
   }
 
-protected:
+public:
   void process(clang::CompoundStmt* compoundStmt) {
     for(clang::Stmt* stmt : compoundStmt->body())
       process(stmt);
@@ -116,7 +116,8 @@ protected:
     if(clang::Expr* repl = maybeReplace(forStmt->getCond()))
       forStmt->setCond(repl);
     if(clang::Expr* repl = maybeReplace(forStmt->getInc()))
-      forStmt->setCond(repl);
+      forStmt->setInc(repl);
+    process(forStmt->getBody());
   }
 
   void process(clang::WhileStmt* whileStmt) {
@@ -146,8 +147,12 @@ protected:
       retStmt->setRetValue(repl);
   }
 
-  void process(clang::LabelStmt*) {
+  void process(clang::NullStmt*) {
     return;
+  }
+
+  void process(clang::LabelStmt* labelStmt) {
+    process(labelStmt->getSubStmt());
   }
 
   void process(clang::GotoStmt*) {
@@ -178,6 +183,8 @@ protected:
   void process(clang::Stmt* stmt) {
     if(auto* compoundStmt = dyn_cast<clang::CompoundStmt>(stmt))
       return process(compoundStmt);
+    else if(auto* nullStmt = dyn_cast<clang::NullStmt>(stmt))
+      return process(nullStmt);
     else if(auto* ifStmt = dyn_cast<clang::IfStmt>(stmt))
       return process(ifStmt);
     else if(auto* doStmt = dyn_cast<clang::DoStmt>(stmt))
@@ -339,6 +346,19 @@ protected:
     return expr;
   }
 
+  bool process(clang::FunctionDecl* f) {
+    bool ret = changed;
+    bool folded = false;
+    do {
+      changed = false;
+      process(f->getBody());
+      folded = changed;
+      ret |= changed;
+    } while(folded);
+
+    return ret;
+  }
+
 public:
   ASTExprPass(CishContext& cishContext)
       : ASTFunctionPass<ASTExprPass<DerivedT>>(cishContext), changed(false),
@@ -351,13 +371,6 @@ public:
   virtual ~ASTExprPass() = default;
 
   virtual llvm::StringRef getPassName() const override = 0;
-
-  bool process(clang::FunctionDecl* f) {
-    changed = false;
-    process(f->getBody());
-
-    return changed;
-  }
 };
 
 } // namespace cish

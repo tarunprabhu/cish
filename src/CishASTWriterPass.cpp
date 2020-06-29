@@ -35,97 +35,89 @@ private:
   std::string outFile;
 
 private:
-  void run(clang::ASTContext& astContext, raw_ostream& os);
+  void run(clang::ASTContext& astContext, raw_ostream& os) {
+    cish::ASTStreamer stream(astContext, os);
 
-public:
-  explicit CishASTWriterPass(const std::string& outFile);
+    cish::Vector<const clang::RecordDecl*> structs;
+    cish::Vector<const clang::VarDecl*> globals;
+    cish::Vector<const clang::FunctionDecl*> decls;
+    cish::Vector<const clang::FunctionDecl*> funcs;
 
-  virtual StringRef getPassName() const override;
-  virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
-  virtual bool runOnModule(Module& m) override;
-};
-
-CishASTWriterPass::CishASTWriterPass(const std::string& outFile)
-    : ModulePass(ID), outFile(outFile) {
-  ;
-}
-
-StringRef CishASTWriterPass::getPassName() const {
-  return "Cish Printer Pass";
-}
-
-void CishASTWriterPass::getAnalysisUsage(AnalysisUsage& AU) const {
-  AU.addRequired<CishContextWrapperPass>();
-  AU.setPreservesAll();
-}
-
-void CishASTWriterPass::run(clang::ASTContext& astContext, raw_ostream& os) {
-  cish::ASTStreamer stream(astContext, os);
-
-  cish::Vector<const clang::RecordDecl*> structs;
-  cish::Vector<const clang::VarDecl*> globals;
-  cish::Vector<const clang::FunctionDecl*> decls;
-  cish::Vector<const clang::FunctionDecl*> funcs;
-
-  for(clang::Decl* decl : astContext.getTranslationUnitDecl()->decls())
-    if(const auto* record = dyn_cast<clang::RecordDecl>(decl))
-      structs.push_back(record);
-    else if(const auto* global = dyn_cast<clang::VarDecl>(decl))
-      globals.push_back(global);
-    else if(const auto* f = dyn_cast<clang::FunctionDecl>(decl))
-      if(f->hasBody())
-        funcs.push_back(f);
+    for(clang::Decl* decl : astContext.getTranslationUnitDecl()->decls())
+      if(const auto* record = dyn_cast<clang::RecordDecl>(decl))
+        structs.push_back(record);
+      else if(const auto* global = dyn_cast<clang::VarDecl>(decl))
+        globals.push_back(global);
+      else if(const auto* f = dyn_cast<clang::FunctionDecl>(decl))
+        if(f->hasBody())
+          funcs.push_back(f);
+        else
+          decls.push_back(f);
       else
-        decls.push_back(f);
-    else
-      cish::error() << "Unexpected decl found: " << decl->getDeclKindName()
-                    << "\n";
+        cish::error() << "Unexpected decl found: " << decl->getDeclKindName()
+                      << "\n";
 
-  // TODO: Could consider creating a definition order for structs so that
-  // structs are defined or forward declared before use because that would be
-  // nice to have in a C-ish output
-  for(const clang::RecordDecl* record : structs)
-    stream << record << stream.endl();
-  if(structs.size())
-    stream.endl();
+    // TODO: Could consider creating a definition order for structs so that
+    // structs are defined or forward declared before use because that would be
+    // nice to have in a C-ish output
+    for(const clang::RecordDecl* record : structs)
+      stream << record << stream.endl();
+    if(structs.size())
+      stream.endl();
 
-  // Function declarations
-  for(const clang::FunctionDecl* f : decls)
-    stream << f << stream.endl();
-  if(decls.size())
-    stream.endl();
+    // Function declarations
+    for(const clang::FunctionDecl* f : decls)
+      stream << f << stream.endl();
+    if(decls.size())
+      stream.endl();
 
-  // Global variables
-  for(const clang::VarDecl* g : globals)
-    stream << g << stream.endl();
-  if(globals.size())
-    stream.endl();
+    // Global variables
+    for(const clang::VarDecl* g : globals)
+      stream << g << stream.endl();
+    if(globals.size())
+      stream.endl();
 
-  // Function definitions
-  for(const clang::FunctionDecl* f : funcs)
-    stream << f << stream.endl() << stream.endl();
-}
-
-bool CishASTWriterPass::runOnModule(Module& m) {
-  const cish::CishContext& context
-      = getAnalysis<CishContextWrapperPass>().getCishContext();
-  clang::ASTContext& astContext = context.getASTContext();
-
-  if(outFile == "-") {
-    run(astContext, outs());
-  } else {
-    std::error_code ec;
-    raw_fd_ostream fs(outFile, ec);
-    if(ec) {
-      cish::fatal(cish::error() << ec.message());
-    } else {
-      run(astContext, fs);
-      fs.close();
-    }
+    // Function definitions
+    for(const clang::FunctionDecl* f : funcs)
+      stream << f << stream.endl() << stream.endl();
   }
 
-  return false;
-}
+public:
+  explicit CishASTWriterPass(const std::string& outFile)
+      : ModulePass(ID), outFile(outFile) {
+    ;
+  }
+
+  virtual StringRef getPassName() const override {
+    return "Cish Printer Pass";
+  }
+
+  virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
+    AU.addRequired<CishContextWrapperPass>();
+    AU.setPreservesAll();
+  }
+
+  virtual bool runOnModule(Module& m) override {
+    const cish::CishContext& context
+        = getAnalysis<CishContextWrapperPass>().getCishContext();
+    clang::ASTContext& astContext = context.getASTContext();
+
+    if(outFile == "-") {
+      run(astContext, outs());
+    } else {
+      std::error_code ec;
+      raw_fd_ostream fs(outFile, ec);
+      if(ec) {
+        cish::fatal(cish::error() << ec.message());
+      } else {
+        run(astContext, fs);
+        fs.close();
+      }
+    }
+
+    return false;
+  }
+};
 
 char CishASTWriterPass::ID = 0;
 

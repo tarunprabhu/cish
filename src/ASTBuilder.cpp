@@ -51,8 +51,12 @@ DeclStmt* ASTBuilder::createDeclStmt(Decl* decl) {
   return new(astContext) DeclStmt(*group, invLoc, invLoc);
 }
 
+NullStmt* ASTBuilder::createNullStmt() {
+  return new(astContext) NullStmt(invLoc);
+}
+
 LabelStmt* ASTBuilder::createLabelStmt(LabelDecl* label) {
-  return new(astContext) LabelStmt(invLoc, label, nullptr);
+  return new(astContext) LabelStmt(invLoc, label, createNullStmt());
 }
 
 LabelDecl* ASTBuilder::createLabelDecl(FunctionDecl* f,
@@ -276,6 +280,12 @@ ASTBuilder::createMemberExpr(Expr* base, ValueDecl* member, QualType type) {
 
 DoStmt* ASTBuilder::createDoStmt(Stmt* body, Expr* cond) {
   return new(astContext) DoStmt(body, cond, invLoc, invLoc, invLoc);
+}
+
+ForStmt*
+ASTBuilder::createForStmt(Stmt* init, Expr* cond, Expr* inc, Stmt* body) {
+  return new(astContext) ForStmt(
+      astContext, init, cond, nullptr, inc, body, invLoc, invLoc, invLoc);
 }
 
 WhileStmt* ASTBuilder::createWhileStmt(Expr* cond, Stmt* body) {
