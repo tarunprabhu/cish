@@ -121,13 +121,14 @@ public:
   }
 
   Expr* process(UnaryOperator* unOp) {
-    UnaryOperator::Opcode op = unOp->getOpcode();
-    if(op == UO_Deref) {
+    switch(unOp->getOpcode()) {
+    case UO_Deref:
       // Cancel out consecutive occurences of * and &
       if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr()))
         if(subOp->getOpcode() == UO_AddrOf)
           return subOp->getSubExpr();
-    } else if(op == UO_LNot) {
+      break;
+    case UO_LNot:
       // Convert relational operators of the form
       //
       // !(a <rel> b)
@@ -159,7 +160,13 @@ public:
         default:
           break;
         }
+      } else if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr())) {
+        if(subOp->getOpcode() == UO_LNot)
+          return subOp->getSubExpr();
       }
+      break;
+    default:
+      break;
     }
 
     return unOp;
@@ -177,7 +184,7 @@ public:
   virtual llvm::StringRef getPassName() const override {
     return "Cish AST Simplify Operators";
   }
-};
+}; // namespace cish
 
 } // namespace cish
 

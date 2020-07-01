@@ -237,7 +237,7 @@ public:
   void addGoto(const std::string& dest, const llvm::Function& f);
   void addIfThen(const llvm::BranchInst& br, bool invert);
   void addIfThenElse(const llvm::BranchInst& br);
-  void addIfThenBreak(const llvm::BranchInst& br);
+  void addIfThenBreak(const llvm::BranchInst& br, bool invert);
   void addIfThenGoto(const std::string& label,
                      const llvm::BranchInst& br,
                      bool invert);

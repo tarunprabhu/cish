@@ -28,9 +28,9 @@
 
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/ParentMap.h>
+#include <clang/Analysis/Analyses/Dominators.h>
 #include <clang/Analysis/CFG.h>
 #include <clang/Analysis/CFGStmtMap.h>
-#include <clang/Analysis/Analyses/Dominators.h>
 
 #include <llvm/ADT/iterator_range.h>
 
@@ -97,10 +97,10 @@ protected:
   // For now, every def of a variable is an assignment statement.
   // In clang-speak, this would be a BinaryOperator where the operand is
   // BO_*Assign. When returning the def, it will return the entire statement
-  Map<clang::VarDecl*, List<clang::Stmt*>> defMap;
+  Map<clang::VarDecl*, Set<clang::Stmt*>> defMap;
 
   // The uses are the nearest Expr containing the variable directly.
-  Map<clang::VarDecl*, List<clang::Stmt*>> useMap;
+  Map<clang::VarDecl*, Set<clang::Stmt*>> useMap;
 
   // These are the top-level uses. The top-level statements are those that
   // are either a control structure or a statement terminated by a semicolon
@@ -119,6 +119,11 @@ protected:
   // Variables that have their address taken
   Set<clang::VarDecl*> addrTaken;
 
+  // Local variables in the function
+  // Keep this separate because function parameters are also VarDecl's, so
+  // it's a bit messy keeping track of everything
+  List<clang::VarDecl*> locals;
+
 public:
   using loop_iterator = decltype(loopStmts)::const_iterator;
   using loop_range = llvm::iterator_range<loop_iterator>;
@@ -126,7 +131,7 @@ public:
   using child_range = llvm::iterator_range<child_iterator>;
   using tl_iterator = decltype(stmtInfo)::const_key_iterator;
   using tl_range = llvm::iterator_range<tl_iterator>;
-  using var_iterator = decltype(defMap)::const_key_iterator;
+  using var_iterator = decltype(locals)::const_iterator;
   using var_range = llvm::iterator_range<var_iterator>;
   using def_iterator = decltype(defMap)::mapped_type::const_iterator;
   using def_range = llvm::iterator_range<def_iterator>;
@@ -147,13 +152,10 @@ protected:
                       clang::Stmt* construct,
                       unsigned stmtDepth);
 
-  void addDef(clang::VarDecl* var, clang::Stmt* stmt);
-  void addUse(clang::VarDecl* var, clang::Stmt* stmt);
-  void addTopLevelDef(clang::VarDecl* var, clang::Stmt* stmt);
-  void addTopLevelDef(clang::Expr* expr, clang::Stmt* stmt);
-  void addTopLevelUse(clang::VarDecl* var, clang::Stmt* stmt);
-
-  bool replaceBody(clang::Stmt* ctrl, clang::Stmt* old, clang::Stmt* neew);
+  void addDef(clang::VarDecl* var, clang::Stmt* user);
+  void addUse(clang::Expr* expr, clang::Stmt* user);
+  void addTopLevelDef(clang::Stmt* stmt, clang::Stmt* user);
+  void addTopLevelUse(clang::Stmt* stmt, clang::Stmt* user);
 
   bool replace(clang::Expr* expr, clang::VarDecl* var);
   bool
@@ -198,10 +200,10 @@ public:
 
   void removeUse(clang::VarDecl* var, clang::Stmt* stmt);
   void removeDef(clang::VarDecl* var, clang::Stmt* stmt);
-  void removeVar(clang::VarDecl* var);
   bool replaceAllUsesWith(clang::VarDecl* var, clang::Expr* expr);
   bool replaceStmtWith(clang::Stmt* old, clang::Stmt* repl);
-  bool eraseStmt(clang::Stmt* stmt);
+  bool erase(clang::Stmt* stmt);
+  bool erase(clang::VarDecl* var);
 
   const clang::DominatorTree& getDominatorTree() const;
   clang::CFG* getCFG() const;
@@ -210,17 +212,14 @@ public:
 
   bool hasAddressTaken(clang::VarDecl* var) const;
 
-  Vector<clang::Stmt*> getUses(clang::VarDecl* var) const;
-  Set<clang::Stmt*> getUsesSet(clang::VarDecl* var) const;
-  Vector<clang::Stmt*> getDefs(clang::VarDecl* var) const;
-  Set<clang::Stmt*> getDefsSet(clang::VarDecl* var) const;
+  unsigned getNumUses(clang::VarDecl* var) const;
+  unsigned getNumDefs(clang::VarDecl* var) const;
+
   Vector<clang::Stmt*> getTopLevelUses(clang::VarDecl* var) const;
   Set<clang::Stmt*> getTopLevelUsesSet(clang::VarDecl* var) const;
   Vector<clang::Stmt*> getTopLevelDefs(clang::VarDecl* var) const;
   Set<clang::Stmt*> getTopLevelDefsSet(clang::VarDecl* var) const;
-  unsigned getNumDefs(clang::VarDecl* var) const;
   unsigned getNumTopLevelDefs(clang::VarDecl* var) const;
-  unsigned getNumUses(clang::VarDecl* var) const;
   unsigned getNumTopLevelUses(clang::VarDecl* var) const;
   bool isDefined(clang::VarDecl* var) const;
   bool isUsed(clang::VarDecl* var) const;
@@ -228,6 +227,10 @@ public:
   bool hasSingleUse(clang::VarDecl* var) const;
   bool hasZeroDefs(clang::VarDecl* var) const;
   bool hasZeroUses(clang::VarDecl* var) const;
+  bool hasSingleTopLevelDef(clang::VarDecl* var) const;
+  bool hasSingleTopLevelUse(clang::VarDecl* var) const;
+  bool hasZeroTopLevelDefs(clang::VarDecl* var) const;
+  bool hasZeroTopLevelUses(clang::VarDecl* var) const;
   clang::Stmt* getSingleDef(clang::VarDecl* var) const;
   clang::Expr* getSingleDefRHS(clang::VarDecl* var) const;
   clang::Stmt* getSingleUse(clang::VarDecl* var) const;
@@ -248,8 +251,6 @@ public:
   loop_range loops() const;
   tl_range tlstmts() const;
   var_range vars() const;
-  def_range defs(clang::VarDecl* var) const;
-  use_range uses(clang::VarDecl* var) const;
   tluse_range tluses(clang::VarDecl* var) const;
   tldef_range tldefs(clang::VarDecl* var) const;
   child_range children(clang::Stmt* stmt) const;

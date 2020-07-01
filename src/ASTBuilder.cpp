@@ -56,6 +56,10 @@ NullStmt* ASTBuilder::createNullStmt() {
 }
 
 LabelStmt* ASTBuilder::createLabelStmt(LabelDecl* label) {
+  // Need to add null statement to the label because the CFG generation code
+  // expects a non-null sub-statement in the LabelStmt. Not setting on ends
+  // up causing a silent failure in the CFG construction which breaks nearly
+  // all the AST cleanup passes
   return new(astContext) LabelStmt(invLoc, label, createNullStmt());
 }
 

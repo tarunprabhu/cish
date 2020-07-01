@@ -70,19 +70,17 @@ Set<VarDecl*> getVarsInStmt(Stmt* stmt) {
 }
 
 std::string toString(Stmt* stmt, ASTContext& astContext) {
-  std::string buf;
-  llvm::raw_string_ostream ss(buf);
+  ASTStreamer ss(astContext);
 
-  ASTStreamer(astContext, ss) << stmt;
+  ss << stmt;
 
   return ss.str();
 }
 
 std::string toString(FunctionDecl* f, ASTContext& astContext) {
-  std::string buf;
-  llvm::raw_string_ostream ss(buf);
+  ASTStreamer ss(astContext);
 
-  ASTStreamer(astContext, ss) << f;
+  ss << f;
 
   return ss.str();
 }

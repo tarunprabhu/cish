@@ -20,6 +20,7 @@
 #include "AST.h"
 #include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
+#include "ClangUtils.h"
 #include "Diagnostics.h"
 
 #include <llvm/Support/raw_ostream.h>
@@ -35,71 +36,25 @@ protected:
 public:
   bool process(FunctionDecl* f) {
     Set<Stmt*> removeStmts;
-    Set<const VarDecl*> removeVars;
+    Set<VarDecl*> removeVars;
     bool changed = false;
+    bool iterChanged = false;
     do {
-      changed = false;
-      for(Decl* decl : f->decls()) {
-        if(auto* var = dyn_cast<VarDecl>(decl)) {
-          if(not ast->isUsed(var)) {
-            auto defs = ast->defs(var);
-            List<Stmt*> remove(defs.begin(), defs.end());
-            changed |= remove.size();
-            for(Stmt* def : remove) {
-              ast->removeDef(var, def);
-              removeStmts.insert(def);
-            }
-            removeVars.insert(var);
-          }
-        }
-      }
-    } while(changed);
+      iterChanged = false;
 
-    Set<std::pair<CompoundStmt*, Stmt*>> containers;
-    for(Stmt* stmt : removeStmts)
-      containers.emplace(ast->getBodyFor(stmt), ast->getConstructFor(stmt));
+      for(VarDecl* var : ast->vars())
+        if(not ast->isUsed(var))
+          for(Stmt* def : ast->getTopLevelDefs(var))
+            iterChanged |= ast->erase(def);
 
-    for(auto& i : containers) {
-      CompoundStmt* body = i.first;
-      Stmt* container = i.second;
-      Vector<Stmt*> newStmts;
-      for(Stmt* stmt : i.first->body())
-        if(not removeStmts.contains(stmt))
-          newStmts.push_back(stmt);
-      CompoundStmt* newBody = builder.createCompoundStmt(newStmts);
-      if(not container)
-        f->setBody(newBody);
-      else if(auto* ifStmt = dyn_cast<IfStmt>(container))
-        if(ifStmt->getThen() == body)
-          ifStmt->setThen(newBody);
-        else
-          ifStmt->setElse(newBody);
-      else if(auto* doStmt = dyn_cast<DoStmt>(container))
-        doStmt->setBody(newBody);
-      else if(auto* forStmt = dyn_cast<ForStmt>(container))
-        forStmt->setBody(newBody);
-      else if(auto* whileStmt = dyn_cast<WhileStmt>(container))
-        whileStmt->setBody(newBody);
-      else if(auto* caseStmt = dyn_cast<CaseStmt>(container))
-        caseStmt->setSubStmt(newBody);
-      else if(auto* defaultStmt = dyn_cast<DefaultStmt>(container))
-        defaultStmt->setSubStmt(newBody);
-      else
-        fatal(error() << "Unexpected container statement: "
-                      << container->getStmtClassName());
-    }
+      for(VarDecl* var : ast->getVars())
+        if(ast->hasZeroTopLevelDefs(var) and ast->hasZeroTopLevelUses(var))
+          iterChanged |= ast->erase(var);
 
-    Set<VarDecl*> orphanVars;
-    for(auto* decl : f->decls())
-      if(auto* var = dyn_cast<VarDecl>(decl))
-        if(ast->hasZeroDefs(var) and ast->hasZeroUses(var))
-          orphanVars.insert(var);
-    for(VarDecl* var : orphanVars) {
-      ast->removeVar(var);
-      f->removeDecl(var);
-    }
+      changed |= iterChanged;
+    } while(iterChanged);
 
-    return removeStmts.size() or removeVars.size() or orphanVars.size();
+    return changed;
   }
 
 public:

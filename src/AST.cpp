@@ -59,8 +59,8 @@ AST::AST(CishContext& cishContext, FunctionDecl* decl)
     tlDefMap[param].clear();
     tlUseMap[param].clear();
   }
-  for(Decl* decl : decl->decls()) {
-    if(auto* var = dyn_cast<VarDecl>(decl)) {
+  for(Decl* d : decl->decls()) {
+    if(auto* var = dyn_cast<VarDecl>(d)) {
       useMap[var].clear();
       defMap[var].clear();
       tlUseMap[var].clear();
@@ -150,52 +150,41 @@ void AST::associateStmts(CompoundStmt* body, Stmt* ctrl, unsigned depth) {
     } else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt)) {
       for(SwitchCase* kase = switchStmt->getSwitchCaseList(); kase;
           kase = kase->getNextSwitchCase()) {
-        // addChild(kase,
-        //          cast<CompoundStmt>(switchStmt->getBody()),
-        //          switchStmt,
-        //          depth + 1);
         associateStmts(cast<CompoundStmt>(kase->getSubStmt()), kase, depth + 1);
       }
     }
   }
 }
 
-void AST::addDef(VarDecl* var, Stmt* stmt) {
-  defMap[var].push_back(stmt);
+void AST::addDef(VarDecl* var, Stmt* user) {
+  defMap[var].insert(user);
 }
 
-void AST::addUse(VarDecl* var, Stmt* stmt) {
-  useMap[var].push_back(stmt);
+void AST::addUse(Expr* expr, Stmt* user) {
+  if(not isa<DeclRefExpr>(expr))
+    for(VarDecl* var : getVarsInStmt(expr))
+      useMap[var].insert(user);
 }
 
-void AST::addTopLevelDef(VarDecl* var, Stmt* stmt) {
-  tlDefMap[var].insert(stmt);
-}
-
-void AST::addTopLevelDef(Expr* expr, Stmt* stmt) {
-  if(auto* ref = dyn_cast<DeclRefExpr>(expr))
+void AST::addTopLevelDef(Stmt* stmt, Stmt* user) {
+  if(auto* ref = dyn_cast<DeclRefExpr>(stmt))
     if(auto* var = dyn_cast<VarDecl>(ref->getFoundDecl()))
-      tlDefMap[var].insert(stmt);
+      tlDefMap[var].insert(user);
 }
 
-void AST::addTopLevelUse(VarDecl* var, Stmt* stmt) {
-  tlUseMap[var].insert(stmt);
+void AST::addTopLevelUse(Stmt* stmt, Stmt* user) {
+  for(VarDecl* var : getVarsInStmt(stmt))
+    tlUseMap[var].insert(user);
 }
 
 void AST::removeUse(VarDecl* var, Stmt* stmt) {
   useMap.at(var).erase(stmt);
+  tlUseMap.at(var).erase(stmt);
 }
 
 void AST::removeDef(VarDecl* var, Stmt* stmt) {
   defMap.at(var).erase(stmt);
-}
-
-void AST::removeVar(VarDecl* var) {
-  if(not(hasZeroDefs(var) and hasZeroUses(var)))
-    fatal(error() << "Cannot remove var: " << var->getName() << ". Defs: "
-                  << getNumDefs(var) << ". Uses: " << getNumUses(var));
-  defMap.erase(var);
-  useMap.erase(var);
+  tlDefMap.at(var).erase(stmt);
 }
 
 bool AST::replace(Expr* expr, VarDecl* var) {
@@ -374,37 +363,11 @@ bool AST::replace(Stmt* stmt, VarDecl* var, Expr* repl) {
   return false;
 }
 
-bool AST::replaceBody(Stmt* ctrl, Stmt* oldBody, Stmt* newBody) {
-  if(not ctrl)
-    decl->setBody(newBody);
-  else if(auto* ifStmt = dyn_cast<IfStmt>(ctrl))
-    if(ifStmt->getThen() == oldBody)
-      ifStmt->setThen(newBody);
-    else
-      ifStmt->setElse(newBody);
-  else if(auto* doStmt = dyn_cast<DoStmt>(ctrl))
-    doStmt->setBody(newBody);
-  else if(auto* forStmt = dyn_cast<ForStmt>(ctrl))
-    forStmt->setBody(newBody);
-  else if(auto* whileStmt = dyn_cast<WhileStmt>(ctrl))
-    whileStmt->setBody(newBody);
-  else if(auto* caseStmt = dyn_cast<CaseStmt>(ctrl))
-    caseStmt->setSubStmt(newBody);
-  else if(auto* defaultStmt = dyn_cast<DefaultStmt>(ctrl))
-    defaultStmt->setSubStmt(newBody);
-  else
-    fatal(error() << "Unknown statement parent to replace: "
-                  << ctrl->getStmtClassName());
-  ctrls[cast<CompoundStmt>(newBody)] = ctrl;
-  recalculateCFG();
-
-  return true;
-}
-
 bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
   bool changed = false;
 
-  for(Stmt* use : getUses(var)) {
+  Vector<Stmt*> uses(useMap.at(var).begin(), useMap.at(var).end());
+  for(Stmt* use : uses) {
     changed |= replace(use, var, repl);
     removeUse(var, use);
   }
@@ -413,33 +376,58 @@ bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
 }
 
 bool AST::replaceStmtWith(Stmt* old, Stmt* repl) {
-  auto* parent = cast<CompoundStmt>(stmtParents->getParent(old));
-  Vector<Stmt*> body;
-  for(Stmt* stmt : parent->body())
-    if(stmt != old)
-      body.push_back(stmt);
-    else
-      body.push_back(repl);
+  bool changed = false;
 
-  replaceBody(ctrls.at(parent), parent, builder.createCompoundStmt(body));
+  CompoundStmt* body = cast<CompoundStmt>(stmtParents->getParent(old));
+  Stmt** stmts = body->body_begin();
+  for(unsigned i = 0; i < body->size(); i++) {
+    if(stmts[i] == old) {
+      stmts[i] = repl;
+      changed |= true;
+    }
+  }
 
-  return true;
+  return changed;
 }
 
-bool AST::eraseStmt(Stmt* key) {
-  auto* parent = cast<CompoundStmt>(stmtParents->getParent(key));
-  Vector<Stmt*> body;
-  for(Stmt* stmt : parent->body())
-    if(stmt != key)
-      body.push_back(stmt);
+bool AST::erase(Stmt* key) {
+  bool changed = false;
 
-  replaceBody(ctrls.at(parent), parent, builder.createCompoundStmt(body));
+  CompoundStmt* body = cast<CompoundStmt>(stmtParents->getParent(key));
+  Stmt** stmts = body->body_begin();
+  for(unsigned i = 0; i < body->size(); i++) {
+    if(stmts[i] == key) {
+      stmts[i] = builder.createNullStmt();
+      for(VarDecl* var : getVarsInStmt(key)) {
+        removeUse(var, key);
+        removeDef(var, key);
+      }
+      changed |= true;
+    }
+  }
 
-  return true;
+  return changed;
+}
+
+bool AST::erase(VarDecl* var) {
+  if(not(hasZeroTopLevelUses(var) and hasZeroTopLevelDefs(var)))
+    fatal(error() << "Cannot delete variable: " << var->getName() << "("
+                  << getNumTopLevelDefs(var) << " defs, "
+                  << getNumTopLevelUses(var) << " uses)");
+
+  bool changed = false;
+  for(VarDecl* local : vars())
+    if(local == var)
+      changed = true;
+
+  locals.erase(var);
+  decl->removeDecl(var);
+
+  return changed;
 }
 
 Vector<VarDecl*> AST::getVars() const {
-  return Vector<VarDecl*>(vars().begin(), vars().end());
+  return Vector<VarDecl*>(locals.begin(), locals.end());
 }
 
 Vector<Stmt*> AST::getLoops() const {
@@ -447,15 +435,7 @@ Vector<Stmt*> AST::getLoops() const {
 }
 
 AST::var_range AST::vars() const {
-  return var_range(defMap.keys().begin(), defMap.keys().end());
-}
-
-AST::def_range AST::defs(VarDecl* var) const {
-  return def_range(defMap.at(var).begin(), defMap.at(var).end());
-}
-
-AST::use_range AST::uses(VarDecl* var) const {
-  return use_range(useMap.at(var).begin(), useMap.at(var).end());
+  return var_range(locals.begin(), locals.end());
 }
 
 AST::tluse_range AST::tluses(VarDecl* var) const {
@@ -482,6 +462,10 @@ bool AST::hasAddressTaken(VarDecl* var) const {
   return addrTaken.contains(var);
 }
 
+unsigned AST::getNumDefs(VarDecl* var) const {
+  return defMap.at(var).size();
+}
+
 bool AST::isDefined(VarDecl* var) const {
   return getNumDefs(var);
 }
@@ -506,20 +490,16 @@ Expr* AST::getSingleDefRHS(VarDecl* var) const {
   return nullptr;
 }
 
-unsigned AST::getNumDefs(VarDecl* var) const {
-  return defMap.at(var).size();
-}
-
 unsigned AST::getNumTopLevelDefs(VarDecl* var) const {
   return tlDefMap.at(var).size();
 }
 
-Vector<Stmt*> AST::getDefs(VarDecl* var) const {
-  return Vector<Stmt*>(defs(var).begin(), defs(var).end());
+bool AST::hasZeroTopLevelDefs(VarDecl* var) const {
+  return getNumTopLevelDefs(var) == 0;
 }
 
-Set<Stmt*> AST::getDefsSet(VarDecl* var) const {
-  return Set<Stmt*>(defs(var).begin(), defs(var).end());
+bool AST::hasSingleTopLevelDef(VarDecl* var) const {
+  return getNumTopLevelDefs(var) == 1;
 }
 
 Vector<Stmt*> AST::getTopLevelDefs(VarDecl* var) const {
@@ -538,6 +518,14 @@ bool AST::hasZeroUses(VarDecl* var) const {
   return getNumUses(var) == 0;
 }
 
+bool AST::hasZeroTopLevelUses(VarDecl* var) const {
+  return getNumTopLevelUses(var) == 0;
+}
+
+bool AST::hasSingleTopLevelUse(VarDecl* var) const {
+  return getNumTopLevelUses(var) == 1;
+}
+
 bool AST::hasSingleUse(VarDecl* var) const {
   return getNumUses(var) == 1;
 }
@@ -550,14 +538,6 @@ Stmt* AST::getSingleUse(VarDecl* var) const {
 
 unsigned AST::getNumUses(VarDecl* var) const {
   return useMap.at(var).size();
-}
-
-Vector<Stmt*> AST::getUses(VarDecl* var) const {
-  return Vector<Stmt*>(uses(var).begin(), uses(var).end());
-}
-
-Set<Stmt*> AST::getUsesSet(VarDecl* var) const {
-  return Set<Stmt*>(uses(var).begin(), uses(var).end());
 }
 
 Vector<Stmt*> AST::getTopLevelUses(VarDecl* var) const {
@@ -600,38 +580,44 @@ void AST::recalculateDefUse() {
   // Compute use-def information with respect to the top-level statements
   for(Stmt* stmt : tlstmts()) {
     if(auto* ifStmt = dyn_cast<IfStmt>(stmt)) {
-      for(VarDecl* var : getVarsInStmt(ifStmt->getCond()))
-        addTopLevelUse(var, ifStmt);
+      addTopLevelUse(ifStmt->getCond(), ifStmt);
     } else if(auto* doStmt = dyn_cast<DoStmt>(stmt)) {
-      for(VarDecl* var : getVarsInStmt(doStmt->getCond()))
-        addTopLevelUse(var, doStmt);
+      addTopLevelUse(doStmt->getCond(), doStmt);
     } else if(auto* forStmt = dyn_cast<ForStmt>(stmt)) {
       for(Stmt* subStmt : Vector<Stmt*>{
               forStmt->getInit(), forStmt->getCond(), forStmt->getInc()})
         if(subStmt)
-          for(VarDecl* var : getVarsInStmt(subStmt))
-            addTopLevelUse(var, forStmt);
+          addTopLevelUse(subStmt, forStmt);
     } else if(auto* whileStmt = dyn_cast<WhileStmt>(stmt)) {
-      for(VarDecl* var : getVarsInStmt(whileStmt->getCond()))
-        addTopLevelUse(var, whileStmt);
+      addTopLevelUse(whileStmt->getCond(), whileStmt);
     } else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt)) {
-      for(VarDecl* var : getVarsInStmt(switchStmt->getCond()))
-        addTopLevelUse(var, switchStmt);
+      addTopLevelUse(switchStmt->getCond(), switchStmt);
     } else if(auto* switchCase = dyn_cast<SwitchCase>(stmt)) {
       ;
-
     } else if(auto* binOp = dyn_cast<BinaryOperator>(stmt)) {
-      if(binOp->getOpcode() == BO_Assign) {
+      switch(binOp->getOpcode()) {
+      case BO_AddAssign:
+      case BO_SubAssign:
+      case BO_MulAssign:
+      case BO_DivAssign:
+      case BO_RemAssign:
+      case BO_ShlAssign:
+      case BO_ShrAssign:
+      case BO_AndAssign:
+      case BO_OrAssign:
+      case BO_XorAssign:
+        addTopLevelUse(binOp->getLHS(), binOp);
+        // fall-through
+      case BO_Assign:
         addTopLevelDef(binOp->getLHS(), binOp);
-        for(VarDecl* var : getVarsInStmt(binOp->getRHS()))
-          addTopLevelUse(var, binOp);
-      } else {
-        for(VarDecl* var : getVarsInStmt(binOp))
-          addTopLevelUse(var, binOp);
+        addTopLevelUse(binOp->getRHS(), binOp);
+        break;
+      default:
+        addTopLevelUse(binOp, binOp);
+        break;
       }
     } else {
-      for(VarDecl* var : getVarsInStmt(stmt))
-        addTopLevelUse(var, stmt);
+      addTopLevelUse(stmt, stmt);
     }
   }
 
@@ -675,13 +661,19 @@ void AST::recalculateStructure() {
 }
 
 void AST::recalculate(bool defUseOnly) {
-  // // If we only need to update the def-use information, then the structure
-  // // hasn't changed and we don't need to recalculate the parent-child
-  // // relationships between statements or the CFG
-  // if(not defUseOnly) {
+  locals.clear();
+  for(Decl* d : decl->decls())
+    if(auto* var = dyn_cast<VarDecl>(d))
+      if(not isa<ParmVarDecl>(var))
+        locals.push_back(var);
+
+  // If we only need to update the def-use information, then the structure
+  // hasn't changed and we don't need to recalculate the parent-child
+  // relationships between statements or the CFG
+  if(not defUseOnly) {
     recalculateStructure();
     recalculateCFG();
-  // }
+  }
   recalculateDefUse();
 }
 

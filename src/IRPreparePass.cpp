@@ -32,6 +32,7 @@
 #include "IRSourceInfo.h"
 #include "List.h"
 #include "Map.h"
+#include "Options.h"
 #include "Set.h"
 #include "Vector.h"
 
@@ -48,6 +49,7 @@ public:
   static char ID;
 
 private:
+  std::string varBase;
   cish::Map<std::string, int> suffixes;
   cish::Set<std::string> vars;
 
@@ -97,7 +99,7 @@ private:
   }
 
 public:
-  IRPreparePass() : FunctionPass(ID) {
+  IRPreparePass() : FunctionPass(ID), varBase(cish::opts().prefix + "t") {
     ;
   }
 
@@ -184,7 +186,7 @@ public:
                               ->first,
                           false));
           else
-            alloca->setName(getNewVar("_t", true));
+            alloca->setName(getNewVar(varBase, true));
         }
       } else {
         inst.getParent()->splitBasicBlock(&inst);
@@ -230,6 +232,24 @@ public:
             }
           }
         }
+      }
+    }
+
+    if(cish::opts().verbose) {
+      std::string buf;
+      raw_string_ostream fname(buf);
+      if(cish::opts().logDir.length())
+        fname << cish::opts().logDir << "/";
+      fname << f.getName() + ".prepared.ll";
+
+      std::error_code ec;
+      raw_fd_ostream fs(fname.str(), ec);
+      if(not ec) {
+        fs << *f.getParent();
+        fs.close();
+      } else {
+        cish::warning() << "Could not write module to file: " << ec.message()
+                        << "\n";
       }
     }
 

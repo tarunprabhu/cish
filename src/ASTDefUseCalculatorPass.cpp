@@ -38,17 +38,23 @@ protected:
         ast->addDef(var, user);
   }
 
-  void findUsed(Expr* expr, Stmt* user) {
-    if(auto* declRef = dyn_cast<DeclRefExpr>(expr))
-      if(auto* var = dyn_cast<VarDecl>(declRef->getFoundDecl()))
-        ast->addUse(var, user);
+  void process(BinaryOperator* binOp, ForStmt* user) {
+    if(defOps2.contains(binOp->getOpcode())) {
+      findDefd(binOp->getLHS(), user);
+      if(binOp->getOpcode() != BO_Assign)
+        // This is an OperatorAssign statement
+        ast->addUse(binOp->getLHS(), user);
+    } else {
+      ast->addUse(binOp->getLHS(), user);
+    }
+    ast->addUse(binOp->getRHS(), user);
   }
 
 public:
   bool process(ConditionalOperator* condOp) {
-    findUsed(condOp->getCond(), condOp);
-    findUsed(condOp->getTrueExpr(), condOp);
-    findUsed(condOp->getFalseExpr(), condOp);
+    ast->addUse(condOp->getCond(), condOp);
+    ast->addUse(condOp->getTrueExpr(), condOp);
+    ast->addUse(condOp->getFalseExpr(), condOp);
 
     return false;
   }
@@ -59,11 +65,17 @@ public:
       // If this is an OperatorAssign (+=, -= etc.), the LHS will be definitely
       // also be read
       if(binOp->getOpcode() != BO_Assign)
-        findUsed(binOp->getLHS(), binOp);
+        ast->addUse(binOp->getLHS(), binOp);
+      ast->addUse(binOp->getRHS(), binOp);
+    } else if(binOp->getOpcode() == BO_Comma) {
+      // Comma operators won't be used anywhere except initializers and
+      // increments for a ForStmt
+      process(cast<BinaryOperator>(binOp->getLHS()));
+      process(cast<BinaryOperator>(binOp->getRHS()));
     } else {
-      findUsed(binOp->getLHS(), binOp);
+      ast->addUse(binOp->getLHS(), binOp);
+      ast->addUse(binOp->getRHS(), binOp);
     }
-    findUsed(binOp->getRHS(), binOp);
 
     return false;
   }
@@ -72,7 +84,7 @@ public:
     Expr* expr = unOp->getSubExpr();
     if(defOps1.contains(unOp->getOpcode()))
       findDefd(expr, unOp);
-    findUsed(expr, unOp);
+    ast->addUse(expr, unOp);
 
     return false;
   }
@@ -82,70 +94,107 @@ public:
     // which might get mutated in the call. Not sure whether or not they should
     // be considered defs
     for(Expr* arg : callExpr->arguments())
-      findUsed(arg, callExpr);
+      ast->addUse(arg, callExpr);
 
     return false;
   }
 
   bool process(CStyleCastExpr* castExpr) {
-    findUsed(castExpr->getSubExpr(), castExpr);
+    ast->addUse(castExpr->getSubExpr(), castExpr);
 
     return false;
   }
 
   bool process(ArraySubscriptExpr* arrExpr) {
-    findUsed(arrExpr->getBase(), arrExpr);
-    findUsed(arrExpr->getIdx(), arrExpr);
+    ast->addUse(arrExpr->getBase(), arrExpr);
+    ast->addUse(arrExpr->getIdx(), arrExpr);
 
     return false;
   }
 
   bool process(MemberExpr* memberExpr) {
-    findUsed(memberExpr->getBase(), memberExpr);
+    ast->addUse(memberExpr->getBase(), memberExpr);
 
     return false;
   }
 
   bool process(InitListExpr* initList) {
     for(Expr* expr : initList->inits())
-      findUsed(expr, initList);
+      ast->addUse(expr, initList);
 
     return false;
   }
 
   bool process(SwitchStmt* switchStmt) {
-    findUsed(switchStmt->getCond(), switchStmt);
+    ast->addUse(switchStmt->getCond(), switchStmt);
 
     return false;
   }
 
   bool process(ReturnStmt* retStmt) {
     if(Expr* expr = retStmt->getRetValue())
-      findUsed(expr, retStmt);
+      ast->addUse(expr, retStmt);
 
     return false;
   }
 
   bool process(IfStmt* ifStmt) {
-    findUsed(ifStmt->getCond(), ifStmt);
+    ast->addUse(ifStmt->getCond(), ifStmt);
 
     return false;
   }
 
   bool process(DoStmt* doStmt) {
-    findUsed(doStmt->getCond(), doStmt);
+    ast->addUse(doStmt->getCond(), doStmt);
 
     return false;
   }
 
+  void collectExprs(BinaryOperator* binOp, Vector<BinaryOperator*>& exprs) {
+    if(binOp->getOpcode() == BO_Comma) {
+      collectExprs(cast<BinaryOperator>(binOp->getLHS()), exprs);
+      collectExprs(cast<BinaryOperator>(binOp->getRHS()), exprs);
+    } else {
+      exprs.push_back(binOp);
+    }
+  }
+
+  Vector<BinaryOperator*> collectExprs(BinaryOperator* binOp) {
+    Vector<BinaryOperator*> exprs;
+
+    collectExprs(binOp, exprs);
+
+    return exprs;
+  }
+
   bool process(ForStmt* forStmt) {
-    findUsed(forStmt->getCond(), forStmt);
+    if(auto* init = forStmt->getInit()) {
+      if(auto* binOp = dyn_cast<BinaryOperator>(init))
+        for(BinaryOperator* expr : collectExprs(binOp))
+          process(expr, forStmt);
+      else if(auto* declStmt = dyn_cast<DeclStmt>(init))
+        fatal(error() << "Not implemented: DeclStmt in for loop");
+      else
+        fatal(error() << "Unknown statement in for loop initializer: "
+                      << init->getStmtClassName());
+    }
+
+    ast->addUse(forStmt->getCond(), forStmt);
+
+    if(auto* inc = forStmt->getInc()) {
+      if(auto* binOp = dyn_cast<BinaryOperator>(inc))
+        for(BinaryOperator* expr : collectExprs(binOp))
+          process(expr, forStmt);
+      else
+        fatal(error() << "Unkonwn statement in for loop increment: "
+                      << inc->getStmtClassName());
+    }
 
     return false;
   }
 
   bool process(WhileStmt* whileStmt) {
-    findUsed(whileStmt->getCond(), whileStmt);
+    ast->addUse(whileStmt->getCond(), whileStmt);
 
     return false;
   }

@@ -148,7 +148,7 @@ void WalkStructured::walk(const IfThenElse& ifte) {
 void WalkStructured::walk(const IfThenBreak& iftb) {
   const BranchInst& br = iftb.getLLVMBranchInst();
   handle(br);
-  be.addIfThenBreak(br);
+  be.addIfThenBreak(br, iftb.isInverted());
 }
 
 void WalkStructured::walk(const IfThenGoto& iftg) {
@@ -165,8 +165,8 @@ void WalkStructured::walk(const Label& label) {
 void WalkStructured::walk(const Switch& swtch) {
   const SwitchInst& sw = swtch.getLLVM();
   handle(sw);
-  be.addSwitchStmt(sw);
 
+  be.beginBlock();
   for(const Switch::Case& kase : swtch.getCases()) {
     be.beginBlock();
     if(not kase.isEmpty())
@@ -183,6 +183,9 @@ void WalkStructured::walk(const Switch& swtch) {
     be.endBlock();
     be.addSwitchDefault();
   }
+  be.endBlock();
+
+  be.addSwitchStmt(sw);
 }
 
 void WalkStructured::walk(const LoopHeader&) {
@@ -288,7 +291,7 @@ void WalkSemiStructured::walk(const Block& block) {
   if(isUnstructured(block) and (block.getNumSuccessors() > 1)) {
     const BasicBlock& bb = block.getLLVM();
     if(const auto* swtch = dyn_cast<SwitchInst>(&bb.back())) {
-      be.addSwitchStmt(*swtch);
+      be.beginBlock();
       for(const auto& i : swtch->cases()) {
         be.beginBlock();
         be.addGoto(nodeNames.at(&block.getSuccessor(i.getCaseValue())), func);
@@ -303,6 +306,8 @@ void WalkSemiStructured::walk(const Block& block) {
 
         be.addSwitchDefault();
       }
+      be.endBlock();
+      be.addSwitchStmt(*swtch);
     } else if(const auto* br = dyn_cast<BranchInst>(&bb.back())) {
       LLVMContext& llvmContext = func.getContext();
       be.beginBlock();

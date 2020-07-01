@@ -20,6 +20,7 @@
 #include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
 #include "Map.h"
+#include "Options.h"
 #include "Vector.h"
 
 #include <clang/Analysis/CFG.h>
@@ -32,29 +33,11 @@ class ASTRenameVarsPass : public ASTFunctionPass<ASTRenameVarsPass> {
 protected:
   ASTBuilder builder;
   Map<std::string, unsigned> varNames;
+  const std::string varBase;
+  const Vector<std::string> loopVarsBase;
 
 protected:
-  void parse(MemberExpr* memberExpr, Vector<std::string>& pieces) {
-    pieces.push_back(memberExpr->getMemberDecl()->getName());
-    if(auto* next = dyn_cast<MemberExpr>(memberExpr->getBase()))
-      parse(next, pieces);
-  }
-
-  Vector<std::string> parse(Stmt* stmt) {
-    Vector<std::string> pieces;
-    if(auto* memberExpr = dyn_cast<MemberExpr>(stmt)) {
-      parse(memberExpr, pieces);
-    } else if(auto* unOp = dyn_cast<UnaryOperator>(stmt)) {
-      if(auto* arrExpr = dyn_cast<ArraySubscriptExpr>(unOp->getSubExpr()))
-        if(auto* declRef = dyn_cast<DeclRefExpr>(arrExpr->getBase()))
-          if(auto* var = dyn_cast<VarDecl>(declRef->getFoundDecl()))
-            pieces.push_back(var->getName());
-    }
-
-    return pieces;
-  }
-
-  std::string getName(const std::string& base) {
+  std::string getNewVarName(const std::string& base) {
     if(not varNames.contains(base)) {
       varNames[base] = 0;
       return base;
@@ -66,44 +49,227 @@ protected:
     return ss.str();
   }
 
+  std::string getNameFor(UnaryOperator* unOp) {
+    if(unOp->getOpcode() == UO_AddrOf) {
+      std::string newName = getNameFor(unOp->getSubExpr());
+      if(newName.size())
+        return newName + "_a";
+    }
+    return "";
+  }
+
+  std::string getNameFor(ArraySubscriptExpr* arrExpr) {
+    std::string newName = getNameFor(arrExpr->getBase());
+    if(newName.size())
+      return newName + "_e";
+    return "";
+  }
+
+  void parse(MemberExpr* memberExpr, Vector<std::string>& pieces) {
+    pieces.push_back(memberExpr->getMemberDecl()->getName());
+    if(auto* next = dyn_cast<MemberExpr>(memberExpr->getBase()))
+      parse(next, pieces);
+  }
+
+  std::string getNameFor(MemberExpr* memberExpr) {
+    Vector<std::string> pieces;
+    parse(memberExpr, pieces);
+    if(pieces.size()) {
+      if(pieces.size() == 1)
+        return pieces[0];
+      else
+        return pieces[1] + "_" + pieces[0];
+    }
+    return "";
+  }
+
+  std::string getNameFor(DeclRefExpr* declRef) {
+    if(auto* var = dyn_cast<VarDecl>(declRef->getFoundDecl()))
+      if(not var->getName().startswith("_"))
+        return var->getName();
+    return "";
+  }
+
+  std::string getNameFor(Expr* expr) {
+    if(auto* unOp = dyn_cast<UnaryOperator>(expr))
+      return getNameFor(unOp);
+    else if(auto* arrExpr = dyn_cast<ArraySubscriptExpr>(expr))
+      return getNameFor(arrExpr);
+    else if(auto* memberExpr = dyn_cast<MemberExpr>(expr))
+      return getNameFor(memberExpr);
+    else if(auto* declRef = dyn_cast<DeclRefExpr>(expr))
+      return getNameFor(declRef);
+    else if(isa<CXXBoolLiteralExpr>(expr))
+      return "cb";
+    else if(isa<CharacterLiteral>(expr))
+      return "cc";
+    else if(isa<IntegerLiteral>(expr))
+      return "ci";
+    else if(isa<FloatingLiteral>(expr))
+      return "cf";
+    else if(isa<StringLiteral>(expr))
+      return "cs";
+    return "";
+  }
+
+  VarDecl* getVarByName(const std::string& name) {
+    for(VarDecl* var : ast->vars())
+      if(var->getName() == name)
+        return var;
+    return nullptr;
+  }
+
+  void
+  getLoops(CompoundStmt* body, unsigned depth, Map<Stmt*, unsigned>& loops) {
+    for(Stmt* stmt : body->body()) {
+      if(auto* ifStmt = dyn_cast<IfStmt>(stmt)) {
+        getLoops(cast<CompoundStmt>(ifStmt->getThen()), depth, loops);
+        if(Stmt* els = ifStmt->getElse())
+          getLoops(cast<CompoundStmt>(els), depth, loops);
+      } else if(auto* doStmt = dyn_cast<DoStmt>(stmt)) {
+        loops[stmt] = depth;
+        getLoops(cast<CompoundStmt>(doStmt->getBody()), depth + 1, loops);
+      } else if(auto* forStmt = dyn_cast<ForStmt>(stmt)) {
+        loops[stmt] = depth;
+        getLoops(cast<CompoundStmt>(forStmt->getBody()), depth + 1, loops);
+      } else if(auto* whileStmt = dyn_cast<WhileStmt>(stmt)) {
+        loops[stmt] = depth;
+        getLoops(cast<CompoundStmt>(whileStmt->getBody()), depth + 1, loops);
+      } else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt)) {
+        for(SwitchCase* kase = switchStmt->getSwitchCaseList(); kase;
+            kase = kase->getNextSwitchCase())
+          if(CaseStmt* caseStmt = dyn_cast<CaseStmt>(kase))
+            getLoops(cast<CompoundStmt>(caseStmt->getSubStmt()), depth, loops);
+          else if(DefaultStmt* defStmt = dyn_cast<DefaultStmt>(kase))
+            getLoops(cast<CompoundStmt>(defStmt->getSubStmt()), depth, loops);
+      }
+    }
+  }
+
+  Map<Stmt*, unsigned> getLoops() {
+    Map<Stmt*, unsigned> loops;
+
+    getLoops(cast<CompoundStmt>(ast->getFunction()->getBody()), 0, loops);
+
+    return loops;
+  }
+
+  std::string getLoopVarName(unsigned depth, bool useSuffix, unsigned suffix) {
+    std::string buf;
+    llvm::raw_string_ostream ss(buf);
+    std::string base = loopVarsBase[depth % loopVarsBase.size()];
+    for(unsigned i = 0; i <= depth / loopVarsBase.size(); i++)
+      ss << base;
+    if(useSuffix)
+      ss << suffix;
+
+    return ss.str();
+  }
+
+  bool allInitializedVariablesLoopLocal(Stmt* init,
+                                        ForStmt* loop,
+                                        Vector<VarDecl*>& vars) {
+    if(auto* binOp = dyn_cast<BinaryOperator>(init)) {
+      Expr* lhs = binOp->getLHS();
+      Expr* rhs = binOp->getRHS();
+      if(binOp->getOpcode() == BO_Comma) {
+        return allInitializedVariablesLoopLocal(lhs, loop, vars)
+               and allInitializedVariablesLoopLocal(rhs, loop, vars);
+      } else if(binOp->getOpcode() == BO_Assign) {
+        VarDecl* var = cast<VarDecl>(cast<DeclRefExpr>(lhs)->getFoundDecl());
+        for(Stmt* use : ast->tluses(var))
+          if(not((use == loop) or ast->isContainedIn(use, loop)))
+            return false;
+        vars.push_back(var);
+      } else {
+        fatal(error() << "Unexpected operator in loop initializer: "
+                      << binOp->getOpcodeStr());
+      }
+    } else {
+      fatal(error() << "Unexpected statement in loop initializer: "
+                    << init->getStmtClassName());
+    }
+
+    return true;
+  }
+
+  Vector<VarDecl*> getLoopVariables(ForStmt* loop) {
+    Vector<VarDecl*> vars;
+    if(allInitializedVariablesLoopLocal(loop->getInit(), loop, vars))
+      return vars;
+    return Vector<VarDecl*>();
+  }
+
+  bool renameLoopVariables() {
+    Map<VarDecl*, std::string> newLoopVars;
+    for(auto& i : getLoops()) {
+      Stmt* loop = i.first;
+      unsigned loopDepth = i.second;
+      if(auto* forStmt = dyn_cast<ForStmt>(loop)) {
+        // All of the variables in the initializer of a for-stmt must
+        // be local
+        Vector<VarDecl*> loopVars = getLoopVariables(forStmt);
+        for(unsigned i = 0; i < loopVars.size(); i++)
+          newLoopVars[loopVars[i]]
+              = getLoopVarName(loopDepth, loopVars.size() > 1, i);
+      }
+    }
+
+    // Rename existing variables
+    for(const auto& i : newLoopVars) {
+      const std::string& name = i.second;
+      if(VarDecl* var = getVarByName(name))
+        var->setDeclName(builder.createDeclName(getNewVarName(varBase)));
+    }
+
+    // Rename loop variables
+    for(auto& i : newLoopVars) {
+      VarDecl* var = i.first;
+      const std::string& name = i.second;
+      var->setDeclName(builder.createDeclName(name));
+    }
+
+    return newLoopVars.size();
+  }
+
 public:
   bool process(FunctionDecl* f) {
     bool changed = false;
 
-    Vector<VarDecl*> vars;
-    for(Decl* decl : f->decls()) {
-      if(auto* var = dyn_cast<VarDecl>(decl)) {
-        varNames[var->getName()] = 0;
-        vars.push_back(var);
-      }
-    }
+    // Initialize known variable names
+    for(VarDecl* var : ast->vars())
+      varNames[var->getName()] = 0;
 
-    bool varChanged = false;
+    changed |= renameLoopVariables();
+
+    bool iterChanged = false;
     do {
-      varChanged = false;
-      for(VarDecl* var : vars) {
+      iterChanged = false;
+
+      for(VarDecl* var : ast->vars()) {
         if(var->getName().startswith("_") and ast->hasSingleDef(var)) {
-          Stmt* def = cast<BinaryOperator>(ast->getSingleDef(var))->getRHS();
-          Vector<std::string> pieces = parse(def);
-          if(pieces.size()) {
-            if(pieces.size() == 1)
-              var->setDeclName(builder.createDeclName(getName(pieces[0])));
-            else
-              var->setDeclName(
-                  builder.createDeclName(getName(pieces[1] + "_" + pieces[0])));
-            changed |= true;
-            varChanged |= true;
+          Expr* rhs = ast->getSingleDefRHS(var);
+          std::string newName = getNameFor(rhs);
+          if(auto* declRef = dyn_cast<DeclRefExpr>(rhs))
+            if(auto* param = dyn_cast<ParmVarDecl>(declRef->getFoundDecl()))
+              newName = param->getName().str() + "_p";
+          if(newName.size()) {
+            var->setDeclName(builder.createDeclName(getNewVarName(newName)));
+            iterChanged |= true;
           }
         }
       }
-    } while(varChanged);
+
+      changed |= iterChanged;
+    } while(iterChanged);
 
     return changed;
   }
 
 public:
   ASTRenameVarsPass(CishContext& context)
-      : ASTFunctionPass(context), builder(astContext) {
+      : ASTFunctionPass(context), builder(astContext),
+        varBase(opts().prefix + "t"), loopVarsBase({"i", "j", "k", "l"}) {
     ;
   }
 

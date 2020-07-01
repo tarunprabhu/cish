@@ -35,8 +35,8 @@ private:
   std::string outFile;
 
 private:
-  void run(clang::ASTContext& astContext, raw_ostream& os) {
-    cish::ASTStreamer stream(astContext, os);
+  std::string run(clang::ASTContext& astContext) {
+    cish::ASTStreamer stream(astContext);
 
     cish::Vector<const clang::RecordDecl*> structs;
     cish::Vector<const clang::VarDecl*> globals;
@@ -80,6 +80,8 @@ private:
     // Function definitions
     for(const clang::FunctionDecl* f : funcs)
       stream << f << stream.endl() << stream.endl();
+
+    return stream.str();
   }
 
 public:
@@ -103,14 +105,14 @@ public:
     clang::ASTContext& astContext = context.getASTContext();
 
     if(outFile == "-") {
-      run(astContext, outs());
+      outs() << run(astContext) << "\n";
     } else {
       std::error_code ec;
       raw_fd_ostream fs(outFile, ec);
       if(ec) {
         cish::fatal(cish::error() << ec.message());
       } else {
-        run(astContext, fs);
+        fs << run(astContext);
         fs.close();
       }
     }

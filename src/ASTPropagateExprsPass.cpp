@@ -45,13 +45,13 @@ class ASTPropagateExprsPass : public ASTFunctionPass<ASTPropagateExprsPass> {
 protected:
   bool isDefBeforeUseInRootBlock(Set<Stmt*>& rhsDefs,
                                  CFGBlock* rootBlock,
-                                 Stmt* lhsDef,
+                                 Stmt* def,
                                  Set<Stmt*>& lhsUses) {
     bool sawLhsDef = false;
     for(CFGElement& cfgElem : *rootBlock) {
       if(CFGStmt* cfgStmt = cfgElem.getAs<CFGStmt>().getPointer()) {
         Stmt* stmt = const_cast<Stmt*>(cfgStmt->getStmt());
-        if(stmt == lhsDef) {
+        if(stmt == def) {
           sawLhsDef = true;
         } else if(sawLhsDef) {
           if(rhsDefs.contains(stmt))
@@ -62,6 +62,13 @@ protected:
       } else {
         fatal(error() << "Unexpected CFG element kind");
       }
+    }
+    Stmt* term = rootBlock->getTerminator();
+    if(sawLhsDef) {
+      if(rhsDefs.contains(term))
+        return true;
+      else if(lhsUses.contains(term))
+        lhsUses.erase(term);
     }
 
     return false;
@@ -90,6 +97,14 @@ protected:
       } else {
         fatal(error() << "Unexpected CFG element kind");
       }
+    }
+    Stmt* term = block->getTerminator();
+    if(defs.contains(term)) {
+      defSeen |= true;
+    } else if(uses.contains(term)) {
+      uses.erase(term);
+      if(defSeen)
+        return true;
     }
 
     seen.insert(block);
@@ -162,17 +177,15 @@ protected:
     return false;
   }
 
-  bool canPropagateCopy(VarDecl* lhs, VarDecl* rhs, Stmt* lhsDef) {
+  bool canPropagateCopy(VarDecl* lhs, VarDecl* rhs, Stmt* def) {
     Set<Stmt*> defs = ast->getTopLevelDefsSet(rhs);
     Set<Stmt*> uses = ast->getTopLevelUsesSet(lhs);
     if(uses.size() == 0)
       return true;
 
-    llvm::errs() << lhs->getName() << " = " << toString(lhsDef, astContext)
-                 << "\n";
-    CFGBlock* rootBlock = ast->getCFGBlock(lhsDef);
+    CFGBlock* rootBlock = ast->getCFGBlock(def);
 
-    if(isDefBeforeUseInRootBlock(defs, rootBlock, lhsDef, uses))
+    if(isDefBeforeUseInRootBlock(defs, rootBlock, def, uses))
       return false;
     // If all the uses have already been seen, nothing more to be done
     if(uses.size() == 0)
@@ -193,7 +206,7 @@ protected:
 
   bool isRecursiveExpr(VarDecl* lhs, Stmt* lhsDef) {
     for(VarDecl* var : getVarsInStmt(lhsDef)) {
-      for(Stmt* def : ast->defs(var)) {
+      for(Stmt* def : ast->tldefs(var)) {
         Expr* rhs = cast<BinaryOperator>(def)->getRHS();
         if(getVarsInStmt(rhs).contains(lhs))
           return true;
@@ -202,14 +215,14 @@ protected:
     return false;
   }
 
-  bool isLHSDefConstantForAllUses(VarDecl* lhs, Stmt* lhsDef) {
+  bool isLHSDefConstantForAllUses(VarDecl* lhs, BinaryOperator* def) {
     Set<Stmt*> uses = ast->getTopLevelUsesSet(lhs);
-    CFGBlock* rootBlock = ast->getCFGBlock(lhsDef);
+    CFGBlock* rootBlock = ast->getCFGBlock(def);
 
-    for(VarDecl* var : getVarsInStmt(lhsDef)) {
+    for(VarDecl* var : getVarsInStmt(def->getRHS())) {
       Set<Stmt*> defs = ast->getTopLevelDefsSet(var);
 
-      if(isDefBeforeUseInRootBlock(defs, rootBlock, lhsDef, uses))
+      if(isDefBeforeUseInRootBlock(defs, rootBlock, def, uses))
         return false;
 
       // If all the uses have already been seen, nothing more to be done
@@ -229,8 +242,9 @@ protected:
     return true;
   }
 
-  bool canPropagateExpr(VarDecl* lhs, Stmt* lhsDef) {
-    if(isRecursiveExpr(lhs, lhsDef) or isLHSDefConstantForAllUses(lhs, lhsDef))
+  bool canPropagateExpr(VarDecl* lhs, BinaryOperator* def) {
+    if(isRecursiveExpr(lhs, def->getRHS())
+       or isLHSDefConstantForAllUses(lhs, def))
       return true;
     return false;
   }
@@ -257,7 +271,7 @@ public:
            and (not ast->hasAddressTaken(lhs)))
           if(auto* def = dyn_cast<DeclRefExpr>(ast->getSingleDefRHS(lhs)))
             if(auto* rhs = dyn_cast<VarDecl>(def->getFoundDecl()))
-              if(canPropagateCopy(lhs, rhs, def))
+              if(canPropagateCopy(lhs, rhs, ast->getSingleDef(lhs)))
                 replVars[lhs] = def;
 
       for(auto& i : replVars) {
@@ -283,7 +297,9 @@ public:
           if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
              and (not ast->hasAddressTaken(lhs)))
             if(Expr* def = ast->getSingleDefRHS(lhs))
-              if(isReplaceable(def) and canPropagateExpr(lhs, def))
+              if(isReplaceable(def)
+                 and canPropagateExpr(
+                     lhs, cast<BinaryOperator>(ast->getSingleDef(lhs))))
                 replExprs[lhs] = def;
 
       for(auto& i : replExprs) {

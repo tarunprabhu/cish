@@ -123,11 +123,14 @@ protected:
         return false;
 
     unsigned init = 0;
+    unsigned incr = 0;
     for(Stmt* def : ast->tldefs(var))
       if((not ast->isContainedIn(def, loop)) and dominates(def, loop))
         init += 1;
+      else if(ast->isContainedIn(def, loop))
+        incr += 1;
 
-    return init <= 1;
+    return (init <= 1) and (incr == 1);
   }
 
   Loop getLoopFor(Stmt* loop) {
@@ -177,14 +180,12 @@ protected:
         step = getVarInExpr(bin->getLHS()) ? bin->getRHS() : bin->getLHS();
 
       if(step) {
-        Vector<Stmt*> stmts(body->body_begin(), body->body_end());
+        Stmt** stmts = body->body_begin();
         unsigned i = 0;
-        for(; i < stmts.size(); i++)
+        for(; i < body->size(); i++)
           if(stmts[i] == cond)
             break;
-        if((i != (stmts.size() - 2)) and (stmts[i + 1] == latch))
-          return Loop();
-        else
+        if((i == (body->size() - 2)) and (stmts[i + 1] == latch))
           return Loop(var, init, init->getRHS(), cond, latch, step);
       }
     }
@@ -256,11 +257,6 @@ protected:
       BinaryOperator::Opcode stepOp = latchRhs->getOpcode();
       BinaryOperator::Opcode condOp = cond->getOpcode();
 
-      Vector<Stmt*> stmts;
-      for(Stmt* stmt : cast<CompoundStmt>(getLoopBody(loop))->body())
-        if((stmt != exit) and (stmt != latch))
-          stmts.push_back(stmt);
-
       Expr* newInit = builder.createBinaryOperator(
           latchLhs, init, BO_Assign, latchLhs->getType());
       Expr* newCondLhs = builder.createBinaryOperator(
@@ -270,10 +266,13 @@ protected:
       Expr* newLatch = builder.createBinaryOperator(
           latchLhs, latchRhs, BO_Assign, latchLhs->getType());
       ForStmt* forStmt = builder.createForStmt(
-          newInit, newCond, newLatch, builder.createCompoundStmt(stmts));
+          newInit, newCond, newLatch, getLoopBody(loop));
 
+      setLoopBody(loop, nullptr);
       changed |= ast->replaceStmtWith(loop, forStmt);
-      changed |= ast->eraseStmt(initStmt);
+      changed |= ast->erase(initStmt);
+      changed |= ast->erase(exit);
+      changed |= ast->erase(latch);
     }
 
     return changed;

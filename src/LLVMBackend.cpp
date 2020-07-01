@@ -655,14 +655,16 @@ void LLVMBackend::addIfThen(const BranchInst& br, bool invert) {
 void LLVMBackend::addIfThenElse(const BranchInst& br) {
   clang::Stmt* els = stmts.top().pop_back();
   clang::Stmt* thn = stmts.top().pop_back();
-  BackendBase::add(
-      builder.createIfStmt(get<clang::Expr>(br.getCondition()), thn, els));
+  clang::Expr* cond = get<clang::Expr>(br.getCondition());
+  BackendBase::add(builder.createIfStmt(cond, thn, els));
 }
 
-void LLVMBackend::addIfThenBreak(const BranchInst& br) {
+void LLVMBackend::addIfThenBreak(const BranchInst& br, bool invert) {
   clang::Stmt* thn = builder.createCompoundStmt(builder.createBreakStmt());
-  BackendBase::add(
-      builder.createIfStmt(get<clang::Expr>(br.getCondition()), thn));
+  clang::Expr* cond = get<clang::Expr>(br.getCondition());
+  if(invert)
+    cond = builder.createUnaryOperator(cond, clang::UO_LNot, cond->getType());
+  BackendBase::add(builder.createIfStmt(cond, thn));
 }
 
 void LLVMBackend::addIfThenGoto(const std::string& name,
@@ -702,33 +704,37 @@ void LLVMBackend::addEndlessLoop() {
 }
 
 void LLVMBackend::addSwitchStmt(const SwitchInst& sw) {
-  BackendBase::add(
-      builder.createSwitchStmt(get<clang::Expr>(sw.getCondition())));
+  clang::CompoundStmt* body = cast<clang::CompoundStmt>(stmts.top().pop_back());
+  clang::SwitchStmt* switchStmt
+      = builder.createSwitchStmt(get<clang::Expr>(sw.getCondition()));
+  switchStmt->setBody(body);
+
+  for(clang::Stmt* kase : body->body()) {
+    // Calling SwitchStmt->addSwitchCase() ends up with the newly added case
+    // becoming the first case in the switch statement. Better to maintain the
+    // order here
+    clang::SwitchCase* first = switchStmt->getSwitchCaseList();
+    if(not first) {
+      switchStmt->addSwitchCase(cast<clang::SwitchCase>(kase));
+    } else {
+      clang::SwitchCase* last = first;
+      while(last->getNextSwitchCase())
+        last = last->getNextSwitchCase();
+      last->setNextSwitchCase(cast<clang::SwitchCase>(kase));
+    }
+  }
+
+  BackendBase::add(switchStmt);
 }
 
 void LLVMBackend::addSwitchCase(const ConstantInt* value) {
   clang::Stmt* body = stmts.top().pop_back();
-  clang::SwitchCase* newCase = nullptr;
   if(value) {
     clang::CaseStmt* kase = builder.createCaseStmt(get<clang::Expr>(*value));
     kase->setSubStmt(body);
-    newCase = kase;
+    BackendBase::add(kase);
   } else {
-    newCase = builder.createDefaultStmt(body);
-  }
-
-  // Calling SwitchStmt->addSwitchCase() ends up with the newly added case
-  // becoming the first case in the switch statement. Better to maintain the
-  // order here
-  auto* stmt = cast<clang::SwitchStmt>(stmts.top().back());
-  clang::SwitchCase* first = stmt->getSwitchCaseList();
-  if(not first) {
-    stmt->addSwitchCase(newCase);
-  } else {
-    clang::SwitchCase* last = first;
-    while(last->getNextSwitchCase())
-      last = last->getNextSwitchCase();
-    last->setNextSwitchCase(newCase);
+    BackendBase::add(builder.createDefaultStmt(body));
   }
 }
 

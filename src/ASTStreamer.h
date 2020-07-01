@@ -28,9 +28,16 @@
 namespace cish {
 
 class ASTStreamer {
+private:
+  static constexpr unsigned SkipIndent = 0x1;
+  static constexpr unsigned SkipNewline = 0x2;
+
+private:
+  std::string buf;
+
 protected:
   const clang::ASTContext& astContext;
-  llvm::raw_ostream& os;
+  llvm::raw_string_ostream os;
 
   std::string tabStr;
   unsigned ilevel;
@@ -53,6 +60,7 @@ protected:
   ASTStreamer& tab();
   ASTStreamer& space(unsigned spaces = 1);
   ASTStreamer& endst(bool newline = true);
+  char back(unsigned skip = 0);
 
   // The optional label is used if the block represents a basic block and a
   // label is added before the block
@@ -124,7 +132,7 @@ protected:
   ASTStreamer& operator<<(const clang::ParmVarDecl*);
 
 public:
-  ASTStreamer(const clang::ASTContext& astContext, llvm::raw_ostream& os);
+  ASTStreamer(const clang::ASTContext& astContext);
   ASTStreamer(const ASTStreamer&) = delete;
   ASTStreamer(ASTStreamer&&) = delete;
 
@@ -136,6 +144,8 @@ public:
   ASTStreamer& operator<<(const clang::FunctionDecl*);
   ASTStreamer& operator<<(const clang::RecordDecl*);
   ASTStreamer& operator<<(const clang::Stmt*);
+
+  const std::string& str();
 };
 
 } // namespace cish

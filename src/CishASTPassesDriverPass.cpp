@@ -55,15 +55,17 @@ public:
         createASTPropagateExprsPass(cishContext),
         createASTSimplifyLoopsPass(cishContext),
         createASTConstantFoldingPass(cishContext),
+        createASTPropagateExprsPass(cishContext),
         createASTDeadCodeEliminationPass(cishContext),
         createASTRenameVarsPass(cishContext),
     };
 
     for(clang::FunctionDecl* f : cishContext.funcs()) {
+      // llvm::outs() << cish::toString(f, cishContext.getASTContext()) << "\n";
       for(cish::ASTPass* pass : passes) {
         pass->runOnFunction(f);
-        // llvm::errs() << cish::toString(f, cishContext.getASTContext()) << "\n";
-        // llvm::errs().flush();
+        // llvm::outs() << cish::toString(f, cishContext.getASTContext()) <<
+        // "\n"; llvm::outs().flush();
       }
     }
 

@@ -147,6 +147,7 @@ protected:
     changed |= process(forStmt->getInit());
     changed |= process(forStmt->getCond());
     changed |= process(forStmt->getInc());
+    changed |= process(forStmt->getBody());
 
     return changed;
   }

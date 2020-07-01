@@ -838,32 +838,37 @@ StructureKind StructureAnalysis::runOnFunction(const Function& f) {
       const Loop& loop = *li.getLoopFor(bb);
       if(loopExitBlocks[&loop].size() == 1) {
         StructNode& old = getNodeFor(bb);
-        StructNode& succ0
-            = old.getSuccessor(ConstantInt::getFalse(llvmContext));
-        ConstantInt* exitCase = ConstantInt::getFalse(llvmContext);
-        if(auto* block = dyn_cast<Block>(&succ0)) {
-          // Break when the condition is true
-          if(loop.contains(&block->getLLVM()))
-            exitCase = ConstantInt::getTrue(llvmContext);
-        } else if(auto* ift = dyn_cast<IfThenBreak>(&succ0)) {
-          // Break when the condition is true
-          if(loop.contains(ift->getLLVMBranchInst().getParent()))
-            exitCase = ConstantInt::getTrue(llvmContext);
+
+        // Start by assuming that the loop is exited when the condition is true.
+        // If that turns out not to be the case, swap the exit and the
+        // successor and mark the IfThenBreak node as having to invert the
+        // condition. This is because the loop must always be exited when the
+        // condition is true
+        StructNode* exit = &old.getSuccessor(ConstantInt::getTrue(llvmContext));
+        StructNode* cont
+            = &old.getSuccessor(ConstantInt::getFalse(llvmContext));
+        bool invert = false;
+        if(auto* block = dyn_cast<Block>(exit)) {
+          if(loop.contains(&block->getLLVM())) {
+            std::swap(exit, cont);
+            invert = true;
+          }
+        } else if(auto* ift = dyn_cast<IfThenBreak>(exit)) {
+          if(loop.contains(ift->getLLVMBranchInst().getParent())) {
+            std::swap(exit, cont);
+            invert = true;
+          }
         } else {
           fatal(
               error() << "Expected successor to be a block or if-then-break\n");
         }
-        ConstantInt* invExitCase = exitCase->isZero()
-                                       ? ConstantInt::getTrue(llvmContext)
-                                       : ConstantInt::getFalse(llvmContext);
-        StructNode& exit = old.getSuccessor(exitCase);
-        StructNode& cont = old.getSuccessor(invExitCase);
+
         Vector<std::pair<const ConstantInt*, StructNode*>> preds
             = old.getIncoming();
         IfThenBreak& neew
-            = newNode<IfThenBreak>(exit,
+            = newNode<IfThenBreak>(*exit,
                                    cast<BranchInst>(bb->back()),
-                                   not exitCase,
+                                   invert,
                                    loopExitBlocks.contains(&loop));
 
         old.disconnect();
@@ -872,8 +877,8 @@ StructureKind StructureAnalysis::runOnFunction(const Function& f) {
           StructNode& pred = *i.second;
           pred.addSuccessor(kase, neew);
         }
-        neew.addSuccessor(exitCase, exit);
-        neew.addSuccessor(invExitCase, cont);
+        neew.addSuccessor(ConstantInt::getTrue(llvmContext), *exit);
+        neew.addSuccessor(ConstantInt::getFalse(llvmContext), *cont);
       }
     }
   }

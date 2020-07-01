@@ -28,6 +28,10 @@ using namespace clang;
 
 namespace cish {
 
+// static bool isFlagSet(unsigned flags, unsigned flag) {
+//   return (flags | flag) == flag;
+// }
+
 static void formatArrayDims(const ConstantArrayType* aty,
                             llvm::raw_ostream& ss) {
   ss << "[" << aty->getSize().getLimitedValue() << "]";
@@ -43,9 +47,8 @@ static std::string formatArrayDims(const ConstantArrayType* aty) {
   return ss.str();
 }
 
-ASTStreamer::ASTStreamer(const clang::ASTContext& astContext,
-                         llvm::raw_ostream& os)
-    : astContext(astContext), os(os), ilevel(0) {
+ASTStreamer::ASTStreamer(const clang::ASTContext& astContext)
+    : astContext(astContext), os(buf), ilevel(0) {
   if(opts().indentOffset == 0)
     tabStr = "\t";
   else
@@ -141,6 +144,38 @@ ASTStreamer& ASTStreamer::endst(bool newl) {
   if(newl)
     endl();
   return *this;
+}
+
+char ASTStreamer::back(unsigned skip) {
+  auto isFlagSet
+      = [](unsigned flags, unsigned flag) { return (flags & flag) == flag; };
+
+  os.flush();
+  bool skipIndent = isFlagSet(skip, ASTStreamer::SkipIndent);
+  bool skipNewline = isFlagSet(skip, ASTStreamer::SkipNewline);
+  if(not buf.size()) {
+    return '\0';
+  } else if(skip) {
+    for(size_t i = buf.size(); i > 0; i--)
+      if(not[&]() {
+           switch(buf[i - 1]) {
+           case ' ':
+           case '\t':
+             if(skipIndent)
+               return true;
+             break;
+           case '\n':
+             if(skipNewline)
+               return true;
+             break;
+           }
+           return false;
+         }())
+        return buf[i - 1];
+    return '\0';
+  } else {
+    return buf.back();
+  }
 }
 
 ASTStreamer& ASTStreamer::beginBlock(const std::string& label) {
@@ -640,6 +675,10 @@ ASTStreamer& ASTStreamer::operator<<(const DefaultStmt* deflt) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const SwitchStmt* sw) {
+  static const Vector<char> sentinels = {';'};
+  if(sentinels.contains(back(SkipIndent | SkipNewline)))
+    *this << endl() << tab();
+
   *this << "switch(" << sw->getCond() << ")" << beginBlock();
 
   for(const clang::SwitchCase* i = sw->getSwitchCaseList(); i;
@@ -658,9 +697,11 @@ ASTStreamer& ASTStreamer::operator<<(const SwitchStmt* sw) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const IfStmt* ifStmt) {
-  *this << endl() << tab() << "if (" << ifStmt->getCond() << ")"
-        << ifStmt->getThen();
-  if(const Stmt* then = ifStmt->getElse()) {
+  if(back(SkipIndent | SkipNewline) == ';')
+    *this << endl() << tab();
+
+  *this << "if (" << ifStmt->getCond() << ")" << ifStmt->getThen();
+  if(const Stmt* els = ifStmt->getElse()) {
     switch(opts().indentStyle) {
     case IndentStyle::KR:
       *this << " else";
@@ -670,14 +711,16 @@ ASTStreamer& ASTStreamer::operator<<(const IfStmt* ifStmt) {
       endl() << tab() << "else";
       break;
     }
-    *this << then;
+    *this << els;
   }
-  *this << endl();
 
   return *this;
 }
 
 ASTStreamer& ASTStreamer::operator<<(const ReturnStmt* retStmt) {
+  if(back(SkipIndent | SkipNewline) == ';')
+    *this << endl() << tab();
+
   *this << "return";
   if(const Expr* val = retStmt->getRetValue())
     space() << val;
@@ -704,21 +747,25 @@ ASTStreamer& ASTStreamer::process(const CompoundStmt* stmt, bool block) {
     beginBlock();
 
   for(Stmt* stmt : stmt->body()) {
-    if(not stmt)
-      break;
-    if(not isa<LabelStmt>(stmt))
-      tab();
+    if(not(isa<LabelStmt>(stmt) or isa<NullStmt>(stmt))) {
+      if(back(SkipIndent | SkipNewline) == '}')
+        *this << endl();
+      *this << tab();
+    }
     *this << stmt;
     if(isa<IfStmt>(stmt) or isa<ForStmt>(stmt) or isa<WhileStmt>(stmt)
        or isa<SwitchStmt>(stmt) or isa<DeclStmt>(stmt)) {
       // Statements that should not have a semicolon at the end
-      endl();
+      *this << endl();
+    } else if(isa<NullStmt>(stmt)) {
+      if(back(SkipIndent) != '\n')
+        *this << endl();
     } else if(const auto* label = dyn_cast<LabelStmt>(stmt)) {
       // Labels definitely don't end with a semicolon
       if(label->getDecl()->getName().size())
-        endl();
+        *this << endl();
     } else {
-      endst();
+      *this << endst();
     }
   }
 
@@ -733,7 +780,10 @@ ASTStreamer& ASTStreamer::operator<<(const CompoundStmt* compoundStmt) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const DoStmt* doStmt) {
-  *this << endl() << tab() << "do" << doStmt->getBody();
+  if(back(SkipIndent | SkipNewline) == ';')
+    *this << endl() << tab();
+
+  *this << "do" << doStmt->getBody();
   switch(opts().indentStyle) {
   case IndentStyle::KR:
     *this << " while";
@@ -749,6 +799,9 @@ ASTStreamer& ASTStreamer::operator<<(const DoStmt* doStmt) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const ForStmt* forStmt) {
+  if(back(SkipIndent | SkipNewline) == ';')
+    *this << endl() << tab();
+
   *this << "for(" << forStmt->getInit() << "; " << forStmt->getCond() << "; "
         << forStmt->getInc() << ")" << forStmt->getBody();
 
@@ -756,6 +809,9 @@ ASTStreamer& ASTStreamer::operator<<(const ForStmt* forStmt) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const WhileStmt* whileStmt) {
+  if(back(SkipIndent | SkipNewline) == ';')
+    *this << endl() << tab();
+
   *this << "while (" << whileStmt->getCond() << ")" << whileStmt->getBody();
 
   return *this;
@@ -825,6 +881,11 @@ ASTStreamer& ASTStreamer::operator<<(const Stmt* stmt) {
   else
     fatal(error() << "UNKNOWN STMT: " << stmt->getStmtClassName());
   return *this;
+}
+
+const std::string& ASTStreamer::str() {
+  os.flush();
+  return buf;
 }
 
 } // namespace cish

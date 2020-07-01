@@ -87,8 +87,10 @@ public:
                                       clang::QualType type);
   clang::DoStmt* createDoStmt(clang::Stmt* body, clang::Expr* cond);
   clang::WhileStmt* createWhileStmt(clang::Expr* cond, clang::Stmt* body);
-  clang::ForStmt* createForStmt(clang::Stmt* init, clang::Expr* cond,
-                                clang::Expr* inc, clang::Stmt* body = nullptr);
+  clang::ForStmt* createForStmt(clang::Stmt* init,
+                                clang::Expr* cond,
+                                clang::Expr* inc,
+                                clang::Stmt* body = nullptr);
   clang::CXXBoolLiteralExpr* createBoolLiteral(bool b);
   clang::CXXBoolLiteralExpr* createBoolLiteral(bool b, clang::QualType type);
   clang::IntegerLiteral* createIntLiteral(const llvm::APInt& i,
