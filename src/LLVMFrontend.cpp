@@ -53,8 +53,9 @@ static std::string formatLLVMName(const std::string& s) {
   return name;
 }
 
-LLVMFrontend::LLVMFrontend(CishContext& context, const SourceInfo& si)
-    : context(context), si(si), be(context.getLLVMBackend()) {
+LLVMFrontend::LLVMFrontend(CishContext& cishContext)
+    : cishContext(cishContext), si(cishContext.getSourceInfo()),
+      be(cishContext.getLLVMBackend()) {
   ;
 }
 
@@ -301,9 +302,6 @@ bool LLVMFrontend::shouldUseTemporary(const Instruction& inst) const {
   else if((isa<CallInst>(inst) or isa<InvokeInst>(inst))
           and (not inst.getType()->isVoidTy()) and ((uses == 0) or (uses > 1)))
     return true;
-  else if(auto* load = dyn_cast<LoadInst>(&inst))
-    if(inst.getMetadata("cish.notemp"))
-      return false;
   return false;
 }
 

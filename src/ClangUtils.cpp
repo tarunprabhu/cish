@@ -19,6 +19,7 @@
 
 #include "ClangUtils.h"
 #include "ASTStreamer.h"
+#include "Diagnostics.h"
 
 #include <clang/AST/RecursiveASTVisitor.h>
 
@@ -58,6 +59,50 @@ Expr* stripCasts(Expr* expr) {
   return expr;
 }
 
+static bool isEqualInt(Expr* lhs, Expr* rhs) {
+  if(auto* lint = dyn_cast<IntegerLiteral>(lhs))
+    if(auto* rint = dyn_cast<IntegerLiteral>(rhs))
+      return lint->getValue().getLimitedValue()
+             == rint->getValue().getLimitedValue();
+  return false;
+}
+
+static bool isEqualFloat(Expr* lhs, Expr* rhs) {
+  if(auto* lf = dyn_cast<FloatingLiteral>(lhs))
+    if(auto* rf = dyn_cast<FloatingLiteral>(rhs))
+      return lf->getValue().compare(rf->getValue()) == llvm::APFloat::cmpEqual;
+  return false;
+}
+
+bool isEqual(Expr* lhs, Expr* rhs) {
+  if(lhs->getType()->isIntegerType())
+    return isEqualInt(lhs, rhs);
+  else if(lhs->getType()->isFloatingType())
+    return isEqualFloat(lhs, rhs);
+  return false;
+}
+
+bool isConstant(Expr* expr, uint64_t val) {
+  if(auto* intLit = dyn_cast<IntegerLiteral>(expr))
+    return intLit->getValue().getLimitedValue() == val;
+  return false;
+}
+
+bool isZero(Expr* expr) {
+  return isConstant(expr, 0);
+}
+
+bool isOne(Expr* expr) {
+  return isConstant(expr, 1);
+}
+
+VarDecl* getVar(Expr* expr) {
+  if(auto* ref = dyn_cast<DeclRefExpr>(expr))
+    if(auto* var = dyn_cast<VarDecl>(ref->getFoundDecl()))
+      return var;
+  return nullptr;
+}
+
 Vector<VarDecl*> getVarsInStmtAsVector(Stmt* stmt) {
   Set<VarDecl*> vars = getVarsInStmt(stmt);
   return Vector<VarDecl*>(vars.begin(), vars.end());
@@ -67,6 +112,66 @@ Set<VarDecl*> getVarsInStmt(Stmt* stmt) {
   Set<VarDecl*> vars;
   FindVarsInStmt(vars).TraverseStmt(stmt);
   return vars;
+}
+
+static void collectCommaExprs(BinaryOperator* binOp,
+                              Vector<BinaryOperator*>& exprs) {
+  switch(binOp->getOpcode()) {
+  case BO_Comma:
+    collectCommaExprs(cast<BinaryOperator>(binOp->getLHS()), exprs);
+    collectCommaExprs(cast<BinaryOperator>(binOp->getRHS()), exprs);
+    break;
+  default:
+    exprs.push_back(binOp);
+    break;
+  }
+}
+
+Vector<BinaryOperator*> getCommaExprs(BinaryOperator* binOp) {
+  Vector<BinaryOperator*> exprs;
+
+  collectCommaExprs(binOp, exprs);
+
+  return exprs;
+}
+
+static void collectForInits(BinaryOperator* binOp,
+                            Vector<BinaryOperator*>& inits) {
+  switch(binOp->getOpcode()) {
+  case BO_Assign:
+    inits.push_back(binOp);
+    break;
+  case BO_Comma:
+    collectCommaExprs(binOp, inits);
+    break;
+  default:
+    fatal(error() << "Initializer in a for must be either an assignment or a "
+                     "comma operator with assignments");
+  }
+}
+
+Vector<BinaryOperator*> getForInits(ForStmt* forStmt) {
+  Vector<BinaryOperator*> inits;
+  if(Stmt* init = forStmt->getInit()) {
+    if(auto* binOp = dyn_cast<BinaryOperator>(forStmt->getInit()))
+      collectForInits(binOp, inits);
+    else
+      fatal(error() << "Unexpected statement in for loop initializer: "
+                    << init->getStmtClassName());
+  }
+  return inits;
+}
+
+Vector<BinaryOperator*> getForIncs(ForStmt* forStmt) {
+  Vector<BinaryOperator*> incs;
+  if(Stmt* inc = forStmt->getInc()) {
+    if(auto* binOp = dyn_cast<BinaryOperator>(inc))
+      collectCommaExprs(binOp, incs);
+    else
+      fatal(error() << "Unexpected statement in for loop increment: "
+                    << inc->getStmtClassName());
+  }
+  return incs;
 }
 
 std::string toString(Stmt* stmt, ASTContext& astContext) {

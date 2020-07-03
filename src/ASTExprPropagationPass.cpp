@@ -22,6 +22,7 @@
 #include "ClangUtils.h"
 #include "Diagnostics.h"
 #include "Map.h"
+#include "NameGenerator.h"
 #include "Set.h"
 
 #include <clang/AST/RecursiveASTVisitor.h>
@@ -172,6 +173,8 @@ protected:
     } else if(const auto* unOp = dyn_cast<UnaryOperator>(expr)) {
       if(unOp->getOpcode() != UO_AddrOf)
         return isShort(unOp->getSubExpr());
+    } else if(const auto* castExpr = dyn_cast<CStyleCastExpr>(expr)) {
+      return isShort(castExpr->getSubExpr());
     }
 
     return false;
@@ -267,8 +270,8 @@ public:
     do {
       replVars.clear();
       for(VarDecl* lhs : ast->vars())
-        if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
-           and (not ast->hasAddressTaken(lhs)))
+        if(ast->hasSingleDef(lhs)
+           and (not ast->hasZeroUses(lhs)) and (not ast->hasAddressTaken(lhs)))
           if(auto* def = dyn_cast<DeclRefExpr>(ast->getSingleDefRHS(lhs)))
             if(auto* rhs = dyn_cast<VarDecl>(def->getFoundDecl()))
               if(canPropagateCopy(lhs, rhs, ast->getSingleDef(lhs)))
@@ -292,15 +295,14 @@ public:
     Map<VarDecl*, Expr*> replExprs;
     do {
       replExprs.clear();
-      for(Decl* decl : f->decls())
-        if(auto* lhs = dyn_cast<VarDecl>(decl))
-          if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
-             and (not ast->hasAddressTaken(lhs)))
-            if(Expr* def = ast->getSingleDefRHS(lhs))
-              if(isReplaceable(def)
-                 and canPropagateExpr(
-                     lhs, cast<BinaryOperator>(ast->getSingleDef(lhs))))
-                replExprs[lhs] = def;
+      for(VarDecl* lhs : ast->vars())
+        if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
+           and (not ast->hasAddressTaken(lhs)))
+          if(Expr* def = ast->getSingleDefRHS(lhs))
+            if(isReplaceable(def)
+               and canPropagateExpr(
+                   lhs, cast<BinaryOperator>(ast->getSingleDef(lhs))))
+              replExprs[lhs] = def;
 
       for(auto& i : replExprs) {
         VarDecl* var = i.first;
@@ -323,7 +325,11 @@ public:
   virtual ~ASTPropagateExprsPass() = default;
 
   virtual llvm::StringRef getPassName() const override {
-    return "Cish AST Propagate Exprs";
+    return "cish-eprop";
+  }
+
+  virtual llvm::StringRef getPassLongName() const override {
+    return "Cish AST Expression Propagation";
   }
 };
 

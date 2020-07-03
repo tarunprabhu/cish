@@ -22,6 +22,12 @@
 
 #include <llvm/Pass.h>
 
-llvm::Pass* createIRPreparePass();
+namespace cish {
+
+class CishContext;
+
+} // namespace cish
+
+llvm::Pass* createIRPreparePass(cish::CishContext& cishContext);
 
 #endif // CISH_IR_PASSES_H

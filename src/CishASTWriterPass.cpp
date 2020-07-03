@@ -20,6 +20,7 @@
 #include "ASTStreamer.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
+#include "Options.h"
 #include "Vector.h"
 
 #include <llvm/Pass.h>
@@ -32,10 +33,12 @@ public:
   static char ID;
 
 private:
+  cish::CishContext& cishContext;
   std::string outFile;
 
 private:
-  std::string run(clang::ASTContext& astContext) {
+  std::string run() {
+    clang::ASTContext& astContext = cishContext.getASTContext();
     cish::ASTStreamer stream(astContext);
 
     cish::Vector<const clang::RecordDecl*> structs;
@@ -85,34 +88,30 @@ private:
   }
 
 public:
-  explicit CishASTWriterPass(const std::string& outFile)
-      : ModulePass(ID), outFile(outFile) {
+  explicit CishASTWriterPass(cish::CishContext& cishContext)
+      : ModulePass(ID), cishContext(cishContext),
+        outFile(cish::opts().fileOut) {
     ;
   }
 
   virtual StringRef getPassName() const override {
-    return "Cish Printer Pass";
+    return "Cish AST Writer Pass";
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
-    AU.addRequired<CishContextWrapperPass>();
     AU.setPreservesAll();
   }
 
   virtual bool runOnModule(Module& m) override {
-    const cish::CishContext& context
-        = getAnalysis<CishContextWrapperPass>().getCishContext();
-    clang::ASTContext& astContext = context.getASTContext();
-
     if(outFile == "-") {
-      outs() << run(astContext) << "\n";
+      outs() << run() << "\n";
     } else {
       std::error_code ec;
       raw_fd_ostream fs(outFile, ec);
       if(ec) {
         cish::fatal(cish::error() << ec.message());
       } else {
-        fs << run(astContext);
+        fs << run();
         fs.close();
       }
     }
@@ -123,6 +122,6 @@ public:
 
 char CishASTWriterPass::ID = 0;
 
-Pass* createCishASTWriterPass(const std::string& outFile) {
-  return new CishASTWriterPass(outFile);
+Pass* createCishASTWriterPass(cish::CishContext& cishContext) {
+  return new CishASTWriterPass(cishContext);
 }

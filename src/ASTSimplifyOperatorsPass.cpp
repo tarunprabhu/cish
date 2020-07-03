@@ -17,7 +17,8 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "ASTExprPass.h"
+#include "ASTFunctionPass.h"
+#include "ClangUtils.h"
 
 #include <llvm/Support/raw_ostream.h>
 
@@ -25,155 +26,152 @@ using namespace clang;
 
 namespace cish {
 
-class ASTSimplifyOperatorsPass : public ASTExprPass<ASTSimplifyOperatorsPass> {
+class ASTSimplifyOperatorsPass
+    : public ASTFunctionPass<ASTSimplifyOperatorsPass> {
 public:
-  // Clang doesn't unique expressions. But because this is coming from LLVM
-  // which does unique values, if two expressions have different addresses,
-  // they are different
-  // It might be better to be more rigorous about this because if we ever
-  // support GCC, then this might not necessarily be true
-  bool identical(const Expr* e1, const Expr* e2) {
-    return e1 == e2;
-  }
+  bool process(MemberExpr* memberExpr) {
+    bool changed = false;
 
-  Expr* process(MemberExpr* memberExpr) {
     bool arrow
         = isa<PointerType>(memberExpr->getBase()->getType().getTypePtr());
     changed |= (arrow != memberExpr->isArrow());
     memberExpr->setArrow(arrow);
-    return memberExpr;
+
+    return changed;
   }
 
-  Expr* process(BinaryOperator* binOp) {
+  bool process(BinaryOperator* binOp) {
+    bool changed = false;
+
     BinaryOperator::Opcode opc = binOp->getOpcode();
     Expr* lhs = binOp->getLHS();
     Expr* rhs = binOp->getRHS();
     switch(opc) {
-    case BO_Assign:
-      if(auto* rhsOp = dyn_cast<BinaryOperator>(rhs)) {
-        Expr* rhs0 = rhsOp->getLHS();
-        Expr* rhs1 = rhsOp->getRHS();
-        if(identical(lhs, rhs0)) {
-          switch(rhsOp->getOpcode()) {
-          case BO_Add:
-            binOp->setOpcode(BO_AddAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Sub:
-            binOp->setOpcode(BO_SubAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Mul:
-            binOp->setOpcode(BO_MulAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Div:
-            binOp->setOpcode(BO_DivAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Rem:
-            binOp->setOpcode(BO_RemAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Shl:
-            binOp->setOpcode(BO_ShlAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Shr:
-            binOp->setOpcode(BO_ShrAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_And:
-            binOp->setOpcode(BO_AndAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Or:
-            binOp->setOpcode(BO_OrAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          case BO_Xor:
-            binOp->setOpcode(BO_XorAssign);
-            binOp->setRHS(rhs1);
-            changed |= true;
-            break;
-          default:
-            break;
-          }
+    case BO_Add:
+      //
+      // Match:   op1 + -op2
+      // Replace: op1 - op2
+      //
+      if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
+        if(unOp->getOpcode() == UO_Minus) {
+          binOp->setOpcode(BO_Sub);
+          ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
+          changed |= true;
+        }
+      } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
+        llvm::APInt ival = intLit->getValue();
+        if(ival.isNegative()) {
+          ival.negate();
+          binOp->setOpcode(BO_Sub);
+          ast->replaceExprWith(
+              binOp->getRHS(),
+              builder.createIntLiteral(ival, intLit->getType()));
+          changed |= true;
+        }
+      }
+      break;
+    case BO_Sub:
+      //
+      // Match:   op1 - -op2
+      // Replace: op1 + op2
+      //
+      if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
+        if(unOp->getOpcode() == UO_Minus) {
+          binOp->setOpcode(BO_Add);
+          ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
+          changed |= true;
+        }
+      } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
+        llvm::APInt ival = intLit->getValue();
+        if(ival.isNegative()) {
+          ival.negate();
+          binOp->setOpcode(BO_Add);
+          ast->replaceExprWith(
+              binOp->getRHS(),
+              builder.createIntLiteral(ival, intLit->getType()));
+          changed |= true;
+        }
+      }
+      break;
+    case BO_LT:
+      //
+      // Match:   (op - 1) < op2
+      // Replace: op1 <= op2
+      //
+      if(auto* subOp = dyn_cast<BinaryOperator>(lhs)) {
+        if((subOp->getOpcode() == BO_Sub) and isOne(subOp->getRHS())) {
+          binOp->setOpcode(BO_LE);
+          ast->replaceExprWith(binOp->getLHS(), subOp->getRHS());
+          changed |= true;
         }
       }
       break;
     default:
       break;
     }
-    // TODO: Can merge a unary minus or negative number on the RHS
-    // of an addition or subtraction
 
-    return binOp;
+    return changed;
   }
 
-  Expr* process(UnaryOperator* unOp) {
+  bool process(UnaryOperator* unOp) {
+    bool changed = false;
+
     switch(unOp->getOpcode()) {
     case UO_Deref:
-      // Cancel out consecutive occurences of * and &
       if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr()))
+        //
+        // Match:   *&op
+        // Replace: op
+        //
         if(subOp->getOpcode() == UO_AddrOf)
-          return subOp->getSubExpr();
+          changed |= ast->replaceExprWith(unOp, subOp->getSubExpr());
       break;
     case UO_LNot:
-      // Convert relational operators of the form
-      //
-      // !(a <rel> b)
-      //
-      // to
-      //
-      // (a <inv-rel> b)
-      //
-      if(auto* binOp = dyn_cast<BinaryOperator>(unOp->getSubExpr())) {
+      if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr())) {
+        //
+        // Match:   !!op
+        // Replace: op
+        //
+        if(subOp->getOpcode() == UO_LNot)
+          changed |= ast->replaceExprWith(unOp, subOp->getSubExpr());
+      } else if(auto* binOp = dyn_cast<BinaryOperator>(unOp->getSubExpr())) {
+        //
+        // Match:   !(a <rel> b)
+        // Replace: (a <inv-rel> b)
+        //
         switch(binOp->getOpcode()) {
         case BO_EQ:
           binOp->setOpcode(BO_NE);
-          return binOp;
+          changed |= true;
         case BO_NE:
           binOp->setOpcode(BO_EQ);
-          return binOp;
+          changed |= true;
         case BO_GT:
           binOp->setOpcode(BO_LE);
-          return binOp;
+          changed |= true;
         case BO_GE:
           binOp->setOpcode(BO_LT);
-          return binOp;
+          changed |= true;
         case BO_LT:
           binOp->setOpcode(BO_GE);
-          return binOp;
+          changed |= true;
         case BO_LE:
           binOp->setOpcode(BO_GT);
-          return binOp;
+          changed |= true;
         default:
           break;
         }
-      } else if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr())) {
-        if(subOp->getOpcode() == UO_LNot)
-          return subOp->getSubExpr();
       }
       break;
     default:
       break;
     }
 
-    return unOp;
+    return changed;
   }
 
 public:
-  ASTSimplifyOperatorsPass(CishContext& context) : ASTExprPass(context) {
+  ASTSimplifyOperatorsPass(CishContext& context) : ASTFunctionPass(context) {
     ;
   }
 
@@ -182,9 +180,13 @@ public:
   virtual ~ASTSimplifyOperatorsPass() = default;
 
   virtual llvm::StringRef getPassName() const override {
+    return "cish-operators";
+  }
+
+  virtual llvm::StringRef getPassLongName() const override {
     return "Cish AST Simplify Operators";
   }
-}; // namespace cish
+};
 
 } // namespace cish
 

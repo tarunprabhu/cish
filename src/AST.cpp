@@ -31,6 +31,8 @@ using namespace clang;
 
 namespace cish {
 
+static const Set<Expr*> emptyEqvExprs;
+
 class FindVarsAddressTaken : public RecursiveASTVisitor<FindVarsAddressTaken> {
 protected:
   Set<VarDecl*>& vars;
@@ -51,8 +53,10 @@ public:
 
 AST::AST(CishContext& cishContext, FunctionDecl* decl)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      decl(decl), defUseCalculator(createASTDefUseCalculatorPass(cishContext)),
-      builder(astContext), dt(new DominatorTree()) {
+      builder(cishContext.getASTBuilder()), decl(decl),
+      defUseCalculator(createASTDefUseCalculatorPass(cishContext)),
+      exprNumberingCalculator(createASTExprNumberingPass(cishContext)),
+      dt(new DominatorTree()) {
   for(ParmVarDecl* param : decl->parameters()) {
     defMap[param].clear();
     useMap[param].clear();
@@ -67,6 +71,11 @@ AST::AST(CishContext& cishContext, FunctionDecl* decl)
       tlDefMap[var].clear();
     }
   }
+}
+
+AST::~AST() {
+  delete defUseCalculator;
+  delete exprNumberingCalculator;
 }
 
 unsigned AST::getDepth(Stmt* stmt) const {
@@ -106,6 +115,10 @@ const DominatorTree& AST::getDominatorTree() const {
   return *dt;
 }
 
+Stmt* AST::getParent(clang::Stmt* stmt) const {
+  return stmtParents->getParent(stmt);
+}
+
 CFG* AST::getCFG() const {
   return cfg.get();
 }
@@ -118,13 +131,10 @@ const CFG::BuildOptions& AST::getCFGBuildOpts() const {
   return cfgBuildOpts;
 }
 
-void AST::addChild(Stmt* stmt,
-                   CompoundStmt* body,
-                   Stmt* construct,
-                   unsigned depth) {
+void AST::addChild(Stmt* stmt, CompoundStmt* body, Stmt* ctrl, unsigned depth) {
   subStmts[stmt];
-  stmtInfo.emplace(stmt, StmtInfo(body, construct, depth));
-  subStmts[construct].insert(stmt);
+  stmtInfo.emplace(stmt, StmtInfo(body, ctrl, depth));
+  subStmts[ctrl].insert(stmt);
 }
 
 void AST::associateStmts(CompoundStmt* body, Stmt* ctrl, unsigned depth) {
@@ -156,20 +166,41 @@ void AST::associateStmts(CompoundStmt* body, Stmt* ctrl, unsigned depth) {
   }
 }
 
+AST::ExprNum AST::addExpr(Expr* expr) {
+  AST::ExprNum exprId = exprNums.size() + 1;
+  eqvExprs[exprId].insert(expr);
+
+  return exprNums[expr] = exprId;
+}
+
+bool AST::hasExprNum(Expr* expr) const {
+  return exprNums.contains(expr);
+}
+
+AST::ExprNum AST::getExprNum(Expr* expr) const {
+  return exprNums.at(expr);
+}
+
+const Set<Expr*>& AST::getEqvExprs(Expr* expr) const {
+  if(not eqvExprs.contains(exprNums.at(expr)))
+    return emptyEqvExprs;
+  return eqvExprs.at(exprNums.at(expr));
+}
+
 void AST::addDef(VarDecl* var, Stmt* user) {
   defMap[var].insert(user);
 }
 
-void AST::addUse(Expr* expr, Stmt* user) {
-  if(not isa<DeclRefExpr>(expr))
-    for(VarDecl* var : getVarsInStmt(expr))
-      useMap[var].insert(user);
+void AST::addUse(VarDecl* var, Stmt* user) {
+  useMap[var].insert(user);
 }
 
-void AST::addTopLevelDef(Stmt* stmt, Stmt* user) {
-  if(auto* ref = dyn_cast<DeclRefExpr>(stmt))
-    if(auto* var = dyn_cast<VarDecl>(ref->getFoundDecl()))
-      tlDefMap[var].insert(user);
+void AST::addExprUse(Expr* expr, Stmt* user) {
+  exprUseMap[expr].insert(user);
+}
+
+void AST::addTopLevelDef(VarDecl* var, Stmt* user) {
+  tlDefMap[var].insert(user);
 }
 
 void AST::addTopLevelUse(Stmt* stmt, Stmt* user) {
@@ -187,190 +218,247 @@ void AST::removeDef(VarDecl* var, Stmt* stmt) {
   tlDefMap.at(var).erase(stmt);
 }
 
-bool AST::replace(Expr* expr, VarDecl* var) {
-  if(auto* declRefExpr = dyn_cast<DeclRefExpr>(expr))
-    return declRefExpr->getFoundDecl() == var;
-  return false;
-}
-
-bool AST::replace(BinaryOperator* binOp, VarDecl* var, Expr* repl) {
+bool AST::replace(UnaryOperator* unOp, Expr* repl) {
   bool changed = false;
 
-  if(replace(binOp->getLHS(), var)) {
+  changed |= (unOp->getSubExpr() != repl);
+  unOp->setSubExpr(repl);
+
+  return changed;
+}
+
+bool AST::replace(BinaryOperator* binOp, Expr* repl, bool lhs) {
+  bool changed = false;
+
+  if(lhs) {
+    changed |= (binOp->getLHS() != repl);
     binOp->setLHS(repl);
-    changed |= true;
-  }
-
-  if(replace(binOp->getRHS(), var)) {
+  } else {
+    changed |= (binOp->getRHS() != repl);
+    llvm::errs() << "Replacing " << toString(binOp->getRHS(), astContext)
+                 << " => " << toString(repl, astContext) << " in "
+                 << toString(binOp, astContext) << "\n";
     binOp->setRHS(repl);
-    changed |= true;
   }
 
   return changed;
 }
 
-bool AST::replace(UnaryOperator* unOp, VarDecl* var, Expr* repl) {
+bool AST::replace(ArraySubscriptExpr* arrExpr, Expr* repl, bool base) {
   bool changed = false;
 
-  if((changed |= replace(unOp->getSubExpr(), var)))
-    unOp->setSubExpr(repl);
-
-  return changed;
-}
-
-bool AST::replace(ConditionalOperator* condOp, VarDecl* var, Expr* repl) {
-  fatal(error() << "Not implemented\n");
-}
-
-bool AST::replace(ArraySubscriptExpr* arrExpr, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if(replace(arrExpr->getBase(), var)) {
+  if(base) {
+    changed |= (arrExpr->getBase() != repl);
     arrExpr->setLHS(repl);
-    changed |= true;
-  }
-
-  if(replace(arrExpr->getIdx(), var)) {
+  } else {
+    changed |= (arrExpr->getIdx() != repl);
     arrExpr->setRHS(repl);
-    changed |= true;
   }
 
   return changed;
 }
 
-bool AST::replace(MemberExpr* memberExpr, VarDecl* var, Expr* repl) {
-  return false;
-}
-
-bool AST::replace(CallExpr* callExpr, VarDecl* var, Expr* repl) {
+bool AST::replace(CallExpr* callExpr, Expr* repl, long arg) {
   bool changed = false;
 
-  for(unsigned i = 0; i < callExpr->getNumArgs(); i++) {
-    if(replace(callExpr->getArg(i), var)) {
-      callExpr->setArg(i, repl);
-      changed |= true;
+  if(arg < 0) {
+    changed |= (callExpr->getCallee() != repl);
+    callExpr->setCallee(repl);
+  } else {
+    changed |= (callExpr->getArg(arg) != repl);
+    callExpr->setArg(arg, repl);
+  }
+
+  return changed;
+}
+
+bool AST::replace(CStyleCastExpr* castExpr, Expr* repl) {
+  bool changed = false;
+
+  changed |= (castExpr->getSubExpr() != repl);
+  castExpr->setSubExpr(repl);
+
+  return changed;
+}
+
+bool AST::replace(MemberExpr* memberExpr, Expr* repl) {
+  bool changed = false;
+
+  changed |= (memberExpr->getBase() != repl);
+  memberExpr->setBase(repl);
+
+  return changed;
+}
+
+bool AST::replace(ReturnStmt* retStmt, Expr* repl) {
+  bool changed = false;
+
+  changed |= (retStmt->getRetValue() != repl);
+  retStmt->setRetValue(repl);
+
+  return changed;
+}
+
+bool AST::replace(IfStmt* ifStmt, Expr* repl) {
+  bool changed = false;
+
+  changed |= (ifStmt->getCond() != repl);
+  ifStmt->setCond(repl);
+
+  return changed;
+}
+
+bool AST::replace(SwitchStmt* switchStmt, Expr* repl) {
+  bool changed = false;
+
+  changed |= (switchStmt->getCond() != repl);
+  switchStmt->setCond(repl);
+
+  return changed;
+}
+
+bool AST::replace(DoStmt* doStmt, Expr* repl) {
+  bool changed = false;
+
+  changed |= (doStmt->getCond() != repl);
+  doStmt->setCond(repl);
+
+  return changed;
+}
+
+bool AST::replace(ForStmt* forStmt, Expr* repl, bool cond) {
+  bool changed = false;
+
+  if(cond) {
+    changed |= (forStmt->getCond() != repl);
+    forStmt->setCond(repl);
+  } else {
+    changed |= (forStmt->getInc() != repl);
+    forStmt->setInc(repl);
+  }
+
+  return changed;
+}
+
+bool AST::replace(WhileStmt* whileStmt, Expr* repl) {
+  bool changed = false;
+
+  changed |= (whileStmt->getCond() != repl);
+  whileStmt->setCond(repl);
+
+  return changed;
+}
+
+bool AST::replace(Stmt* parent, Expr* expr, Expr* repl) {
+  bool changed = false;
+
+  if(auto* unOp = dyn_cast<UnaryOperator>(parent)) {
+    if(unOp->getSubExpr() == expr)
+      changed |= replace(unOp, repl);
+  } else if(auto* binOp = dyn_cast<BinaryOperator>(parent)) {
+    if(binOp->getLHS() == expr)
+      changed |= replace(binOp, repl, true);
+    else if(binOp->getRHS() == expr)
+      changed |= replace(binOp, repl, false);
+  } else if(auto* condOp = dyn_cast<ConditionalOperator>(parent)) {
+    Expr* newCond = condOp->getCond();
+    if(newCond == expr)
+      newCond = repl;
+    Expr* newTrue = condOp->getTrueExpr();
+    if(newTrue == expr)
+      newTrue = repl;
+    Expr* newFalse = condOp->getFalseExpr();
+    if(newFalse == expr)
+      newFalse = repl;
+    if((newCond == repl) or (newTrue == repl) or (newFalse == repl))
+      changed |= replace(getParent(condOp),
+                         condOp,
+                         builder.createConditionalOperator(
+                             newCond, newTrue, newFalse, newTrue->getType()));
+  } else if(auto* arrExpr = dyn_cast<ArraySubscriptExpr>(parent)) {
+    if(arrExpr->getBase() == expr)
+      changed |= replace(arrExpr, repl, true);
+    else if(arrExpr->getIdx() == expr)
+      changed |= replace(arrExpr, repl, false);
+  } else if(auto* callExpr = dyn_cast<CallExpr>(parent)) {
+    if(callExpr->getCallee() == expr)
+      changed |= replace(callExpr, repl, -1);
+    for(unsigned i = 0; i < callExpr->getNumArgs(); i++)
+      if(callExpr->getArg(i) == expr)
+        changed |= replace(callExpr, repl, i);
+  } else if(auto* castExpr = dyn_cast<CStyleCastExpr>(parent)) {
+    if(castExpr->getSubExpr() == expr)
+      changed |= replace(castExpr, repl);
+  } else if(auto* memberExpr = dyn_cast<MemberExpr>(parent)) {
+    if(memberExpr->getBase() == expr)
+      changed |= replace(memberExpr, repl);
+  } else if(auto* retStmt = dyn_cast<ReturnStmt>(parent)) {
+    if(retStmt->getRetValue() == expr)
+      changed |= replace(retStmt, repl);
+  } else if(auto* ifStmt = dyn_cast<IfStmt>(parent)) {
+    if(ifStmt->getCond() == expr)
+      changed |= replace(ifStmt, repl);
+  } else if(auto* switchStmt = dyn_cast<SwitchStmt>(parent)) {
+    if(switchStmt->getCond() == expr)
+      changed |= replace(switchStmt, repl);
+  } else if(auto* doStmt = dyn_cast<DoStmt>(parent)) {
+    if(doStmt->getCond() == expr)
+      changed |= replace(doStmt, repl);
+  } else if(auto* forStmt = dyn_cast<ForStmt>(parent)) {
+    for(BinaryOperator* binOp : getForInits(forStmt))
+      changed |= replace((Stmt*)binOp, expr, repl);
+    if(forStmt->getCond() == expr)
+      changed |= replace(forStmt, repl, true);
+    if(forStmt->getInc() == expr)
+      changed |= replace(forStmt, repl, false);
+  } else if(auto* whileStmt = dyn_cast<WhileStmt>(parent)) {
+    if(whileStmt->getCond() == expr)
+      changed |= replace(whileStmt, repl);
+  } else if(isa<DeclRefExpr>(expr)) {
+    ;
+  } else {
+    fatal(error() << "Unexpected use for expression being replaced: "
+                  << parent->getStmtClassName());
+  }
+
+  return changed;
+}
+
+bool AST::replaceEqvUsesWith(Expr* expr, Expr* repl) {
+  bool changed = false;
+
+  if(isa<DeclRefExpr>(expr))
+    fatal(error() << "Cannot replace a DeclRefExpr. Replace the underlying "
+                     "ValueDecl instead");
+
+  Set<VarDecl*> vars = getVarsInStmt(expr);
+  for(Expr* e : getEqvExprs(expr)) {
+    if(e != expr) {
+      changed |= replace(getParent(e), e, repl);
     }
   }
-  if(replace(callExpr->getCallee(), var)) {
-    callExpr->setCallee(repl);
-    changed |= true;
-  }
 
   return changed;
-}
-
-bool AST::replace(CastExpr* castExpr, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if((changed |= replace(castExpr->getSubExpr(), var)))
-    castExpr->setSubExpr(repl);
-
-  return changed;
-}
-
-bool AST::replace(ReturnStmt* retStmt, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if(Expr* retValue = retStmt->getRetValue())
-    if((changed |= replace(retValue, var)))
-      retStmt->setRetValue(repl);
-
-  return changed;
-}
-
-bool AST::replace(IfStmt* ifStmt, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if((changed |= replace(ifStmt->getCond(), var)))
-    ifStmt->setCond(repl);
-
-  return changed;
-}
-
-bool AST::replace(DoStmt* doStmt, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if((changed |= replace(doStmt->getCond(), var)))
-    doStmt->setCond(repl);
-
-  return changed;
-}
-
-bool AST::replace(ForStmt* forStmt, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if((changed |= replace(forStmt->getCond(), var)))
-    forStmt->setCond(repl);
-
-  return changed;
-}
-
-bool AST::replace(WhileStmt* whileStmt, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if((changed |= replace(whileStmt->getCond(), var)))
-    whileStmt->setCond(repl);
-
-  return changed;
-}
-
-bool AST::replace(SwitchStmt* switchStmt, VarDecl* var, Expr* repl) {
-  bool changed = false;
-
-  if((changed |= replace(switchStmt->getCond(), var)))
-    switchStmt->setCond(repl);
-
-  return changed;
-}
-
-bool AST::replace(Stmt* stmt, VarDecl* var, Expr* repl) {
-  if(auto* binOp = dyn_cast<BinaryOperator>(stmt))
-    return replace(binOp, var, repl);
-  else if(auto* unOp = dyn_cast<UnaryOperator>(stmt))
-    return replace(unOp, var, repl);
-  else if(auto* condOp = dyn_cast<ConditionalOperator>(stmt))
-    return replace(condOp, var, repl);
-  else if(auto* arrExpr = dyn_cast<ArraySubscriptExpr>(stmt))
-    return replace(arrExpr, var, repl);
-  else if(auto* memberExpr = dyn_cast<MemberExpr>(stmt))
-    return replace(memberExpr, var, repl);
-  else if(auto* callExpr = dyn_cast<CallExpr>(stmt))
-    return replace(callExpr, var, repl);
-  else if(auto* castExpr = dyn_cast<CastExpr>(stmt))
-    return replace(castExpr, var, repl);
-  else if(auto* retStmt = dyn_cast<ReturnStmt>(stmt))
-    return replace(retStmt, var, repl);
-  else if(auto* ifStmt = dyn_cast<IfStmt>(stmt))
-    return replace(ifStmt, var, repl);
-  else if(auto* doStmt = dyn_cast<DoStmt>(stmt))
-    return replace(doStmt, var, repl);
-  else if(auto* forStmt = dyn_cast<ForStmt>(stmt))
-    return replace(forStmt, var, repl);
-  else if(auto* whileStmt = dyn_cast<WhileStmt>(stmt))
-    return replace(whileStmt, var, repl);
-  else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt))
-    return replace(switchStmt, var, repl);
-  else if(isa<CXXBoolLiteralExpr>(stmt) or isa<CharacterLiteral>(stmt)
-          or isa<IntegerLiteral>(stmt) or isa<FloatingLiteral>(stmt)
-          or isa<StringLiteral>(stmt) or isa<CXXNullPtrLiteralExpr>(stmt)
-          or isa<LabelStmt>(stmt) or isa<GotoStmt>(stmt) or isa<BreakStmt>(stmt)
-          or isa<ContinueStmt>(stmt) or isa<SwitchCase>(stmt))
-    return false;
-  else
-    fatal(error() << "Unknown statement to replace in: "
-                  << stmt->getStmtClassName());
-
-  return false;
 }
 
 bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
   bool changed = false;
 
-  Vector<Stmt*> uses(useMap.at(var).begin(), useMap.at(var).end());
-  for(Stmt* use : uses) {
-    changed |= replace(use, var, repl);
+  // The DeclRef's are uniqued, so this will always return the same value for
+  // a given VarDecl
+  DeclRefExpr* ref = builder.createDeclRefExpr(var);
+  for(Stmt* use : getUses(var)) {
+    changed |= replace(use, ref, repl);
     removeUse(var, use);
   }
+
+  return changed;
+}
+
+bool AST::replaceExprWith(Expr* expr, Expr* repl) {
+  bool changed = false;
+
+  changed |= replace(getParent(expr), expr, repl);
 
   return changed;
 }
@@ -378,7 +466,7 @@ bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
 bool AST::replaceStmtWith(Stmt* old, Stmt* repl) {
   bool changed = false;
 
-  CompoundStmt* body = cast<CompoundStmt>(stmtParents->getParent(old));
+  CompoundStmt* body = cast<CompoundStmt>(getParent(old));
   Stmt** stmts = body->body_begin();
   for(unsigned i = 0; i < body->size(); i++) {
     if(stmts[i] == old) {
@@ -393,7 +481,7 @@ bool AST::replaceStmtWith(Stmt* old, Stmt* repl) {
 bool AST::erase(Stmt* key) {
   bool changed = false;
 
-  CompoundStmt* body = cast<CompoundStmt>(stmtParents->getParent(key));
+  CompoundStmt* body = cast<CompoundStmt>(getParent(key));
   Stmt** stmts = body->body_begin();
   for(unsigned i = 0; i < body->size(); i++) {
     if(stmts[i] == key) {
@@ -462,6 +550,10 @@ bool AST::hasAddressTaken(VarDecl* var) const {
   return addrTaken.contains(var);
 }
 
+Set<Stmt*> AST::getDefs(VarDecl* var) {
+  return Set<Stmt*>(defMap.at(var).begin(), defMap.at(var).end());
+}
+
 unsigned AST::getNumDefs(VarDecl* var) const {
   return defMap.at(var).size();
 }
@@ -508,6 +600,10 @@ Vector<Stmt*> AST::getTopLevelDefs(VarDecl* var) const {
 
 Set<Stmt*> AST::getTopLevelDefsSet(VarDecl* var) const {
   return Set<Stmt*>(tldefs(var).begin(), tldefs(var).end());
+}
+
+Set<Stmt*> AST::getUses(VarDecl* var) {
+  return Set<Stmt*>(useMap.at(var).begin(), useMap.at(var).end());
 }
 
 bool AST::isUsed(VarDecl* var) const {
@@ -571,61 +667,26 @@ void AST::recalculateCFG() {
 
 void AST::recalculateDefUse() {
   addrTaken.clear();
+  for(VarDecl* var : vars()) {
+    useMap[var].clear();
+    tlUseMap[var].clear();
+    defMap[var].clear();
+    tlDefMap[var].clear();
+  }
 
   // Compute statement-level use-def information
   // This will associate a variable with the statement in which it is used
   // directly. The statement may be a subexpression
   defUseCalculator->runOnFunction(decl);
 
-  // Compute use-def information with respect to the top-level statements
-  for(Stmt* stmt : tlstmts()) {
-    if(auto* ifStmt = dyn_cast<IfStmt>(stmt)) {
-      addTopLevelUse(ifStmt->getCond(), ifStmt);
-    } else if(auto* doStmt = dyn_cast<DoStmt>(stmt)) {
-      addTopLevelUse(doStmt->getCond(), doStmt);
-    } else if(auto* forStmt = dyn_cast<ForStmt>(stmt)) {
-      for(Stmt* subStmt : Vector<Stmt*>{
-              forStmt->getInit(), forStmt->getCond(), forStmt->getInc()})
-        if(subStmt)
-          addTopLevelUse(subStmt, forStmt);
-    } else if(auto* whileStmt = dyn_cast<WhileStmt>(stmt)) {
-      addTopLevelUse(whileStmt->getCond(), whileStmt);
-    } else if(auto* switchStmt = dyn_cast<SwitchStmt>(stmt)) {
-      addTopLevelUse(switchStmt->getCond(), switchStmt);
-    } else if(auto* switchCase = dyn_cast<SwitchCase>(stmt)) {
-      ;
-    } else if(auto* binOp = dyn_cast<BinaryOperator>(stmt)) {
-      switch(binOp->getOpcode()) {
-      case BO_AddAssign:
-      case BO_SubAssign:
-      case BO_MulAssign:
-      case BO_DivAssign:
-      case BO_RemAssign:
-      case BO_ShlAssign:
-      case BO_ShrAssign:
-      case BO_AndAssign:
-      case BO_OrAssign:
-      case BO_XorAssign:
-        addTopLevelUse(binOp->getLHS(), binOp);
-        // fall-through
-      case BO_Assign:
-        addTopLevelDef(binOp->getLHS(), binOp);
-        addTopLevelUse(binOp->getRHS(), binOp);
-        break;
-      default:
-        addTopLevelUse(binOp, binOp);
-        break;
-      }
-    } else {
-      addTopLevelUse(stmt, stmt);
-    }
-  }
-
   // Find variables who address is taken. These can never be optimized safely
   FindVarsAddressTaken(addrTaken).TraverseDecl(decl);
 }
 
 void AST::recalculateStructure() {
+  eqvExprs.clear();
+  exprNums.clear();
+
   stmtInfo.clear();
   ctrls.clear();
   loopStmts.clear();
@@ -674,6 +735,7 @@ void AST::recalculate(bool defUseOnly) {
     recalculateStructure();
     recalculateCFG();
   }
+  exprNumberingCalculator->runOnFunction(decl);
   recalculateDefUse();
 }
 

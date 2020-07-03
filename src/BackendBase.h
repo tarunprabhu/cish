@@ -20,7 +20,6 @@
 #ifndef CISH_BACKEND_BASE_H
 #define CISH_BACKEND_BASE_H
 
-#include "ASTBuilder.h"
 #include "Map.h"
 #include "Stack.h"
 #include "Vector.h"
@@ -29,23 +28,21 @@
 
 namespace cish {
 
+class ASTBuilder;
 class CishContext;
+class NameGenerator;
 
 class BackendBase {
 protected:
   CishContext& cishContext;
+  NameGenerator& names;
   clang::ASTContext& astContext;
-
-  ASTBuilder builder;
+  ASTBuilder& builder;
 
   // The statements comprising the body of the current function being
   // converted
   Stack<Vector<clang::Stmt*>> stmts;
   Map<std::string, clang::LabelDecl*> labels;
-
-private:
-  std::string varPrefix;
-  uint64_t varSuffix;
 
 protected:
   BackendBase(CishContext& context);

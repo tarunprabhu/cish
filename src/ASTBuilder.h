@@ -20,6 +20,7 @@
 #ifndef CISH_AST_BUILDER_H
 #define CISH_AST_BUILDER_H
 
+#include "Map.h"
 #include "Vector.h"
 
 #include <clang/AST/ExprCXX.h>
@@ -32,11 +33,33 @@ protected:
   clang::ASTContext& astContext;
   clang::FullSourceLoc invLoc;
 
+  Map<bool, clang::CXXBoolLiteralExpr*> i1Lits;
+  Map<char, clang::IntegerLiteral*> i8Lits;
+  Map<unsigned char, clang::IntegerLiteral*> u8Lits;
+  Map<short, clang::IntegerLiteral*> i16Lits;
+  Map<unsigned short, clang::IntegerLiteral*> u16Lits;
+  Map<int, clang::IntegerLiteral*> i32Lits;
+  Map<unsigned int, clang::IntegerLiteral*> u32Lits;
+  Map<long, clang::IntegerLiteral*> i64Lits;
+  Map<unsigned long, clang::IntegerLiteral*> u64Lits;
+  Map<llvm::APFloat,
+      clang::FloatingLiteral*,
+      std::function<bool(const llvm::APFloat&, const llvm::APFloat&)>>
+      fLits;
+  Map<std::string, clang::StringLiteral*> sLits;
+  Map<clang::LabelDecl*, clang::LabelStmt*> labels;
+  Map<clang::LabelDecl*, clang::GotoStmt*> gotos;
+  Map<clang::ValueDecl*, clang::DeclRefExpr*> declRefs;
+
 public:
   ASTBuilder(clang::ASTContext& astContext);
   ASTBuilder(const ASTBuilder&) = delete;
   ASTBuilder(ASTBuilder&&) = delete;
 
+  void beginFunction();
+
+  clang::DeclarationNameInfo getDeclarationNameInfo(const std::string& name);
+  clang::IdentifierInfo& getIdentifierInfo(const std::string& name);
   clang::DeclarationName createDeclName(const std::string& name);
 
   clang::RecordDecl* createStruct(const std::string& name);
@@ -96,8 +119,11 @@ public:
   clang::IntegerLiteral* createIntLiteral(const llvm::APInt& i,
                                           clang::QualType type);
   clang::IntegerLiteral* createIntLiteral(short i);
+  clang::IntegerLiteral* createIntLiteral(unsigned short i);
   clang::IntegerLiteral* createIntLiteral(int i);
+  clang::IntegerLiteral* createIntLiteral(unsigned int i);
   clang::IntegerLiteral* createIntLiteral(long i);
+  clang::IntegerLiteral* createIntLiteral(unsigned long i);
   clang::FloatingLiteral* createFloatLiteral(const llvm::APFloat& f,
                                              clang::QualType type);
   clang::FloatingLiteral* createFloatLiteral(float f);

@@ -38,6 +38,7 @@ namespace cish {
 
 class ASTPass;
 class ASTDefUseCalculatorPass;
+class ASTExprNumberingPass;
 class CishContext;
 
 // Single class that keeps track of the AST. Any modifications to the AST
@@ -56,14 +57,17 @@ protected:
     }
   };
 
+  using ExprNum = int64_t;
+
 protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
+  ASTBuilder& builder;
   clang::FunctionDecl* decl;
 
 private:
   ASTPass* defUseCalculator;
-  ASTBuilder builder;
+  ASTPass* exprNumberingCalculator;
 
 protected:
   clang::CFG::BuildOptions cfgBuildOpts;
@@ -71,6 +75,14 @@ protected:
   std::unique_ptr<clang::CFG> cfg;
   std::unique_ptr<clang::CFGStmtMap> cfgStmtMap;
   std::unique_ptr<clang::DominatorTree> dt;
+
+  // Clang does not unique anything because that is impossible to do in order
+  // to correctly associate souce information. But that makes a lot of the
+  // AST transformations a little more difficult. But it may not be safe to do
+  // uniquing ourselves because it may break something in Clang. Instead, just
+  // maintain a map of equivalent expressions instead
+  Map<ExprNum, Set<clang::Expr*>> eqvExprs;
+  Map<clang::Expr*, ExprNum> exprNums;
 
   // The loops in the function because those are usually "interesting" and
   // therefore worthy of keeping separately
@@ -101,6 +113,9 @@ protected:
 
   // The uses are the nearest Expr containing the variable directly.
   Map<clang::VarDecl*, Set<clang::Stmt*>> useMap;
+
+  // These are uses at the expression level. Comes in handy when replacing
+  Map<clang::Expr*, Set<clang::Stmt*>> exprUseMap;
 
   // These are the top-level uses. The top-level statements are those that
   // are either a control structure or a statement terminated by a semicolon
@@ -143,6 +158,10 @@ public:
   using tldef_range = llvm::iterator_range<tldef_iterator>;
 
 protected:
+  ExprNum addExpr(clang::Expr* expr);
+  ExprNum getExprNum(clang::Expr* expr) const;
+  bool hasExprNum(clang::Expr* expr) const;
+
   void addChild(clang::Stmt* stmt,
                 clang::CompoundStmt* body,
                 clang::Stmt* construct,
@@ -153,39 +172,28 @@ protected:
                       unsigned stmtDepth);
 
   void addDef(clang::VarDecl* var, clang::Stmt* user);
-  void addUse(clang::Expr* expr, clang::Stmt* user);
-  void addTopLevelDef(clang::Stmt* stmt, clang::Stmt* user);
+  void addUse(clang::VarDecl* var, clang::Stmt* user);
+  void addExprUse(clang::Expr* expr, clang::Stmt* user);
+  void addTopLevelDef(clang::VarDecl* var, clang::Stmt* user);
   void addTopLevelUse(clang::Stmt* stmt, clang::Stmt* user);
 
-  bool replace(clang::Expr* expr, clang::VarDecl* var);
+  Set<clang::Stmt*> getUses(clang::VarDecl* var);
+  Set<clang::Stmt*> getDefs(clang::VarDecl* var);
+
+  bool replace(clang::UnaryOperator* unOp, clang::Expr* repl);
+  bool replace(clang::BinaryOperator* binOp, clang::Expr* repl, bool lhs);
   bool
-  replace(clang::BinaryOperator* binOp, clang::VarDecl* var, clang::Expr* repl);
-  bool
-  replace(clang::UnaryOperator* unOp, clang::VarDecl* var, clang::Expr* repl);
-  bool replace(clang::ConditionalOperator* condOp,
-               clang::VarDecl* var,
-               clang::Expr* repl);
-  bool replace(clang::ArraySubscriptExpr* arrExpr,
-               clang::VarDecl* var,
-               clang::Expr* repl);
-  bool replace(clang::MemberExpr* memberExpr,
-               clang::VarDecl* var,
-               clang::Expr* repl);
-  bool
-  replace(clang::CallExpr* callExpr, clang::VarDecl* var, clang::Expr* repl);
-  bool
-  replace(clang::CastExpr* castExpr, clang::VarDecl* var, clang::Expr* repl);
-  bool
-  replace(clang::ReturnStmt* retStmt, clang::VarDecl* var, clang::Expr* repl);
-  bool replace(clang::IfStmt* ifStmt, clang::VarDecl* var, clang::Expr* repl);
-  bool replace(clang::DoStmt* doStmt, clang::VarDecl* var, clang::Expr* repl);
-  bool replace(clang::ForStmt* forStmt, clang::VarDecl* var, clang::Expr* repl);
-  bool
-  replace(clang::WhileStmt* whileStmt, clang::VarDecl* var, clang::Expr* repl);
-  bool replace(clang::SwitchStmt* switchStmt,
-               clang::VarDecl* var,
-               clang::Expr* repl);
-  bool replace(clang::Stmt* dst, clang::VarDecl* var, clang::Expr* repl);
+  replace(clang::ArraySubscriptExpr* arrExpr, clang::Expr* repl, bool base);
+  bool replace(clang::CallExpr* callExpr, clang::Expr* repl, long arg);
+  bool replace(clang::CStyleCastExpr* castExpr, clang::Expr* repl);
+  bool replace(clang::MemberExpr* memberExpr, clang::Expr* repl);
+  bool replace(clang::ReturnStmt* retStmt, clang::Expr* repl);
+  bool replace(clang::IfStmt* ifStmt, clang::Expr* repl);
+  bool replace(clang::SwitchStmt* switchStmt, clang::Expr* repl);
+  bool replace(clang::DoStmt* doStmt, clang::Expr* repl);
+  bool replace(clang::ForStmt* forStmt, clang::Expr* repl, bool cond);
+  bool replace(clang::WhileStmt* whileStmt, clang::Expr* repl);
+  bool replace(clang::Stmt* parent, clang::Expr* expr, clang::Expr* repl);
 
   void recalculateCFG();
   void recalculateStructure();
@@ -195,26 +203,31 @@ public:
   AST(CishContext& cishContext, clang::FunctionDecl* decl);
   AST(const AST&) = delete;
   AST(AST&&) = delete;
+  ~AST();
 
   clang::FunctionDecl* getFunction() const;
 
   void removeUse(clang::VarDecl* var, clang::Stmt* stmt);
   void removeDef(clang::VarDecl* var, clang::Stmt* stmt);
   bool replaceAllUsesWith(clang::VarDecl* var, clang::Expr* expr);
+  bool replaceEqvUsesWith(clang::Expr* expr, clang::Expr* repl);
+  bool replaceExprWith(clang::Expr* expr, clang::Expr* repl);
   bool replaceStmtWith(clang::Stmt* old, clang::Stmt* repl);
   bool erase(clang::Stmt* stmt);
   bool erase(clang::VarDecl* var);
 
   const clang::DominatorTree& getDominatorTree() const;
+  clang::Stmt* getParent(clang::Stmt*) const;
   clang::CFG* getCFG() const;
   clang::CFGBlock* getCFGBlock(clang::Stmt* stmt) const;
   const clang::CFG::BuildOptions& getCFGBuildOpts() const;
 
   bool hasAddressTaken(clang::VarDecl* var) const;
 
+  const Set<clang::Expr*>& getEqvExprs(clang::Expr* expr) const;
+
   unsigned getNumUses(clang::VarDecl* var) const;
   unsigned getNumDefs(clang::VarDecl* var) const;
-
   Vector<clang::Stmt*> getTopLevelUses(clang::VarDecl* var) const;
   Set<clang::Stmt*> getTopLevelUsesSet(clang::VarDecl* var) const;
   Vector<clang::Stmt*> getTopLevelDefs(clang::VarDecl* var) const;
@@ -259,6 +272,7 @@ public:
 
 public:
   friend class ASTDefUseCalculatorPass;
+  friend class ASTExprNumberingPass;
 };
 
 } // namespace cish

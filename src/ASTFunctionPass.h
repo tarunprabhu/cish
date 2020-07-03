@@ -67,17 +67,20 @@ protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
   AST* ast;
+  ASTBuilder& builder;
   bool modifiesAST;
 
 protected:
   ASTPass(CishContext& cishContext, bool modifiesAST = false);
   ASTPass(const ASTPass&) = delete;
   ASTPass(ASTPass&&) = delete;
-  virtual ~ASTPass() = default;
-
-  virtual llvm::StringRef getPassName() const;
 
 public:
+  virtual ~ASTPass() = default;
+
+  virtual llvm::StringRef getPassName() const = 0;
+  virtual llvm::StringRef getPassLongName() const;
+
   virtual bool runOnFunction(clang::FunctionDecl* f) = 0;
 };
 
@@ -481,7 +484,7 @@ public:
     bool changed = false;
 
     ast = &cishContext.getAST(f);
-    message() << getPassName() << " (" << f->getName() << ")\n";
+    message() << getPassLongName() << "\n";
 
     changed |= process(f);
 

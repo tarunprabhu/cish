@@ -125,14 +125,14 @@ static cl::opt<std::string> optFilename(cl::Positional,
                                         cl::value_desc("filename"));
 
 // Single global object containing all the options
-const Options* g_opts;
+std::unique_ptr<Options> g_opts;
 
 bool isOpt(const cl::Option& opt) {
   return opt.Category == &cishOptionCategory;
 }
 
 void parseOpts() {
-  g_opts = new Options();
+  g_opts.reset(new Options());
 }
 
 const Options& opts() {

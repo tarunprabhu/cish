@@ -24,9 +24,15 @@
 
 #include <string>
 
-llvm::Pass* createCishASTPassesDriverPass();
-llvm::Pass* createCishASTWriterPass(const std::string& outFile);
-llvm::Pass* createCishFunctionConvertPass();
-llvm::Pass* createCishModuleConvertPass();
+namespace cish {
+
+class CishContext;
+
+} // namespace cish
+
+llvm::Pass* createCishASTPassesDriverPass(cish::CishContext& cishContext);
+llvm::Pass* createCishASTWriterPass(cish::CishContext& cishContext);
+llvm::Pass* createCishFunctionConvertPass(cish::CishContext& cishContext);
+llvm::Pass* createCishModuleConvertPass(cish::CishContext& cishContext);
 
 #endif // CISH_CISH_PASSES_H

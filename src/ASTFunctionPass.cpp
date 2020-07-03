@@ -24,11 +24,12 @@ namespace cish {
 
 ASTPass::ASTPass(CishContext& cishContext, bool modifiesAST)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      ast(nullptr), modifiesAST(modifiesAST) {
+      ast(nullptr), builder(cishContext.getASTBuilder()),
+      modifiesAST(modifiesAST) {
   ;
 }
 
-llvm::StringRef ASTPass::getPassName() const {
+llvm::StringRef ASTPass::getPassLongName() const {
   return "Cish AST Pass (Unnamed)";
 }
 

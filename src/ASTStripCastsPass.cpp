@@ -17,7 +17,8 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "ASTExprPass.h"
+#include "ASTFunctionPass.h"
+#include "ClangUtils.h"
 #include "Diagnostics.h"
 #include "Options.h"
 
@@ -29,39 +30,39 @@ using namespace clang;
 
 namespace cish {
 
-class ASTStripCastsPass : public ASTExprPass<ASTStripCastsPass> {
+class ASTStripCastsPass : public ASTFunctionPass<ASTStripCastsPass> {
 public:
-  Expr* process(CStyleCastExpr* castExpr) {
+  bool process(CStyleCastExpr* castExpr) {
     const Type* type = castExpr->getType().getTypePtr();
     Expr* expr = castExpr->getSubExpr();
     if(opts().has(StripCasts::Never)) {
-      return castExpr;
+      return false;
     } else if(opts().has(StripCasts::All)) {
-      return expr;
+      return ast->replaceExprWith(castExpr, expr);
     } else if(const auto* pty = dyn_cast<PointerType>(type)) {
       if(isa<FunctionProtoType>(pty->getPointeeType())) {
         if(opts().has(StripCasts::Function))
-          return expr;
+          return ast->replaceExprWith(castExpr, expr);
       } else if(isa<VectorType>(pty->getPointeeType())) {
         if(opts().has(StripCasts::Vector))
-          return expr;
+          return ast->replaceExprWith(castExpr, expr);
       } else {
         if(opts().has(StripCasts::Pointer))
-          return expr;
+          return ast->replaceExprWith(castExpr, expr);
       }
     } else if(type->isScalarType()) {
       if(opts().has(StripCasts::Scalar))
-        return expr;
+        return ast->replaceExprWith(castExpr, expr);
     } else if(isa<VectorType>(type)) {
       if(opts().has(StripCasts::Vector))
-        return expr;
+        return ast->replaceExprWith(castExpr, expr);
     }
 
-    return castExpr;
+    return false;
   }
 
 public:
-  ASTStripCastsPass(CishContext& cishContext) : ASTExprPass(cishContext) {
+  ASTStripCastsPass(CishContext& cishContext) : ASTFunctionPass(cishContext) {
     ;
   }
 
@@ -70,6 +71,10 @@ public:
   virtual ~ASTStripCastsPass() = default;
 
   virtual llvm::StringRef getPassName() const override {
+    return "cish-casts";
+  }
+
+  virtual llvm::StringRef getPassLongName() const override {
     return "AST Strip Casts Pass";
   }
 };

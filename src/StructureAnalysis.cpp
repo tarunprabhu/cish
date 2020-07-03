@@ -20,6 +20,7 @@
 #include "StructureAnalysis.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
+#include "Logging.h"
 #include "Map.h"
 #include "Options.h"
 #include "Structure.h"
@@ -134,27 +135,14 @@ const StructNode& StructureAnalysis::getStructured() const {
 }
 
 void StructureAnalysis::log(const std::string& tag) {
-  if(not opts().log)
-    return;
-
-  std::string buf;
-  raw_string_ostream fname(buf);
-  if(opts().logDir.length())
-    fname << opts().logDir << "/";
-  if(tag.length())
-    fname << func.getName() << "." << tag << ".dot";
-  else
-    fname << func.getName() << "." << reductions << ".dot";
-
-  std::error_code ec;
-  raw_fd_ostream fs(fname.str(), ec);
-  if(not ec) {
-
-    fs << "digraph {\n";
+  if(Logger log = tag.length()
+                      ? Logger::openFile(func.getName(), tag, "dot")
+                      : Logger::openFile(func.getName(), reductions, "dot")) {
+    log() << "digraph {\n";
 
     const StructNode& entry = root->getEntry();
-    fs << "  " << entry.getId() << " [label=\"" << entry.getKindName() << "("
-       << entry.getId() << ")\"]\n";
+    log() << "  " << entry.getId() << " [label=\"" << entry.getKindName() << "("
+          << entry.getId() << ")\"]\n";
     Set<const StructNode*> seen = {&root->getEntry()};
     List<const StructNode*> wl = {&root->getEntry()};
     do {
@@ -164,13 +152,13 @@ void StructureAnalysis::log(const std::string& tag) {
           const ConstantInt* kase = edge.first;
           const StructNode& child = *edge.second;
           uint64_t childId = child.getId();
-          fs << "  " << node->getId() << " -> " << childId << " [label="
-             << (kase ? std::to_string(kase->getLimitedValue())
-                      : std::string("default"))
-             << "]\n";
+          log() << "  " << node->getId() << " -> " << childId << " [label="
+                << (kase ? std::to_string(kase->getLimitedValue())
+                         : std::string("default"))
+                << "]\n";
           if(not seen.contains(&child)) {
-            fs << "  " << childId << " [label=\"" << child.getKindName() << "("
-               << childId << ")\"]\n";
+            log() << "  " << childId << " [label=\"" << child.getKindName()
+                  << "(" << childId << ")\"]\n";
             seen.insert(&child);
             next.push_back(&child);
           }
@@ -179,10 +167,7 @@ void StructureAnalysis::log(const std::string& tag) {
       wl = std::move(next);
     } while(wl.size());
 
-    fs << "}";
-    fs.close();
-  } else {
-    warning() << "Could not write to log file " << fname.str() << "\n";
+    log() << "}";
   }
 }
 

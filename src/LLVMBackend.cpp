@@ -18,6 +18,7 @@
 //  ---------------------------------------------------------------------------
 
 #include "LLVMBackend.h"
+#include "ASTBuilder.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
 #include "LLVMUtils.h"
@@ -79,8 +80,7 @@ void LLVMBackend::add(const AllocaInst& alloca, const std::string& name) {
   // variable will be used, we actually need the pointer to it to be
   // consistent
   add(alloca,
-      builder.createUnaryOperator(
-          ref, clang::UO_AddrOf, get(alloca.getType())));
+      builder.createUnaryOperator(ref, clang::UO_AddrOf, get(alloca.getType())));
 }
 
 UNIMPLEMENTED(AtomicCmpXchgInst)
@@ -134,9 +134,9 @@ void LLVMBackend::add(const BinaryOperator& inst) {
 
   add(inst,
       builder.createBinaryOperator(get<clang::Expr>(inst.getOperand(0)),
-                                   get<clang::Expr>(inst.getOperand(1)),
-                                   opc,
-                                   get(inst.getType())));
+                                 get<clang::Expr>(inst.getOperand(1)),
+                                 opc,
+                                 get(inst.getType())));
 }
 
 void LLVMBackend::add(const BranchInst& br) {
@@ -156,7 +156,7 @@ void LLVMBackend::add(const BranchInst& br) {
 void LLVMBackend::add(const CastInst& cst) {
   add(cst,
       builder.createCastExpr(get<clang::Expr>(cst.getOperand(0)),
-                             get(cst.getType())));
+                           get(cst.getType())));
 }
 
 UNIMPLEMENTED(InvokeInst)
@@ -221,9 +221,9 @@ void LLVMBackend::add(const CmpInst& cmp) {
 
   add(cmp,
       builder.createBinaryOperator(get<clang::Expr>(cmp.getOperand(0)),
-                                   get<clang::Expr>(cmp.getOperand(1)),
-                                   opc,
-                                   get(cmp.getType())));
+                                 get<clang::Expr>(cmp.getOperand(1)),
+                                 opc,
+                                 get(cmp.getType())));
 }
 
 UNIMPLEMENTED(ExtractElementInst)
@@ -237,11 +237,11 @@ LLVMBackend::replace(clang::Expr* src, clang::Expr* old, clang::Expr* repl) {
     return repl;
   else if(auto* castExpr = dyn_cast<clang::CStyleCastExpr>(src))
     return builder.createCastExpr(replace(castExpr->getSubExpr(), old, repl),
-                                  castExpr->getType());
+                                castExpr->getType());
   else if(auto* unOp = dyn_cast<clang::UnaryOperator>(src))
     return builder.createUnaryOperator(replace(unOp->getSubExpr(), old, repl),
-                                       unOp->getOpcode(),
-                                       unOp->getType());
+                                     unOp->getOpcode(),
+                                     unOp->getType());
   fatal(error() << "Unknown expression in which to replace: "
                 << src->getStmtClassName());
 }
@@ -336,8 +336,7 @@ void LLVMBackend::add(const GetElementPtrInst& gep) {
     add(gep, expr);
   else
     add(gep,
-        builder.createUnaryOperator(
-            expr, clang::UO_AddrOf, get(gep.getType())));
+        builder.createUnaryOperator(expr, clang::UO_AddrOf, get(gep.getType())));
 }
 
 UNIMPLEMENTED(IndirectBrInst)
@@ -348,8 +347,8 @@ UNIMPLEMENTED(LandingPadInst)
 void LLVMBackend::add(const LoadInst& load) {
   add(load,
       builder.createUnaryOperator(get<clang::Expr>(load.getPointerOperand()),
-                                  clang::UO_Deref,
-                                  get(load.getType())));
+                                clang::UO_Deref,
+                                get(load.getType())));
 }
 
 UNIMPLEMENTED(ResumeInst)
@@ -364,11 +363,10 @@ void LLVMBackend::add(const ReturnInst& ret) {
 
 void LLVMBackend::add(const SelectInst& select) {
   add(select,
-      builder.createConditionalOperator(
-          get<clang::Expr>(select.getCondition()),
-          get<clang::Expr>(select.getTrueValue()),
-          get<clang::Expr>(select.getFalseValue()),
-          get(select.getType())));
+      builder.createConditionalOperator(get<clang::Expr>(select.getCondition()),
+                                      get<clang::Expr>(select.getTrueValue()),
+                                      get<clang::Expr>(select.getFalseValue()),
+                                      get(select.getType())));
 }
 
 UNIMPLEMENTED(ShuffleVectorInst)
@@ -491,8 +489,7 @@ void LLVMBackend::add(StructType* sty, const Vector<std::string>& elements) {
 void LLVMBackend::add(const ConstantInt& cint) {
   Type* type = cint.getType();
   if(type->isIntegerTy(1))
-    add(cint,
-        builder.createBoolLiteral((bool)cint.getLimitedValue(), get(type)));
+    add(cint, builder.createBoolLiteral((bool)cint.getLimitedValue(), get(type)));
   else
     add(cint, builder.createIntLiteral(cint.getValue(), get(type)));
 }
@@ -510,7 +507,7 @@ void LLVMBackend::add(const ConstantAggregateZero& czero) {
   // build an init list with zeros in it.
   add(czero,
       builder.createIntLiteral(APInt(64, 0),
-                               get(Type::getInt64Ty(czero.getContext()))));
+                             get(Type::getInt64Ty(czero.getContext()))));
 }
 
 void LLVMBackend::add(const ConstantExpr& cexpr, const Value& val) {
@@ -548,8 +545,8 @@ void LLVMBackend::add(const ConstantArray& carray) {
 void LLVMBackend::add(const UndefValue& cundef) {
   add(cundef,
       builder.createVariable("__undefined__",
-                             get(cundef.getType()),
-                             astContext.getTranslationUnitDecl()));
+                           get(cundef.getType()),
+                           astContext.getTranslationUnitDecl()));
 }
 
 void LLVMBackend::add(IntegerType* ity) {

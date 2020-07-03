@@ -17,10 +17,15 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
+#include "AST.h"
 #include "CishContext.h"
 #include "CishPasses.h"
 #include "Diagnostics.h"
 #include "IRPasses.h"
+#include "IRSourceInfo.h"
+#include "LLVMBackend.h"
+#include "LLVMFrontend.h"
+#include "NameGenerator.h"
 #include "Options.h"
 #include "Set.h"
 
@@ -68,9 +73,9 @@ int main(int argc, char* argv[]) {
   initLLVM(argc, argv);
 
   llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> pModule
+  std::unique_ptr<llvm::Module> m
       = parseIRFile(cish::opts().fileIn, err, llvmContext);
-  if(!pModule) {
+  if(!m) {
     err.print(argv[0], llvm::errs());
     return 1;
   }
@@ -79,19 +84,21 @@ int main(int argc, char* argv[]) {
   // belongs. Compiling with -O0 results in clang adding an optnone attribute
   // to the IR. But we really need to do loop simplify so remove an optnone
   // attributes from functions if there are any
-  for(llvm::Function& f : pModule->functions())
+  for(llvm::Function& f : m->functions())
     if(f.hasFnAttribute(llvm::Attribute::AttrKind::OptimizeNone))
       f.removeFnAttr(llvm::Attribute::AttrKind::OptimizeNone);
+
+  cish::CishContext cishContext(*m);
 
   // Now that the clang AST Context has been set up, get down to business
   llvm::legacy::PassManager pm;
   pm.add(llvm::createDemoteRegisterToMemoryPass());
-  pm.add(createIRPreparePass());
-  pm.add(createCishModuleConvertPass());
-  pm.add(createCishFunctionConvertPass());
-  pm.add(createCishASTPassesDriverPass());
-  pm.add(createCishASTWriterPass(cish::opts().fileOut));
-  pm.run(*pModule);
+  pm.add(createIRPreparePass(cishContext));
+  pm.add(createCishModuleConvertPass(cishContext));
+  pm.add(createCishFunctionConvertPass(cishContext));
+  pm.add(createCishASTPassesDriverPass(cishContext));
+  pm.add(createCishASTWriterPass(cishContext));
+  pm.run(*m);
 
   llvm::llvm_shutdown();
 

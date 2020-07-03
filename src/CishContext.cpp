@@ -19,21 +19,23 @@
 
 #include "CishContext.h"
 #include "AST.h"
+#include "ASTBuilder.h"
 #include "Diagnostics.h"
 #include "IRSourceInfo.h"
 #include "LLVMBackend.h"
 #include "LLVMFrontend.h"
+#include "NameGenerator.h"
 
 using namespace llvm;
 
 namespace cish {
 
-CishContext::CishContext(const Module& m, const SourceInfo& si)
+CishContext::CishContext(const Module& m)
     : llvmContext(m.getContext()), fileMgr(fileOpts),
       diagIDs(new clang::DiagnosticIDs()),
       diagOpts(new clang::DiagnosticOptions()), diagEngine(diagIDs, diagOpts),
       srcMgr(diagEngine, fileMgr), targetOpts(new clang::TargetOptions()),
-      targetInfo() {
+      targetInfo(), nameGen(new NameGenerator(*this)), si(new SourceInfo(m)) {
   langOpts.CPlusPlus11 = true;
   langOpts.Bool = true;
 
@@ -45,8 +47,9 @@ CishContext::CishContext(const Module& m, const SourceInfo& si)
   astContext.reset(
       new clang::ASTContext(langOpts, srcMgr, *idents, sels, builtins));
   astContext->InitBuiltinTypes(*targetInfo);
+  builder.reset(new ASTBuilder(*astContext));
   be.reset(new LLVMBackend(*this));
-  fe.reset(new LLVMFrontend(*this, si));
+  fe.reset(new LLVMFrontend(*this));
 }
 
 AST& CishContext::addAST(clang::FunctionDecl* f) {
@@ -61,6 +64,10 @@ AST& CishContext::getAST(clang::FunctionDecl* f) {
 
 const AST& CishContext::getAST(clang::FunctionDecl* f) const {
   return *asts.at(f);
+}
+
+ASTBuilder& CishContext::getASTBuilder() {
+  return *builder;
 }
 
 LLVMContext& CishContext::getLLVMContext() const {
@@ -83,46 +90,16 @@ LLVMBackend& CishContext::getLLVMBackend() const {
   return *be;
 }
 
+NameGenerator& CishContext::getNameGenerator() const {
+  return *nameGen;
+}
+
+const SourceInfo& CishContext::getSourceInfo() const {
+  return *si;
+}
+
 CishContext::func_range CishContext::funcs() {
   return asts.keys();
 }
 
 } // namespace cish
-
-CishContextWrapperPass::CishContextWrapperPass()
-    : ModulePass(ID), context(nullptr) {
-  ;
-}
-
-StringRef CishContextWrapperPass::getPassName() const {
-  return "Cish Context Wrapper Pass";
-}
-
-void CishContextWrapperPass::getAnalysisUsage(AnalysisUsage& AU) const {
-  AU.addRequired<IRSourceInfoWrapperPass>();
-  AU.setPreservesAll();
-}
-
-cish::CishContext& CishContextWrapperPass::getCishContext() const {
-  return *context;
-}
-
-bool CishContextWrapperPass::runOnModule(Module& m) {
-  cish::message() << "Running " << getPassName() << "\n";
-
-  const cish::SourceInfo& si
-      = getAnalysis<IRSourceInfoWrapperPass>().getSourceInfo();
-
-  context.reset(new cish::CishContext(m, si));
-
-  return false;
-}
-
-char CishContextWrapperPass::ID = 0;
-
-static RegisterPass<CishContextWrapperPass>
-    X("cish-context-wrapper", "Cish Context Wrapper Pass", true, true);
-
-Pass* createCishContextWrapperPass() {
-  return new CishContextWrapperPass();
-}

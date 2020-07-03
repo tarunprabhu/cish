@@ -3,15 +3,17 @@ set(SOURCES
   AST.cpp
   ASTBuilder.cpp
   ASTConstantFoldingPass.cpp
+  ASTConvertLoopsPass.cpp
   ASTDeadCodeEliminationPass.cpp
   ASTDefUseCalculatorPass.cpp
+  ASTExprNumberingPass.cpp
+  ASTExprPropagationPass.cpp
   ASTFunctionPass.cpp
-  ASTPropagateExprsPass.cpp
   ASTRenameVarsPass.cpp
-  ASTSimplifyLoopsPass.cpp
   ASTSimplifyOperatorsPass.cpp
   ASTStreamer.cpp
   ASTStripCastsPass.cpp
+  ASTSubexprEliminationPass.cpp
   BackendBase.cpp
   CishContext.cpp
   CishASTPassesDriverPass.cpp
@@ -25,6 +27,8 @@ set(SOURCES
   LLVMUtils.cpp
   IRPreparePass.cpp
   IRSourceInfo.cpp
+  NameGenerator.cpp
+  Logging.cpp
   Options.cpp
   Structure.cpp
   StructureAnalysis.cpp)

@@ -36,7 +36,7 @@ class SourceInfo;
 
 class LLVMFrontend {
 protected:
-  CishContext& context;
+  CishContext& cishContext;
   const SourceInfo& si;
   LLVMBackend& be;
 
@@ -109,7 +109,7 @@ protected:
   void handle(llvm::VectorType* vty);
 
 public:
-  LLVMFrontend(CishContext& context, const SourceInfo& si);
+  LLVMFrontend(CishContext& context);
   LLVMFrontend() = delete;
   LLVMFrontend(const LLVMFrontend&) = delete;
   LLVMFrontend(LLVMFrontend&&) = delete;

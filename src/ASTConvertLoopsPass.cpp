@@ -34,7 +34,7 @@ namespace cish {
 // Currently, this only does very simple pattern matching that converts a
 // loop with a single exiting statement and single loop variable
 
-class ASTSimplifyLoopsPass : public ASTFunctionPass<ASTSimplifyLoopsPass> {
+class ASTConvertLoopsPass : public ASTFunctionPass<ASTConvertLoopsPass> {
 protected:
   struct Loop {
     VarDecl* var;
@@ -76,7 +76,7 @@ protected:
   };
 
 protected:
-  ASTBuilder builder;
+  const Map<BinaryOperator::Opcode, BinaryOperator::Opcode> invOps;
 
 protected:
   bool isExiting(Stmt* stmt) {
@@ -90,6 +90,8 @@ protected:
 
   bool dominates(Stmt* a, Stmt* b) {
     // FIXME: Actually calculate the dominator tree
+    // Right now, it causes segmentation faults, probably because of some
+    // mistake in how the clang AST is being constructed
     return true;
 
     // const DominatorTree& dt = ast->getDominatorTree();
@@ -177,7 +179,7 @@ protected:
       BinaryOperator* latch = latches.front();
       Expr* step = nullptr;
       if(auto* bin = dyn_cast<BinaryOperator>(latch->getRHS()))
-        step = getVarInExpr(bin->getLHS()) ? bin->getRHS() : bin->getLHS();
+        step = getVar(bin->getLHS()) ? bin->getRHS() : bin->getLHS();
 
       if(step) {
         Stmt** stmts = body->body_begin();
@@ -216,11 +218,38 @@ protected:
       fatal(error() << "Not a loop: " << loop->getStmtClassName());
   }
 
-  VarDecl* getVarInExpr(Expr* expr) {
-    if(auto* ref = dyn_cast<DeclRefExpr>(expr))
-      if(auto* var = dyn_cast<VarDecl>(ref->getFoundDecl()))
-        return var;
-    return nullptr;
+  // This tries to normalize for loops so the LHS of the condition consists
+  // either only variable declarations or logical operations
+  BinaryOperator* normalizeForLoopCondition(BinaryOperator* cond,
+                                            BinaryOperator::Opcode stepOp,
+                                            Expr* step) {
+    Expr* lhs = cond->getLHS();
+    Expr* rhs = cond->getRHS();
+    BinaryOperator::Opcode op = cond->getOpcode();
+
+    //
+    //   (var <op> step) <= end  ...  var <= end <inv-op> step
+    //
+    if(auto* subOp = dyn_cast<BinaryOperator>(lhs)) {
+      if(getVar(subOp->getLHS())) {
+        if((op == BO_LE) and (isEqual(subOp->getRHS(), step))) {
+          switch(subOp->getOpcode()) {
+          case BO_Add:
+          case BO_Sub:
+          case BO_Mul:
+          case BO_Div:
+            cond->setLHS(subOp->getLHS());
+            cond->setRHS(builder.createBinaryOperator(
+                rhs, step, invOps.at(subOp->getOpcode()), step->getType()));
+            break;
+          default:
+            break;
+          }
+        }
+      }
+    }
+
+    return cond;
   }
 
   bool replaceLoopWithForLoop(Stmt* loop,
@@ -230,20 +259,6 @@ protected:
                               IfStmt* exit,
                               Stmt* latch,
                               Expr* step) {
-    static const Map<BinaryOperator::Opcode, BinaryOperator::Opcode> invOps = {
-        {BO_Add, BO_Sub},
-        {BO_Sub, BO_Add},
-        {BO_Mul, BO_Div},
-        {BO_Div, BO_Mul},
-
-        {BO_EQ, BO_NE},
-        {BO_NE, BO_EQ},
-        {BO_GT, BO_LE},
-        {BO_LE, BO_GT},
-        {BO_LT, BO_GE},
-        {BO_GE, BO_LT},
-    };
-
     bool changed = false;
 
     // FIXME: There may be other increment conditions for the loop variable
@@ -257,13 +272,14 @@ protected:
       BinaryOperator::Opcode stepOp = latchRhs->getOpcode();
       BinaryOperator::Opcode condOp = cond->getOpcode();
 
-      Expr* newInit = builder.createBinaryOperator(
+      BinaryOperator* newInit = builder.createBinaryOperator(
           latchLhs, init, BO_Assign, latchLhs->getType());
-      Expr* newCondLhs = builder.createBinaryOperator(
+      BinaryOperator* newCondLhs = builder.createBinaryOperator(
           cond->getLHS(), step, invOps.at(stepOp), step->getType());
-      Expr* newCond = builder.createBinaryOperator(
+      BinaryOperator* newCond = builder.createBinaryOperator(
           newCondLhs, cond->getRHS(), invOps.at(condOp), newCondLhs->getType());
-      Expr* newLatch = builder.createBinaryOperator(
+      newCond = normalizeForLoopCondition(newCond, stepOp, step);
+      BinaryOperator* newLatch = builder.createBinaryOperator(
           latchLhs, latchRhs, BO_Assign, latchLhs->getType());
       ForStmt* forStmt = builder.createForStmt(
           newInit, newCond, newLatch, getLoopBody(loop));
@@ -311,23 +327,38 @@ public:
   }
 
 public:
-  ASTSimplifyLoopsPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext, true),
-        builder(cishContext.getASTContext()) {
+  ASTConvertLoopsPass(CishContext& cishContext)
+      : ASTFunctionPass(cishContext, true), invOps({
+                                                {BO_Add, BO_Sub},
+                                                {BO_Sub, BO_Add},
+                                                {BO_Mul, BO_Div},
+                                                {BO_Div, BO_Mul},
+
+                                                {BO_EQ, BO_NE},
+                                                {BO_NE, BO_EQ},
+                                                {BO_GT, BO_LE},
+                                                {BO_LE, BO_GT},
+                                                {BO_LT, BO_GE},
+                                                {BO_GE, BO_LT},
+                                            }) {
     ;
   }
 
-  ASTSimplifyLoopsPass(const ASTSimplifyLoopsPass&) = delete;
-  ASTSimplifyLoopsPass(ASTSimplifyLoopsPass&&) = delete;
-  virtual ~ASTSimplifyLoopsPass() = default;
+  ASTConvertLoopsPass(const ASTConvertLoopsPass&) = delete;
+  ASTConvertLoopsPass(ASTConvertLoopsPass&&) = delete;
+  virtual ~ASTConvertLoopsPass() = default;
 
   virtual llvm::StringRef getPassName() const override {
-    return "Cish AST Simplify Loops";
+    return "cish-loop-convert";
+  }
+
+  virtual llvm::StringRef getPassLongName() const override {
+    return "Cish AST Convert Loops";
   }
 };
 
 } // namespace cish
 
-cish::ASTPass* createASTSimplifyLoopsPass(cish::CishContext& context) {
-  return new cish::ASTSimplifyLoopsPass(context);
+cish::ASTPass* createASTConvertLoopsPass(cish::CishContext& context) {
+  return new cish::ASTConvertLoopsPass(context);
 }

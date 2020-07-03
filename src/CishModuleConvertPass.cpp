@@ -30,6 +30,9 @@ class CishModuleConvertPass : public ModulePass {
 public:
   static char ID;
 
+private:
+  cish::CishContext& cishContext;
+
 protected:
   bool isMetadataFunction(const Function& f) {
     FunctionType* fty = f.getFunctionType();
@@ -42,7 +45,8 @@ protected:
   }
 
 public:
-  CishModuleConvertPass() : ModulePass(ID) {
+  explicit CishModuleConvertPass(cish::CishContext& cishContext)
+      : ModulePass(ID), cishContext(cishContext) {
     ;
   }
 
@@ -51,20 +55,15 @@ public:
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
-    AU.addRequired<IRSourceInfoWrapperPass>();
-    AU.addRequired<CishContextWrapperPass>();
     AU.setPreservesAll();
   }
 
   virtual bool runOnModule(Module& m) override {
     cish::message() << "Running " << getPassName() << "\n";
 
-    const cish::SourceInfo& si
-        = getAnalysis<IRSourceInfoWrapperPass>().getSourceInfo();
-    const cish::CishContext& context
-        = getAnalysis<CishContextWrapperPass>().getCishContext();
-    cish::LLVMFrontend& fe = context.getLLVMFrontend();
-    cish::LLVMBackend& be = context.getLLVMBackend();
+    const cish::SourceInfo& si = cishContext.getSourceInfo();
+    cish::LLVMFrontend& fe = cishContext.getLLVMFrontend();
+    cish::LLVMBackend& be = cishContext.getLLVMBackend();
 
     if(cish::opts().log) {
       std::string buf;
@@ -139,9 +138,6 @@ public:
 
 char CishModuleConvertPass::ID = 0;
 
-static RegisterPass<CishModuleConvertPass>
-    X("cish-module", "Cish Module Pass", true, true);
-
-Pass* createCishModuleConvertPass() {
-  return new CishModuleConvertPass();
+Pass* createCishModuleConvertPass(cish::CishContext& cishContext) {
+  return new CishModuleConvertPass(cishContext);
 }

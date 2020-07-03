@@ -33,8 +33,19 @@ const clang::Type* getBaseType(const clang::ArrayType* aty);
 
 clang::Expr* stripCasts(clang::Expr* expr);
 
+  /// @returns true if both lhs and rhs are constants of equal value
+bool isEqual(clang::Expr* lhs, clang::Expr* rhs);
+bool isConstant(clang::Expr*, uint64_t val);
+bool isZero(clang::Expr*);
+bool isOne(clang::Expr*);
+
+clang::VarDecl* getVar(clang::Expr* expr);
 Vector<clang::VarDecl*> getVarsInStmtAsVector(clang::Stmt* stmt);
 Set<clang::VarDecl*> getVarsInStmt(clang::Stmt* stmt);
+
+Vector<clang::BinaryOperator*> getCommaExprs(clang::BinaryOperator* binOp);
+Vector<clang::BinaryOperator*> getForInits(clang::ForStmt* forStmt);
+Vector<clang::BinaryOperator*> getForIncs(clang::ForStmt* forStmt);
 
 std::string toString(clang::Stmt* stmt, clang::ASTContext& astContext);
 std::string toString(clang::FunctionDecl* f, clang::ASTContext& astContext);

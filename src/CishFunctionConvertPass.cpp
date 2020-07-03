@@ -438,8 +438,12 @@ class CishFunctionConvertPass : public FunctionPass {
 public:
   static char ID;
 
+private:
+  cish::CishContext& cishContext;
+
 public:
-  CishFunctionConvertPass() : FunctionPass(ID) {
+  CishFunctionConvertPass(cish::CishContext& cishContext)
+      : FunctionPass(ID), cishContext(cishContext) {
     ;
   }
 
@@ -448,7 +452,6 @@ public:
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
-    AU.addRequired<CishContextWrapperPass>();
     AU.addRequired<StructureAnalysisWrapperPass>();
     AU.setPreservesAll();
   }
@@ -457,10 +460,8 @@ public:
     cish::message() << "Running " << getPassName() << " on " << f.getName()
                     << "\n";
 
-    const cish::CishContext& context
-        = getAnalysis<CishContextWrapperPass>().getCishContext();
-    cish::LLVMFrontend& fe = context.getLLVMFrontend();
-    cish::LLVMBackend& be = context.getLLVMBackend();
+    cish::LLVMFrontend& fe = cishContext.getLLVMFrontend();
+    cish::LLVMBackend& be = cishContext.getLLVMBackend();
 
     const auto& analysis = getAnalysis<StructureAnalysisWrapperPass>();
 
@@ -487,9 +488,6 @@ public:
 
 char CishFunctionConvertPass::ID = 0;
 
-static RegisterPass<CishFunctionConvertPass>
-    X("cish-functions", "Cish Function Pass", true, true);
-
-Pass* createCishFunctionConvertPass() {
-  return new CishFunctionConvertPass();
+Pass* createCishFunctionConvertPass(cish::CishContext& cishContext) {
+  return new CishFunctionConvertPass(cishContext);
 }

@@ -30,9 +30,6 @@ using namespace clang;
 namespace cish {
 
 class ASTDCEPass : public ASTFunctionPass<ASTDCEPass> {
-protected:
-  ASTBuilder builder;
-
 public:
   bool process(FunctionDecl* f) {
     Set<Stmt*> removeStmts;
@@ -58,8 +55,7 @@ public:
   }
 
 public:
-  ASTDCEPass(CishContext& context)
-      : ASTFunctionPass(context, true), builder(astContext) {
+  ASTDCEPass(CishContext& context) : ASTFunctionPass(context, true) {
     ;
   }
 
@@ -68,6 +64,10 @@ public:
   virtual ~ASTDCEPass() = default;
 
   virtual llvm::StringRef getPassName() const override {
+    return "cish-dce";
+  }
+
+  virtual llvm::StringRef getPassLongName() const override {
     return "Cish AST Dead Code Elimination Pass";
   }
 };

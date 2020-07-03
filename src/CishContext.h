@@ -33,8 +33,10 @@
 namespace cish {
 
 class AST;
+class ASTBuilder;
 class LLVMBackend;
 class LLVMFrontend;
+class NameGenerator;
 class SourceInfo;
 
 class CishContext {
@@ -55,9 +57,12 @@ private:
   std::shared_ptr<clang::TargetInfo> targetInfo;
 
 protected:
+  std::unique_ptr<NameGenerator> nameGen;
+  std::unique_ptr<SourceInfo> si;
   std::unique_ptr<clang::ASTContext> astContext;
   std::unique_ptr<LLVMFrontend> fe;
   std::unique_ptr<LLVMBackend> be;
+  std::unique_ptr<ASTBuilder> builder;
   Map<clang::FunctionDecl*, std::unique_ptr<AST>> asts;
 
 public:
@@ -65,39 +70,26 @@ public:
   using func_range = llvm::iterator_range<func_iterator>;
 
 public:
-  CishContext(const llvm::Module& m, const SourceInfo& si);
+  CishContext(const llvm::Module& m);
   CishContext(const CishContext&) = delete;
   CishContext(CishContext&&) = delete;
 
   AST& addAST(clang::FunctionDecl* f);
   AST& getAST(clang::FunctionDecl* f);
   const AST& getAST(clang::FunctionDecl* f) const;
+
   llvm::LLVMContext& getLLVMContext() const;
   clang::ASTContext& getASTContext() const;
   const clang::LangOptions& getLangOptions() const;
   LLVMFrontend& getLLVMFrontend() const;
   LLVMBackend& getLLVMBackend() const;
+  NameGenerator& getNameGenerator() const;
+  const SourceInfo& getSourceInfo() const;
+  ASTBuilder& getASTBuilder();
 
   func_range funcs();
 };
 
 } // namespace cish
-
-class CishContextWrapperPass : public llvm::ModulePass {
-public:
-  static char ID;
-
-private:
-  std::unique_ptr<cish::CishContext> context;
-
-public:
-  CishContextWrapperPass();
-
-  cish::CishContext& getCishContext() const;
-
-  virtual llvm::StringRef getPassName() const override;
-  virtual void getAnalysisUsage(llvm::AnalysisUsage& AU) const override;
-  virtual bool runOnModule(llvm::Module& m) override;
-};
 
 #endif // CISH_CISH_CONTEXT_H

@@ -20,6 +20,7 @@
 #include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
 #include "Map.h"
+#include "NameGenerator.h"
 #include "Options.h"
 #include "Vector.h"
 
@@ -31,24 +32,9 @@ namespace cish {
 
 class ASTRenameVarsPass : public ASTFunctionPass<ASTRenameVarsPass> {
 protected:
-  ASTBuilder builder;
-  Map<std::string, unsigned> varNames;
-  const std::string varBase;
   const Vector<std::string> loopVarsBase;
 
 protected:
-  std::string getNewVarName(const std::string& base) {
-    if(not varNames.contains(base)) {
-      varNames[base] = 0;
-      return base;
-    }
-
-    std::string buf;
-    llvm::raw_string_ostream ss(buf);
-    ss << base << ++varNames[base];
-    return ss.str();
-  }
-
   std::string getNameFor(UnaryOperator* unOp) {
     if(unOp->getOpcode() == UO_AddrOf) {
       std::string newName = getNameFor(unOp->getSubExpr());
@@ -84,8 +70,9 @@ protected:
   }
 
   std::string getNameFor(DeclRefExpr* declRef) {
+    NameGenerator& names = cishContext.getNameGenerator();
     if(auto* var = dyn_cast<VarDecl>(declRef->getFoundDecl()))
-      if(not var->getName().startswith("_"))
+      if(not names.isGeneratedName(var->getName()))
         return var->getName();
     return "";
   }
@@ -201,6 +188,8 @@ protected:
   }
 
   bool renameLoopVariables() {
+    NameGenerator& names = cishContext.getNameGenerator();
+
     Map<VarDecl*, std::string> newLoopVars;
     for(auto& i : getLoops()) {
       Stmt* loop = i.first;
@@ -219,7 +208,7 @@ protected:
     for(const auto& i : newLoopVars) {
       const std::string& name = i.second;
       if(VarDecl* var = getVarByName(name))
-        var->setDeclName(builder.createDeclName(getNewVarName(varBase)));
+        var->setDeclName(builder.createDeclName(names.getNewVarName()));
     }
 
     // Rename loop variables
@@ -236,25 +225,26 @@ public:
   bool process(FunctionDecl* f) {
     bool changed = false;
 
-    // Initialize known variable names
-    for(VarDecl* var : ast->vars())
-      varNames[var->getName()] = 0;
-
+    NameGenerator& names = cishContext.getNameGenerator();
     changed |= renameLoopVariables();
+    Set<VarDecl*> renamed;
 
     bool iterChanged = false;
     do {
       iterChanged = false;
 
       for(VarDecl* var : ast->vars()) {
-        if(var->getName().startswith("_") and ast->hasSingleDef(var)) {
+        if(names.isGeneratedName(var->getName()) and (not renamed.contains(var))
+           and ast->hasSingleDef(var)) {
           Expr* rhs = ast->getSingleDefRHS(var);
           std::string newName = getNameFor(rhs);
           if(auto* declRef = dyn_cast<DeclRefExpr>(rhs))
             if(auto* param = dyn_cast<ParmVarDecl>(declRef->getFoundDecl()))
               newName = param->getName().str() + "_p";
-          if(newName.size()) {
-            var->setDeclName(builder.createDeclName(getNewVarName(newName)));
+          if((var->getName() != newName) and newName.size()) {
+            var->setDeclName(
+                builder.createDeclName(names.getNewName(newName, false)));
+            renamed.insert(var);
             iterChanged |= true;
           }
         }
@@ -268,8 +258,7 @@ public:
 
 public:
   ASTRenameVarsPass(CishContext& context)
-      : ASTFunctionPass(context), builder(astContext),
-        varBase(opts().prefix + "t"), loopVarsBase({"i", "j", "k", "l"}) {
+      : ASTFunctionPass(context), loopVarsBase({"i", "j", "k", "l"}) {
     ;
   }
 
@@ -278,6 +267,10 @@ public:
   virtual ~ASTRenameVarsPass() = default;
 
   virtual llvm::StringRef getPassName() const override {
+    return "cish-rename";
+  }
+
+  virtual llvm::StringRef getPassLongName() const override {
     return "Cish AST Rename Vars";
   }
 };

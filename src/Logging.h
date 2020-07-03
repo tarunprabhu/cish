@@ -17,25 +17,38 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#ifndef CISH_AST_PASSES_H
-#define CISH_AST_PASSES_H
+#ifndef CISH_LOGGING_H
+#define CISH_LOGGING_H
+
+#include <llvm/Support/raw_ostream.h>
 
 namespace cish {
 
-class ASTPass;
-class CishContext;
+class Logger {
+private:
+  std::unique_ptr<llvm::raw_ostream> nullStream;
+  std::unique_ptr<llvm::raw_fd_ostream> fdStream;
+
+protected:
+  Logger(const std::string& filename);
+
+public:
+  Logger();
+  Logger(const Logger&) = delete;
+  Logger(Logger&&);
+  ~Logger();
+
+  operator bool() const;
+  llvm::raw_ostream& operator()();
+
+public:
+  static Logger
+  openFile(const std::string& base, unsigned tag, const std::string& ext);
+  static Logger openFile(const std::string& base,
+                         const std::string& tag,
+                         const std::string& ext);
+};
 
 } // namespace cish
 
-cish::ASTPass* createASTDefUseCalculatorPass(cish::CishContext&);
-cish::ASTPass* createASTStripCastsPass(cish::CishContext&);
-cish::ASTPass* createASTSimplifyOperatorsPass(cish::CishContext&);
-cish::ASTPass* createASTDeadCodeEliminationPass(cish::CishContext&);
-cish::ASTPass* createASTPropagateExprsPass(cish::CishContext&);
-cish::ASTPass* createASTRenameVarsPass(cish::CishContext&);
-cish::ASTPass* createASTConvertLoopsPass(cish::CishContext&);
-cish::ASTPass* createASTConstantFoldingPass(cish::CishContext&);
-cish::ASTPass* createASTSubexprEliminationPass(cish::CishContext&);
-cish::ASTPass* createASTExprNumberingPass(cish::CishContext&);
-
-#endif // CISH_AST_PASSES_H
+#endif // CISH_LOGGING_H

@@ -18,6 +18,7 @@
 //  ---------------------------------------------------------------------------
 
 #include "ASTBuilder.h"
+#include "ClangUtils.h"
 #include "Diagnostics.h"
 #include "LLVMUtils.h"
 
@@ -25,8 +26,38 @@ using namespace clang;
 
 namespace cish {
 
-ASTBuilder::ASTBuilder(ASTContext& astContext) : astContext(astContext) {
+ASTBuilder::ASTBuilder(ASTContext& astContext)
+    : astContext(astContext),
+      fLits([](const llvm::APFloat& f1, const llvm::APFloat& f2) {
+        return f1.compare(f2) == llvm::APFloat::cmpLessThan;
+      }) {
   ;
+}
+
+void ASTBuilder::beginFunction() {
+  i1Lits.clear();
+  i8Lits.clear();
+  u8Lits.clear();
+  i16Lits.clear();
+  u16Lits.clear();
+  i32Lits.clear();
+  u32Lits.clear();
+  i64Lits.clear();
+  u64Lits.clear();
+  fLits.clear();
+  sLits.clear();
+  labels.clear();
+
+  declRefs.clear();
+}
+
+DeclarationNameInfo
+ASTBuilder::getDeclarationNameInfo(const std::string& name) {
+  return DeclarationNameInfo(&astContext.Idents.get(name), invLoc);
+}
+
+IdentifierInfo& ASTBuilder::getIdentifierInfo(const std::string& name) {
+  return astContext.Idents.get(name);
 }
 
 DeclarationName ASTBuilder::createDeclName(const std::string& name) {
@@ -34,15 +65,18 @@ DeclarationName ASTBuilder::createDeclName(const std::string& name) {
 }
 
 DeclRefExpr* ASTBuilder::createDeclRefExpr(ValueDecl* decl) {
-  return DeclRefExpr::Create(astContext,
-                             NestedNameSpecifierLoc(),
-                             invLoc,
-                             decl,
-                             false,
-                             invLoc,
-                             decl->getType(),
-                             VK_LValue,
-                             decl);
+  if(declRefs.contains(decl))
+    return declRefs.at(decl);
+
+  return declRefs[decl] = DeclRefExpr::Create(astContext,
+                                              NestedNameSpecifierLoc(),
+                                              invLoc,
+                                              decl,
+                                              false,
+                                              invLoc,
+                                              decl->getType(),
+                                              VK_LValue,
+                                              decl);
 }
 
 DeclStmt* ASTBuilder::createDeclStmt(Decl* decl) {
@@ -56,7 +90,7 @@ NullStmt* ASTBuilder::createNullStmt() {
 }
 
 LabelStmt* ASTBuilder::createLabelStmt(LabelDecl* label) {
-  // Need to add null statement to the label because the CFG generation code
+  // Need to add a null statement to the label because the CFG generation code
   // expects a non-null sub-statement in the LabelStmt. Not setting on ends
   // up causing a silent failure in the CFG construction which breaks nearly
   // all the AST cleanup passes
@@ -65,7 +99,7 @@ LabelStmt* ASTBuilder::createLabelStmt(LabelDecl* label) {
 
 LabelDecl* ASTBuilder::createLabelDecl(FunctionDecl* f,
                                        const std::string& name) {
-  return LabelDecl::Create(astContext, f, invLoc, &astContext.Idents.get(name));
+  return LabelDecl::Create(astContext, f, invLoc, &getIdentifierInfo(name));
 }
 
 ParmVarDecl* ASTBuilder::createParam(const std::string& name,
@@ -75,7 +109,7 @@ ParmVarDecl* ASTBuilder::createParam(const std::string& name,
                              func,
                              invLoc,
                              invLoc,
-                             &astContext.Idents.get(name),
+                             &getIdentifierInfo(name),
                              type,
                              nullptr,
                              clang::SC_None,
@@ -84,15 +118,14 @@ ParmVarDecl* ASTBuilder::createParam(const std::string& name,
 
 FunctionDecl* ASTBuilder::createFunction(const std::string& name,
                                          QualType type) {
-  FunctionDecl* f
-      = FunctionDecl::Create(astContext,
-                             astContext.getTranslationUnitDecl(),
-                             invLoc,
-                             invLoc,
-                             DeclarationName(&astContext.Idents.get(name)),
-                             type,
-                             nullptr,
-                             clang::SC_None);
+  FunctionDecl* f = FunctionDecl::Create(astContext,
+                                         astContext.getTranslationUnitDecl(),
+                                         invLoc,
+                                         invLoc,
+                                         createDeclName(name),
+                                         type,
+                                         nullptr,
+                                         clang::SC_None);
   astContext.getTranslationUnitDecl()->addDecl(f);
 
   return f;
@@ -104,7 +137,7 @@ RecordDecl* ASTBuilder::createStruct(const std::string& name) {
                                         astContext.getTranslationUnitDecl(),
                                         invLoc,
                                         invLoc,
-                                        &astContext.Idents.get(name));
+                                        &getIdentifierInfo(name));
   astContext.getTranslationUnitDecl()->addDecl(decl);
   return decl;
 }
@@ -116,7 +149,7 @@ FieldDecl* ASTBuilder::createField(const std::string& name,
                                        strct,
                                        invLoc,
                                        invLoc,
-                                       &astContext.Idents.get(name),
+                                       &getIdentifierInfo(name),
                                        type,
                                        nullptr,
                                        nullptr,
@@ -133,7 +166,7 @@ DeclRefExpr* ASTBuilder::createGlobalVariable(const std::string& name,
                                  tu,
                                  invLoc,
                                  invLoc,
-                                 &astContext.Idents.get(name),
+                                 &getIdentifierInfo(name),
                                  type,
                                  nullptr,
                                  SC_None);
@@ -149,7 +182,7 @@ DeclRefExpr* ASTBuilder::createLocalVariable(const std::string& name,
                                  func,
                                  invLoc,
                                  invLoc,
-                                 &astContext.Idents.get(name),
+                                 &getIdentifierInfo(name),
                                  type,
                                  nullptr,
                                  SC_None);
@@ -165,7 +198,7 @@ DeclRefExpr* ASTBuilder::createVariable(const std::string& name,
                                  parent,
                                  invLoc,
                                  invLoc,
-                                 &astContext.Idents.get(name),
+                                 &getIdentifierInfo(name),
                                  type,
                                  nullptr,
                                  SC_None);
@@ -186,14 +219,14 @@ BinaryOperator* ASTBuilder::createBinaryOperator(Expr* lhs,
                                                  BinaryOperator::Opcode opc,
                                                  QualType type) {
   return new(astContext) BinaryOperator(
-      lhs, rhs, opc, type, VK_RValue, OK_Ordinary, invLoc, FPOptions());
+             lhs, rhs, opc, type, VK_RValue, OK_Ordinary, invLoc, FPOptions());
 }
 
-UnaryOperator* ASTBuilder::createUnaryOperator(Expr* lhs,
+UnaryOperator* ASTBuilder::createUnaryOperator(Expr* expr,
                                                UnaryOperator::Opcode opc,
                                                QualType type) {
-  return new(astContext)
-      UnaryOperator(lhs, opc, type, VK_RValue, OK_Ordinary, invLoc, false);
+  return new(astContext) UnaryOperator(
+             expr, opc, type, VK_RValue, OK_Ordinary, invLoc, false);
 }
 
 ArraySubscriptExpr*
@@ -214,13 +247,28 @@ CStyleCastExpr* ASTBuilder::createCastExpr(Expr* expr, QualType qty) {
                                 invLoc);
 }
 
-IfStmt* ASTBuilder::createIfStmt(Expr* cond, Stmt* thn, Stmt* els) {
-  return IfStmt::Create(
-      astContext, invLoc, false, nullptr, nullptr, cond, thn, invLoc, els);
+MemberExpr*
+ASTBuilder::createMemberExpr(Expr* base, ValueDecl* member, QualType type) {
+  return MemberExpr::Create(astContext,
+                            base,
+                            false,
+                            invLoc,
+                            NestedNameSpecifierLoc(),
+                            invLoc,
+                            member,
+                            DeclAccessPair::make(member, AS_public),
+                            getDeclarationNameInfo(member->getName()),
+                            nullptr,
+                            type,
+                            VK_RValue,
+                            OK_Ordinary);
 }
 
-GotoStmt* ASTBuilder::createGotoStmt(LabelDecl* label) {
-  return new(astContext) GotoStmt(label, invLoc, invLoc);
+CallExpr* ASTBuilder::createCallExpr(Expr* callee,
+                                     const Vector<Expr*>& args,
+                                     QualType type) {
+  return CallExpr::Create(
+      astContext, callee, makeArrayRef(args), type, VK_RValue, invLoc);
 }
 
 CompoundStmt* ASTBuilder::createCompoundStmt(const Vector<Stmt*>& stmts) {
@@ -231,6 +279,15 @@ CompoundStmt* ASTBuilder::createCompoundStmt(const Vector<Stmt*>& stmts) {
 CompoundStmt* ASTBuilder::createCompoundStmt(Stmt* stmt) {
   return CompoundStmt::Create(
       astContext, llvm::ArrayRef<Stmt*>(stmt), invLoc, invLoc);
+}
+
+IfStmt* ASTBuilder::createIfStmt(Expr* cond, Stmt* thn, Stmt* els) {
+  return IfStmt::Create(
+      astContext, invLoc, false, nullptr, nullptr, cond, thn, invLoc, els);
+}
+
+GotoStmt* ASTBuilder::createGotoStmt(LabelDecl* label) {
+  return new(astContext) GotoStmt(label, invLoc, invLoc);
 }
 
 SwitchStmt* ASTBuilder::createSwitchStmt(Expr* cond) {
@@ -257,31 +314,6 @@ ReturnStmt* ASTBuilder::createReturnStmt(Expr* retExpr) {
   return ReturnStmt::Create(astContext, invLoc, retExpr, nullptr);
 }
 
-CallExpr* ASTBuilder::createCallExpr(Expr* callee,
-                                     const Vector<Expr*>& args,
-                                     QualType type) {
-  return CallExpr::Create(
-      astContext, callee, makeArrayRef(args), type, VK_RValue, invLoc);
-}
-
-MemberExpr*
-ASTBuilder::createMemberExpr(Expr* base, ValueDecl* member, QualType type) {
-  return MemberExpr::Create(
-      astContext,
-      base,
-      false,
-      invLoc,
-      NestedNameSpecifierLoc(),
-      invLoc,
-      member,
-      DeclAccessPair::make(member, AS_public),
-      DeclarationNameInfo(&astContext.Idents.get(member->getName()), invLoc),
-      nullptr,
-      type,
-      VK_RValue,
-      OK_Ordinary);
-}
-
 DoStmt* ASTBuilder::createDoStmt(Stmt* body, Expr* cond) {
   return new(astContext) DoStmt(body, cond, invLoc, invLoc, invLoc);
 }
@@ -301,29 +333,89 @@ CXXBoolLiteralExpr* ASTBuilder::createBoolLiteral(bool b) {
 }
 
 CXXBoolLiteralExpr* ASTBuilder::createBoolLiteral(bool b, QualType type) {
-  return new(astContext) CXXBoolLiteralExpr(b, type, invLoc);
+  if(i1Lits.contains(b))
+    return i1Lits.at(b);
+  return i1Lits[b] = new(astContext) CXXBoolLiteralExpr(b, type, invLoc);
 }
 
 IntegerLiteral* ASTBuilder::createIntLiteral(const llvm::APInt& i,
                                              QualType type) {
-  return IntegerLiteral::Create(astContext, i, type, invLoc);
+  if(i.isSignedIntN(8)) {
+    int8_t v = (int8_t)i.getLimitedValue();
+    if(not i8Lits.contains(v))
+      i8Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return i8Lits.at(v);
+  } else if(i.isIntN(8)) {
+    uint8_t v = (uint8_t)i.getLimitedValue();
+    if(not u8Lits.contains(v))
+      u8Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return u8Lits.at(v);
+  } else if(i.isSignedIntN(16)) {
+    int16_t v = (int16_t)i.getLimitedValue();
+    if(not u16Lits.contains(v))
+      u16Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return u16Lits.at(v);
+  } else if(i.isIntN(16)) {
+    uint16_t v = (uint16_t)i.getLimitedValue();
+    if(not u16Lits.contains(v))
+      u16Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return u16Lits.at(v);
+  } else if(i.isSignedIntN(32)) {
+    int32_t v = (int32_t)i.getLimitedValue();
+    if(not u32Lits.contains(v))
+      u32Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return u32Lits.at(v);
+  } else if(i.isIntN(32)) {
+    uint32_t v = (uint32_t)i.getLimitedValue();
+    if(not u32Lits.contains(v))
+      u32Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return u8Lits.at(v);
+  } else if(i.isSignedIntN(64)) {
+    int64_t v = (int64_t)i.getLimitedValue();
+    if(not u64Lits.contains(v))
+      u64Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return u64Lits.at(v);
+  } else if(i.isIntN(64)) {
+    uint64_t v = (uint64_t)i.getLimitedValue();
+    if(not u64Lits.contains(v))
+      u64Lits[v] = IntegerLiteral::Create(astContext, i, type, invLoc);
+    return u64Lits.at(v);
+  }
+
+  fatal(error() << "Unsupported integer size for literal");
+  return nullptr;
 }
 
 IntegerLiteral* ASTBuilder::createIntLiteral(short i) {
   return createIntLiteral(llvm::APInt(16, i, true), astContext.ShortTy);
 }
 
+IntegerLiteral* ASTBuilder::createIntLiteral(unsigned short i) {
+  return createIntLiteral(llvm::APInt(16, i, false),
+                          astContext.UnsignedShortTy);
+}
+
 IntegerLiteral* ASTBuilder::createIntLiteral(int i) {
   return createIntLiteral(llvm::APInt(32, i, true), astContext.IntTy);
+}
+
+IntegerLiteral* ASTBuilder::createIntLiteral(unsigned int i) {
+  return createIntLiteral(llvm::APInt(32, i, false), astContext.UnsignedIntTy);
 }
 
 IntegerLiteral* ASTBuilder::createIntLiteral(long i) {
   return createIntLiteral(llvm::APInt(64, i, true), astContext.LongTy);
 }
 
+IntegerLiteral* ASTBuilder::createIntLiteral(unsigned long i) {
+  return createIntLiteral(llvm::APInt(64, i, false), astContext.UnsignedLongTy);
+}
+
 FloatingLiteral* ASTBuilder::createFloatLiteral(const llvm::APFloat& f,
                                                 QualType type) {
-  return FloatingLiteral::Create(astContext, f, false, type, invLoc);
+  if(fLits.contains(f))
+    return fLits.at(f);
+  return fLits[f] = FloatingLiteral::Create(astContext, f, false, type, invLoc);
 }
 
 FloatingLiteral* ASTBuilder::createFloatLiteral(float f) {
@@ -344,8 +436,11 @@ CXXNullPtrLiteralExpr* ASTBuilder::createNullptr(QualType type) {
 
 StringLiteral* ASTBuilder::createStringLiteral(llvm::StringRef str,
                                                QualType type) {
-  return StringLiteral::Create(
-      astContext, str, StringLiteral::Ascii, false, type, invLoc);
+  std::string s = str.str();
+  if(sLits.contains(s))
+    return sLits.at(s);
+  return sLits[s] = StringLiteral::Create(
+             astContext, str, StringLiteral::Ascii, false, type, invLoc);
 }
 
 StringLiteral* ASTBuilder::createStringLiteral(const std::string& str,

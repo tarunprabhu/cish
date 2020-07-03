@@ -18,7 +18,7 @@
 //  ---------------------------------------------------------------------------
 
 #include "ASTBuilder.h"
-#include "ASTExprPass.h"
+#include "ASTFunctionPass.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
 #include "Map.h"
@@ -28,10 +28,7 @@ using namespace clang;
 
 namespace cish {
 
-class ASTConstantFoldingPass : public ASTExprPass<ASTConstantFoldingPass> {
-protected:
-  ASTBuilder builder;
-
+class ASTConstantFoldingPass : public ASTFunctionPass<ASTConstantFoldingPass> {
 protected:
   bool isOne(const Expr* expr) {
     if(const auto* i = dyn_cast<IntegerLiteral>(expr))
@@ -295,18 +292,9 @@ protected:
   }
 
 public:
-  Expr* process(UnaryOperator* unOp) {
-    switch(unOp->getOpcode()) {
-    case UO_Minus:
-      break;
-    default:
-      break;
-    }
+  bool process(BinaryOperator* binOp) {
+    bool changed = false;
 
-    return unOp;
-  }
-
-  Expr* process(BinaryOperator* binOp) {
     Expr* lhs = binOp->getLHS();
     Expr* rhs = binOp->getRHS();
     BinaryOperator::Opcode op = binOp->getOpcode();
@@ -327,19 +315,18 @@ public:
     case BO_LE:
     case BO_GT:
     case BO_GE:
-      if(Expr* ret = evaluateIdentity(binOp)) {
-        return ret;
+      if(Expr* eval = evaluateIdentity(binOp)) {
+        changed |= ast->replaceExprWith(binOp, eval);
       } else if(isConstant(lhs) and isConstant(rhs)) {
-        if(Expr* ret = evaluate(binOp->getOpcode(), lhs, rhs))
-          return ret;
+        if(Expr* eval = evaluate(binOp->getOpcode(), lhs, rhs))
+          changed |= ast->replaceExprWith(binOp, eval);
       } else if(isConstant(rhs)) {
         if(auto* lhsOp = dyn_cast<BinaryOperator>(lhs)) {
           if(isConstant(lhsOp->getRHS())
              and canAssociate(lhsOp->getOpcode(), op)) {
-            if(Expr* ret = evaluate(op, lhsOp->getRHS(), rhs)) {
-              binOp->setLHS(lhsOp->getLHS());
-              binOp->setRHS(ret);
-              changed |= true;
+            if(Expr* eval = evaluate(op, lhsOp->getRHS(), rhs)) {
+              changed |= ast->replaceExprWith(binOp->getLHS(), lhsOp->getLHS());
+              changed |= ast->replaceExprWith(binOp->getRHS(), eval);
             }
           }
         }
@@ -347,10 +334,9 @@ public:
         if(auto* rhsOp = dyn_cast<BinaryOperator>(rhs)) {
           if(isConstant(rhsOp->getLHS())
              and canAssociate(op, rhsOp->getOpcode())) {
-            if(Expr* ret = evaluate(op, lhs, rhsOp->getLHS())) {
-              binOp->setLHS(ret);
-              binOp->setRHS(rhsOp->getRHS());
-              changed |= true;
+            if(Expr* eval = evaluate(op, lhs, rhsOp->getLHS())) {
+              changed |= ast->replaceExprWith(binOp->getLHS(), eval);
+              changed |= ast->replaceExprWith(binOp->getRHS(), rhsOp->getRHS());
             }
           }
         }
@@ -360,12 +346,12 @@ public:
       break;
     }
 
-    return binOp;
+    return changed;
   }
 
 public:
   ASTConstantFoldingPass(CishContext& context)
-      : ASTExprPass(context), builder(astContext) {
+      : ASTFunctionPass(context) {
     ;
   }
 
@@ -374,6 +360,10 @@ public:
   virtual ~ASTConstantFoldingPass() = default;
 
   virtual llvm::StringRef getPassName() const override {
+    return "cish-cprop";
+  }
+
+  virtual llvm::StringRef getPassLongName() const override {
     return "Cish AST Constant Folding";
   }
 };

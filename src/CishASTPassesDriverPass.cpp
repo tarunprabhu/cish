@@ -23,6 +23,7 @@
 #include "ASTPasses.h"
 #include "CishContext.h"
 #include "ClangUtils.h"
+#include "Logging.h"
 
 using namespace llvm;
 
@@ -31,8 +32,25 @@ class CishASTPassesDriverPass : public ModulePass {
 public:
   static char ID;
 
+private:
+  cish::CishContext& cishContext;
+  unsigned passIdx;
+
+protected:
+  void log(clang::FunctionDecl* f, cish::ASTPass* pass = nullptr) {
+    if(cish::Logger log
+       = cish::Logger::openFile(f->getName(), passIdx++, "cish")) {
+      if(pass)
+        log() << "// After " << pass->getPassName() << "\n\n";
+      else
+        log() << "// Initial AST\n\n";
+      log() << cish::toString(f, f->getASTContext()) << "\n";
+    }
+  }
+
 public:
-  CishASTPassesDriverPass() : ModulePass(ID) {
+  explicit CishASTPassesDriverPass(cish::CishContext& cishContext)
+      : ModulePass(ID), cishContext(cishContext), passIdx(0) {
     ;
   }
 
@@ -41,33 +59,34 @@ public:
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
-    AU.addRequired<CishContextWrapperPass>();
     AU.setPreservesAll();
   }
 
   virtual bool runOnModule(Module& m) override {
-    cish::CishContext& cishContext
-        = getAnalysis<CishContextWrapperPass>().getCishContext();
-
     cish::Vector<cish::ASTPass*> passes = {
         createASTStripCastsPass(cishContext),
         createASTSimplifyOperatorsPass(cishContext),
         createASTPropagateExprsPass(cishContext),
-        createASTSimplifyLoopsPass(cishContext),
+        createASTConvertLoopsPass(cishContext),
+        createASTSimplifyOperatorsPass(cishContext),
         createASTConstantFoldingPass(cishContext),
-        createASTPropagateExprsPass(cishContext),
+        createASTSubexprEliminationPass(cishContext),
         createASTDeadCodeEliminationPass(cishContext),
         createASTRenameVarsPass(cishContext),
     };
 
     for(clang::FunctionDecl* f : cishContext.funcs()) {
-      // llvm::outs() << cish::toString(f, cishContext.getASTContext()) << "\n";
+      cish::message() << "Processing function " << f->getName() << "\n";
+      passIdx = 0;
+      log(f);
       for(cish::ASTPass* pass : passes) {
         pass->runOnFunction(f);
-        // llvm::outs() << cish::toString(f, cishContext.getASTContext()) <<
-        // "\n"; llvm::outs().flush();
+        log(f, pass);
       }
     }
+
+    for(cish::ASTPass* pass : passes)
+      delete pass;
 
     return false;
   }
@@ -75,12 +94,6 @@ public:
 
 char CishASTPassesDriverPass::ID = 0;
 
-static RegisterPass<CishASTPassesDriverPass>
-    X("cish-ast-simplify",
-      "Simplify the Cish AST to make it more readable",
-      true,
-      true);
-
-Pass* createCishASTPassesDriverPass() {
-  return new CishASTPassesDriverPass();
+Pass* createCishASTPassesDriverPass(cish::CishContext& cishContext) {
+  return new CishASTPassesDriverPass(cishContext);
 }
