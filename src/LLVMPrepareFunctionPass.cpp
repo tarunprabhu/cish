@@ -28,9 +28,9 @@
 #include <llvm/Transforms/Utils/Local.h>
 #include <llvm/Transforms/Utils/PromoteMemToReg.h>
 
-#include "CishContext.h"
+#include "CishLLVMContext.h"
 #include "Diagnostics.h"
-#include "IRSourceInfo.h"
+#include "LLVMSourceInfo.h"
 #include "List.h"
 #include "Logging.h"
 #include "LLVMCishMetadata.h"
@@ -46,12 +46,12 @@
 using namespace llvm;
 namespace LLVM = cish::LLVM;
 
-class IRPrepareFunctionPass : public FunctionPass {
+class LLVMPrepareFunctionPass : public FunctionPass {
 public:
   static char ID;
 
 private:
-  cish::CishContext& cishContext;
+  cish::CishLLVMContext& cishContext;
 
 private:
   bool shouldPromote(AllocaInst* alloca) {
@@ -65,7 +65,7 @@ private:
   }
 
 public:
-  explicit IRPrepareFunctionPass(cish::CishContext& cishContext)
+  explicit LLVMPrepareFunctionPass(cish::CishLLVMContext& cishContext)
       : FunctionPass(ID), cishContext(cishContext) {
     ;
   }
@@ -84,8 +84,8 @@ public:
     cish::message() << "Running " << getPassName() << " on " << f.getName()
                     << "\n";
 
-    const cish::SourceInfo& si = cishContext.getSourceInfo();
-    cish::NameGenerator& names = cishContext.getNameGenerator();
+    const cish::LLVMSourceInfo& si = cishContext.getLLVMSourceInfo();
+    cish::NameGenerator& names = cishContext.addNameGenerator(f);
     DominatorTree& dt = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
     AssumptionCache& ac
         = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(f);
@@ -207,8 +207,8 @@ public:
   }
 };
 
-char IRPrepareFunctionPass::ID = 0;
+char LLVMPrepareFunctionPass::ID = 0;
 
-Pass* createIRPrepareFunctionPass(cish::CishContext& cishContext) {
-  return new IRPrepareFunctionPass(cishContext);
+Pass* createLLVMPrepareFunctionPass(cish::CishLLVMContext& cishContext) {
+  return new LLVMPrepareFunctionPass(cishContext);
 }

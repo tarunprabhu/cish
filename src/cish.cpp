@@ -17,14 +17,10 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "AST.h"
-#include "CishContext.h"
+#include "CishLLVMContext.h"
 #include "CishPasses.h"
 #include "Diagnostics.h"
-#include "IRPasses.h"
-#include "IRSourceInfo.h"
-#include "LLVMBackend.h"
-#include "NameGenerator.h"
+#include "LLVMPasses.h"
 #include "Options.h"
 #include "Set.h"
 
@@ -87,15 +83,15 @@ int main(int argc, char* argv[]) {
     if(f.hasFnAttribute(llvm::Attribute::AttrKind::OptimizeNone))
       f.removeFnAttr(llvm::Attribute::AttrKind::OptimizeNone);
 
-  cish::CishContext cishContext(*m);
+  cish::CishLLVMContext cishContext(*m);
 
   // Now that the clang AST Context has been set up, get down to business
   llvm::legacy::PassManager pm;
   pm.add(llvm::createDemoteRegisterToMemoryPass());
-  pm.add(createIRPrepareModulePass(cishContext));
-  pm.add(createIRPrepareFunctionPass(cishContext));
-  pm.add(createCishModuleConvertPass(cishContext));
-  pm.add(createCishFunctionConvertPass(cishContext));
+  pm.add(createLLVMPrepareModulePass(cishContext));
+  pm.add(createLLVMPrepareFunctionPass(cishContext));
+  pm.add(createCishLLVMModuleConvertPass(cishContext));
+  pm.add(createCishLLVMFunctionConvertPass(cishContext));
   pm.add(createCishASTPassesDriverPass(cishContext));
   pm.add(createCishASTWriterPass(cishContext));
   pm.run(*m);

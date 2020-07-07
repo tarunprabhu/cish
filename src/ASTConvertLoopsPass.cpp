@@ -25,6 +25,8 @@
 
 #include <algorithm>
 
+extern bool g_bt;
+
 using namespace clang;
 
 namespace cish {
@@ -39,7 +41,7 @@ protected:
     VarDecl* var;
     Stmt* initStmt;
     Expr* init;
-    IfStmt* cond;
+    IfStmt* exit;
     Stmt* latch;
     Expr* step;
     bool valid;
@@ -49,7 +51,7 @@ protected:
     }
 
     LoopInfo()
-        : var(nullptr), initStmt(nullptr), init(nullptr), cond(nullptr),
+        : var(nullptr), initStmt(nullptr), init(nullptr), exit(nullptr),
           latch(nullptr), step(nullptr), valid(false) {
       ;
     }
@@ -57,10 +59,10 @@ protected:
     LoopInfo(VarDecl* var,
              Stmt* initStmt,
              Expr* init,
-             IfStmt* cond,
+             IfStmt* exit,
              Stmt* latch,
              Expr* step)
-        : var(var), initStmt(initStmt), init(init), cond(cond), latch(latch),
+        : var(var), initStmt(initStmt), init(init), exit(exit), latch(latch),
           step(step), valid(true) {
       ;
     }
@@ -89,7 +91,7 @@ protected:
     return false;
   }
 
-  bool dominates(Stmt* a, Stmt* b) {
+  bool dominates(Stmt*, Stmt*) {
     // FIXME: Actually calculate the dominator tree
     // Right now, it causes segmentation faults, probably because of some
     // mistake in how the clang AST is being constructed
@@ -136,7 +138,7 @@ protected:
     return (init <= 1) and (incr == 1);
   }
 
-  LoopInfo getLoopInfo(WhileStmt* loop) {
+  LoopInfo getLoopInfo(WhileStmt*) {
     return LoopInfo();
   }
 
@@ -203,9 +205,7 @@ protected:
 
   // This tries to normalize for loops so the LHS of the condition consists
   // either only variable declarations or logical operations
-  BinaryOperator* normalizeForLoopCondition(BinaryOperator* cond,
-                                            BinaryOperator::Opcode stepOp,
-                                            Expr* step) {
+  BinaryOperator* normalizeForLoopCondition(BinaryOperator* cond, Expr* step) {
     Expr* lhs = cond->getLHS();
     Expr* rhs = cond->getRHS();
     BinaryOperator::Opcode op = cond->getOpcode();
@@ -240,14 +240,13 @@ protected:
     return cond;
   }
 
-  bool replaceWithForLoop(DoStmt* loop,
-                          VarDecl* var,
-                          Stmt* initStmt,
-                          Expr* init,
-                          IfStmt* exit,
-                          Stmt* latch,
-                          Expr* step) {
+  bool replaceWithForLoop(DoStmt* loop, LoopInfo& li) {
     bool changed = false;
+    Stmt* initStmt = li.initStmt;
+    Expr* init = li.init;
+    IfStmt* exit = li.exit;
+    Stmt* latch = li.latch;
+    Expr* step = li.step;
 
     // FIXME: There may be other increment conditions for the loop variable
     // in a for loop
@@ -275,7 +274,7 @@ protected:
                                       ast->cloneExpr(cond->getRHS()),
                                       invOps.at(condOp),
                                       newCondLhs->getType());
-      newCond = normalizeForLoopCondition(newCond, stepOp, step);
+      newCond = normalizeForLoopCondition(newCond, step);
       BinaryOperator* newLatch
           = ast->createBinaryOperator(ast->cloneExpr(latchLhs),
                                       ast->cloneExpr(latchRhs),
@@ -294,7 +293,7 @@ protected:
     return changed;
   }
 
-  bool replaceWithWhileLoop(DoStmt* loop, VarDecl* var, IfStmt* cond) {
+  bool replaceWithWhileLoop(DoStmt*, LoopInfo&) {
     bool changed = false;
 
     fatal(error() << "Not implemented: replace do loop with while loop\n");
@@ -302,13 +301,7 @@ protected:
     return changed;
   }
 
-  bool replaceWithForLoop(WhileStmt* loop,
-                          VarDecl* var,
-                          Stmt* initStmt,
-                          Expr* init,
-                          IfStmt* exit,
-                          Stmt* latch,
-                          Expr* step) {
+  bool replaceWithForLoop(WhileStmt*, LoopInfo&) {
     bool changed = false;
 
     fatal(error() << "Not implemented: replace while loop with for loop\n");
@@ -329,8 +322,10 @@ public:
     return false;
   }
 
-  bool process(FunctionDecl* f) {
+  bool process(FunctionDecl*) {
     bool changed = false;
+
+    g_bt = true;
 
     // // The loops must be processed from the inside out. The innermost loops
     // // will have the greatest depth
@@ -342,18 +337,17 @@ public:
     for(DoStmt* loop : doLoops) {
       if(LoopInfo li = getLoopInfo(loop)) {
         if(li.isForLoop())
-          changed |= replaceWithForLoop(
-              loop, li.var, li.initStmt, li.init, li.cond, li.latch, li.step);
+          changed |= replaceWithForLoop(loop, li);
         else
-          changed |= replaceWithWhileLoop(loop, li.var, li.cond);
+          changed |= replaceWithWhileLoop(loop, li);
       }
     }
 
     for(WhileStmt* loop : whileLoops)
       if(LoopInfo li = getLoopInfo(loop))
-        changed |= replaceWithForLoop(
-            loop, li.var, li.initStmt, li.init, li.cond, li.latch, li.step);
+        changed |= replaceWithForLoop(loop, li);
 
+    g_bt = false;
     llvm::errs() << "changed: " << changed << "\n";
     return changed;
   }

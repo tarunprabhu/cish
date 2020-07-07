@@ -318,8 +318,6 @@ public:
           if(isConstant(lhsOp->getRHS())
              and canAssociate(lhsOp->getOpcode(), op)) {
             if(Expr* eval = evaluate(op, lhsOp->getRHS(), rhs)) {
-              llvm::errs() << "binOp1: " << Clang::toString(binOp, astContext)
-                           << "\n";
               changed |= ast->replaceExprWith(binOp->getLHS(), lhsOp->getLHS());
               changed |= ast->replaceExprWith(binOp->getRHS(), eval);
             }
@@ -330,8 +328,6 @@ public:
           if(isConstant(rhsOp->getLHS())
              and canAssociate(op, rhsOp->getOpcode())) {
             if(Expr* eval = evaluate(op, lhs, rhsOp->getLHS())) {
-              llvm::errs() << "binOp2: " << Clang::toString(binOp, astContext)
-                           << "\n";
               changed |= ast->replaceExprWith(binOp->getLHS(), eval);
               changed |= ast->replaceExprWith(binOp->getRHS(), rhsOp->getRHS());
             }
@@ -347,7 +343,8 @@ public:
   }
 
 public:
-  ASTConstantFoldingPass(CishContext& context) : ASTFunctionPass(context) {
+  ASTConstantFoldingPass(CishContext& context)
+      : ASTFunctionPass(context, IterateUntilConvergence | PostOrder) {
     ;
   }
 

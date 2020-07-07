@@ -35,13 +35,13 @@ namespace cish {
 class ASTSubexprEliminationPass
     : public ASTFunctionPass<ASTSubexprEliminationPass> {
 protected:
-  bool canPropagateSubexpr(VarDecl* var, Stmt* def) {
+  bool canPropagateSubexpr(FunctionDecl* f, VarDecl* var, Stmt* def) {
     // This is a bit of an optimization and may not always be useful so it may
     // be a good idea to provide a knob to control it.
     // The idea is that eliminating subexpressions where the variable is a
     // generated variable is not terribly useful. So only do it for those
     // variables that may have come from the source code
-    NameGenerator& names = cishContext.getNameGenerator();
+    NameGenerator& names = cishContext.getNameGenerator(f);
     if(names.isGeneratedName(var->getName()))
       return false;
 
@@ -59,7 +59,7 @@ public:
     for(VarDecl* lhs : ast->getVars())
       if(Expr* def = ast->getSingleDefRHS(lhs))
         if(ast->getEqvExprs(def).size() > 1)
-          if(canPropagateSubexpr(lhs, def))
+          if(canPropagateSubexpr(f, lhs, def))
             repl[def] = lhs;
 
     for(auto& i : repl) {

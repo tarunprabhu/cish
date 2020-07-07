@@ -29,14 +29,13 @@ using namespace clang;
 namespace cish {
 
 BackendBase::BackendBase(CishContext& cishContext)
-    : cishContext(cishContext), names(cishContext.getNameGenerator()),
-      astContext(cishContext.getASTContext()),
+    : cishContext(cishContext), astContext(cishContext.getASTContext()),
       ast(&cishContext.getAST(nullptr)) {
   ;
 }
 
 std::string BackendBase::getNewVar(const std::string& prefix) {
-  return names.getNewName(prefix);
+  return cishContext.getNameGenerator(ast->getFunction()).getNewName(prefix);
 }
 
 void BackendBase::beginFunction(FunctionDecl* f) {

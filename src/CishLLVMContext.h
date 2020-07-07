@@ -17,24 +17,39 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#ifndef CISH_CISH_PASSES_H
-#define CISH_CISH_PASSES_H
+#ifndef CISH_CISH_LLVM_CONTEXT_H
+#define CISH_CISH_LLVM_CONTEXT_H
 
-#include <llvm/Pass.h>
+#include "CishContext.h"
+#include "LLVMBackend.h"
+#include "LLVMClangMap.h"
+#include "LLVMSourceInfo.h"
 
-#include <string>
+#include <llvm/IR/Module.h>
 
 namespace cish {
 
-class CishContext;
-class CishLLVMContext;
+class CishLLVMContext : public CishContext {
+protected:
+  llvm::LLVMContext& llvmContext;
+  std::unique_ptr<LLVMSourceInfo> si;
+  std::unique_ptr<LLVMBackend> be;
+
+public:
+  CishLLVMContext(const llvm::Module& m);
+  CishLLVMContext(const CishLLVMContext&) = delete;
+  CishLLVMContext(CishLLVMContext&&) = delete;
+  virtual ~CishLLVMContext() = default;
+
+  NameGenerator& addNameGenerator(const llvm::Function& f);
+
+  llvm::LLVMContext& getLLVMContext() const;
+  LLVMBackend& getLLVMBackend() const;
+  LLVMClangMap& getLLVMClangMap() const;
+  const LLVMSourceInfo& getLLVMSourceInfo() const;
+  NameGenerator& getNameGenerator(const llvm::Function& f) const;
+};
 
 } // namespace cish
 
-llvm::Pass* createCishASTPassesDriverPass(cish::CishContext& cishContext);
-llvm::Pass* createCishASTWriterPass(cish::CishContext& cishContext);
-llvm::Pass*
-createCishLLVMFunctionConvertPass(cish::CishLLVMContext& cishContext);
-llvm::Pass* createCishLLVMModuleConvertPass(cish::CishLLVMContext& cishContext);
-
-#endif // CISH_CISH_PASSES_H
+#endif // CISH_CISH_LLVM_CONTEXT_H

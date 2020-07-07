@@ -22,8 +22,6 @@
 #include "Diagnostics.h"
 #include "Options.h"
 
-#include <clang/AST/ExprCXX.h>
-
 #include <llvm/Support/raw_ostream.h>
 
 using namespace clang;

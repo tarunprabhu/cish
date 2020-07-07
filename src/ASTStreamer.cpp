@@ -178,7 +178,7 @@ char ASTStreamer::back(unsigned skip) {
   }
 }
 
-ASTStreamer& ASTStreamer::beginBlock(const std::string& label) {
+ASTStreamer& ASTStreamer::beginBlock() {
   switch(opts().indentStyle) {
   case IndentStyle::KR:
   case IndentStyle::Stroustrup:
@@ -431,7 +431,7 @@ ASTStreamer& ASTStreamer::operator<<(const FunctionDecl* f) {
   *this << ")";
 
   if(f->hasBody()) {
-    beginBlock("");
+    beginBlock();
     for(const Decl* d : f->decls())
       if(const auto* var = dyn_cast<VarDecl>(d))
         *this << tab() << var << endl();
@@ -453,7 +453,8 @@ ASTStreamer& ASTStreamer::operator<<(const CXXBoolLiteralExpr* b) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const CharacterLiteral* c) {
-  fatal(error() << "UNIMPLEMENTED: CharacterLiteral");
+  *this << "'" << (char)c->getValue() << "'";
+
   return *this;
 }
 
@@ -494,7 +495,7 @@ ASTStreamer& ASTStreamer::operator<<(const StringLiteral* slit) {
   return *this << "\"" << slit->getString() << "\"";
 }
 
-ASTStreamer& ASTStreamer::operator<<(const CXXNullPtrLiteralExpr* cnull) {
+ASTStreamer& ASTStreamer::operator<<(const CXXNullPtrLiteralExpr*) {
   return *this << "nullptr";
 }
 

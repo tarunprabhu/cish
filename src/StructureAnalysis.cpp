@@ -569,7 +569,7 @@ static bool isSwitchStrict(const Block& cond, const StructNode& succ) {
   return true;
 }
 
-static bool isSwitchFallthrough(const Block& sw, const StructNode& succ) {
+static bool isSwitchFallthrough(const Block&, const StructNode&) {
   // FIXME: Implement this
   return false;
 }

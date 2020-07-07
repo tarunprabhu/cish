@@ -248,7 +248,7 @@ public:
 
   template <typename... Args>
   iterator emplace(const_iterator pos, Args&&... args) {
-    return _impl.emplace(args...);
+    return _impl.emplace(pos, args...);
   }
 
   iterator erase(const_iterator pos) {

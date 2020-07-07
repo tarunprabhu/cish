@@ -17,7 +17,7 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "IRSourceInfo.h"
+#include "LLVMSourceInfo.h"
 #include "Diagnostics.h"
 #include "LLVMUtils.h"
 #include "Options.h"
@@ -61,57 +61,57 @@ static bool isStringLiteral(const GlobalVariable& g) {
   return false;
 }
 
-SourceInfo::SourceInfo(const Module& m) : dl(m.getDataLayout()) {
+LLVMSourceInfo::LLVMSourceInfo(const Module& m) : dl(m.getDataLayout()) {
   for(const char* fname : {"llvm.dbg.value", "llvm.dbg.declare"})
     if(const Function* f = m.getFunction(fname))
       dbgFns.push_back(f);
   runOnModule(m);
 }
 
-bool SourceInfo::isCString(const Value* val) const {
+bool LLVMSourceInfo::isCString(const Value* val) const {
   return cstrings.contains(val);
 }
 
-bool SourceInfo::isCString(const Value& val) const {
+bool LLVMSourceInfo::isCString(const Value& val) const {
   return isCString(&val);
 }
 
-bool SourceInfo::isStringLiteral(const Value* val) const {
+bool LLVMSourceInfo::isStringLiteral(const Value* val) const {
   return stringLiterals.contains(val);
 }
 
-bool SourceInfo::isStringLiteral(const Value& val) const {
+bool LLVMSourceInfo::isStringLiteral(const Value& val) const {
   return stringLiterals.contains(&val);
 }
 
-bool SourceInfo::hasName(const Value* val) const {
+bool LLVMSourceInfo::hasName(const Value* val) const {
   return valueNames.contains(val);
 }
 
-bool SourceInfo::hasName(const Value& val) const {
+bool LLVMSourceInfo::hasName(const Value& val) const {
   return hasName(&val);
 }
 
-bool SourceInfo::hasName(StructType* sty) const {
+bool LLVMSourceInfo::hasName(StructType* sty) const {
   return structNames.contains(sty) or classNames.contains(sty)
          or unionNames.contains(sty);
 }
 
-bool SourceInfo::hasElementName(StructType* sty, unsigned i) const {
+bool LLVMSourceInfo::hasElementName(StructType* sty, unsigned i) const {
   if(elemNames.contains(sty))
     return elemNames.at(sty).size() > i;
   return false;
 }
 
-const std::string& SourceInfo::getName(const Value* v) const {
+const std::string& LLVMSourceInfo::getName(const Value* v) const {
   return valueNames.at(v);
 }
 
-const std::string& SourceInfo::getName(const Value& v) const {
+const std::string& LLVMSourceInfo::getName(const Value& v) const {
   return getName(&v);
 }
 
-const std::string& SourceInfo::getName(StructType* sty) const {
+const std::string& LLVMSourceInfo::getName(StructType* sty) const {
   if(structNames.contains(sty))
     return structNames.at(sty);
   else if(classNames.contains(sty))
@@ -121,13 +121,13 @@ const std::string& SourceInfo::getName(StructType* sty) const {
   fatal(error() << "No source name for struct type: " << *sty);
 }
 
-const std::string& SourceInfo::getElementName(StructType* sty,
+const std::string& LLVMSourceInfo::getElementName(StructType* sty,
                                               unsigned i) const {
   return elemNames.at(sty).at(i);
 }
 
-SourceInfo::DbgValElements
-SourceInfo::parseDbgValCall(const CallInst& call) const {
+LLVMSourceInfo::DbgValElements
+LLVMSourceInfo::parseDbgValCall(const CallInst& call) const {
   Value* value = nullptr;
   if(auto* mdv = dyn_cast<MetadataAsValue>(call.getArgOperand(0)))
     if(auto* vdm = dyn_cast<ValueAsMetadata>(mdv->getMetadata()))
@@ -144,7 +144,7 @@ SourceInfo::parseDbgValCall(const CallInst& call) const {
   return DbgValElements(value, di, expr);
 }
 
-void SourceInfo::collectStructs(PointerType* pty, const DIType* md) {
+void LLVMSourceInfo::collectStructs(PointerType* pty, const DIType* md) {
   if(const auto* derived = dyn_cast<DIDerivedType>(md)) {
     switch(derived->getTag()) {
     case dwarf::DW_TAG_pointer_type:
@@ -161,7 +161,7 @@ void SourceInfo::collectStructs(PointerType* pty, const DIType* md) {
   }
 }
 
-void SourceInfo::collectStructs(ArrayType* aty, const DIType* md) {
+void LLVMSourceInfo::collectStructs(ArrayType* aty, const DIType* md) {
   if(const auto* comp = dyn_cast<DICompositeType>(md)) {
     switch(comp->getTag()) {
     case dwarf::DW_TAG_array_type:
@@ -176,11 +176,11 @@ void SourceInfo::collectStructs(ArrayType* aty, const DIType* md) {
   }
 }
 
-void SourceInfo::collectStructs(FunctionType* fty, const DIType* md) {
+void LLVMSourceInfo::collectStructs(FunctionType*, const DIType*) {
   warning() << "UNIMPLEMENTED: Associating function types\n";
 }
 
-void SourceInfo::collectStructsFromStruct(StructType* sty,
+void LLVMSourceInfo::collectStructsFromStruct(StructType* sty,
                                           const DICompositeType* comp) {
   structs[sty] = comp;
   const StructLayout& sl = *dl.getStructLayout(sty);
@@ -222,7 +222,7 @@ fail:
   structs[sty] = nullptr;
 }
 
-void SourceInfo::collectStructsFromClass(StructType* sty,
+void LLVMSourceInfo::collectStructsFromClass(StructType* sty,
                                          const DICompositeType* comp) {
   const StructLayout& sl = *dl.getStructLayout(sty);
   structs[sty] = comp;
@@ -270,12 +270,12 @@ fail:
   structs[sty] = nullptr;
 }
 
-void SourceInfo::collectStructsFromUnion(StructType*, const DICompositeType*) {
+void LLVMSourceInfo::collectStructsFromUnion(StructType*, const DICompositeType*) {
   // At some point, I might figure out if this can be used in any reasonable
   // way
 }
 
-void SourceInfo::collectStructs(StructType* sty, const DIType* md) {
+void LLVMSourceInfo::collectStructs(StructType* sty, const DIType* md) {
   if(const auto* comp = dyn_cast<DICompositeType>(md)) {
     switch(comp->getTag()) {
     case dwarf::DW_TAG_structure_type:
@@ -293,7 +293,7 @@ void SourceInfo::collectStructs(StructType* sty, const DIType* md) {
   }
 }
 
-void SourceInfo::collectStructs(Type* type, const Metadata* md) {
+void LLVMSourceInfo::collectStructs(Type* type, const Metadata* md) {
   if(not md)
     return;
 
@@ -319,7 +319,7 @@ void SourceInfo::collectStructs(Type* type, const Metadata* md) {
   }
 }
 
-void SourceInfo::runOnFunction(const Function& f) {
+void LLVMSourceInfo::runOnFunction(const Function& f) {
   FunctionType* fty = f.getFunctionType();
   if(const DISubprogram* subp = f.getSubprogram()) {
     std::string buf;
@@ -405,7 +405,7 @@ void SourceInfo::runOnFunction(const Function& f) {
   }
 }
 
-void SourceInfo::runOnGlobal(const GlobalVariable& g) {
+void LLVMSourceInfo::runOnGlobal(const GlobalVariable& g) {
   SmallVector<DIGlobalVariableExpression*, 4> gexprs;
   g.getDebugInfo(gexprs);
   if(gexprs.size()) {
@@ -427,7 +427,7 @@ void SourceInfo::runOnGlobal(const GlobalVariable& g) {
     stringLiterals.insert(&g);
 }
 
-void SourceInfo::runOnModule(const Module& m) {
+void LLVMSourceInfo::runOnModule(const Module& m) {
   for(const Function& f : m.functions())
     runOnFunction(f);
   for(const GlobalVariable& g : m.globals())

@@ -20,6 +20,9 @@
 #include "Diagnostics.h"
 #include "Options.h"
 
+#include <execinfo.h>
+#include <stdlib.h>
+
 using namespace llvm;
 
 namespace cish {
@@ -48,6 +51,23 @@ WithColor message(raw_ostream& os) {
   WithColor(os, raw_ostream::Colors::GREEN, true) << "Message";
   WithColor(os) << ": ";
   return WithColor(os);
+}
+
+std::string getBacktrace() {
+  static constexpr int MAX_DEPTH = 30;
+  std::string buf;
+  raw_string_ostream ss(buf);
+  void *array[MAX_DEPTH];
+
+  unsigned size = backtrace(array, MAX_DEPTH);
+  char** strings = backtrace_symbols(array, size);
+
+  for(unsigned i = 0; i < size; i++)
+    ss << strings[i] << "\n";
+
+  free (strings);
+
+  return ss.str();
 }
 
 } // namespace cish

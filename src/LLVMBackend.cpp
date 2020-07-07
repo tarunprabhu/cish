@@ -18,11 +18,12 @@
 //  ---------------------------------------------------------------------------
 
 #include "LLVMBackend.h"
-#include "CishContext.h"
+#include "CishLLVMContext.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
+#include "LLVMClangMap.h"
 #include "LLVMUtils.h"
-#include "IRSourceInfo.h"
+#include "LLVMSourceInfo.h"
 
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
@@ -39,8 +40,9 @@ namespace cish {
     fatal(error() << "NOT IMPLEMENTED: " << inst); \
   }
 
-LLVMBackend::LLVMBackend(CishContext& cishContext)
-    : BackendBase(cishContext), si(cishContext.getSourceInfo()) {
+LLVMBackend::LLVMBackend(CishLLVMContext& cishContext)
+    : BackendBase(cishContext), si(cishContext.getLLVMSourceInfo()),
+      llvmClangMap(cishContext.getLLVMClangMap()) {
   ;
 }
 
@@ -79,7 +81,7 @@ void LLVMBackend::beginBlock(const BasicBlock& bb) {
   BackendBase::add(blocks.at(&bb)->getStmt());
 }
 
-void LLVMBackend::endBlock(const BasicBlock& bb) {
+void LLVMBackend::endBlock(const BasicBlock&) {
   // Nothing to do
 }
 
@@ -273,7 +275,7 @@ LLVMBackend::handleIndexOperand(PointerType* pty,
                                 clang::Expr* currExpr,
                                 unsigned idx,
                                 const Vector<const Value*>& indices,
-                                const Instruction& inst) {
+                                const Instruction&) {
   const Value* op = indices[idx];
   if(const auto* cint = dyn_cast<ConstantInt>(op)) {
     if(cint->getLimitedValue() == 0)
@@ -308,7 +310,7 @@ LLVMBackend::handleIndexOperand(ArrayType* aty,
                                 clang::Expr* currExpr,
                                 unsigned idx,
                                 const Vector<const Value*>& indices,
-                                const Instruction& inst) {
+                                const Instruction&) {
   return ast->createArraySubscriptExpr(
       currExpr, get(indices[idx]), get(aty->getElementType()));
 }
@@ -316,7 +318,7 @@ LLVMBackend::handleIndexOperand(ArrayType* aty,
 clang::Expr* LLVMBackend::handleIndexOperand(StructType* sty,
                                              clang::Expr* currExpr,
                                              unsigned field,
-                                             const Instruction& inst) {
+                                             const Instruction&) {
   return ast->createMemberExpr(
       currExpr, fields.at(sty)[field], get(sty->getElementType(field)));
 }
@@ -374,7 +376,7 @@ clang::Expr* LLVMBackend::get(const LoadInst& load) {
       get(load.getPointerOperand()), clang::UO_Deref, get(load.getType()));
 }
 
-clang::Expr* LLVMBackend::get(const PHINode& phi) {
+clang::Expr* LLVMBackend::get(const PHINode&) {
   fatal(error() << "PHI nodes should have been removed");
 
   return nullptr;
@@ -547,6 +549,7 @@ void LLVMBackend::add(const Function& f,
                       const Vector<std::string>& argNames) {
   clang::QualType type = get(f.getFunctionType());
   clang::FunctionDecl* decl = ast->createFunction(name, type);
+  llvmClangMap.add(f, decl);
 
   funcs[&f] = decl;
   Vector<clang::ParmVarDecl*> params;
@@ -557,7 +560,7 @@ void LLVMBackend::add(const Function& f,
   decl->setParams(LLVM::makeArrayRef<clang::ParmVarDecl*>(params));
 }
 
-void LLVMBackend::add(const GlobalAlias& alias, const std::string& name) {
+void LLVMBackend::add(const GlobalAlias& alias, const std::string&) {
   fatal(error() << "NOT IMPLEMENTED: " << alias);
 }
 
@@ -567,6 +570,7 @@ void LLVMBackend::add(const GlobalVariable& g, const std::string& name) {
     type.addConst();
   clang::VarDecl* decl
       = ast->createGlobalVariable(name, get(g.getType()->getElementType()));
+  llvmClangMap.add(g, decl);
   if(const Constant* init = g.getInitializer())
     decl->setInit(get(init));
 }

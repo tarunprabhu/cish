@@ -20,7 +20,10 @@
 #ifndef CISH_CISH_CONTEXT_H
 #define CISH_CISH_CONTEXT_H
 
+#include "AST.h"
+#include "IRClangMap.h"
 #include "Map.h"
+#include "NameGenerator.h"
 
 #include <llvm/ADT/iterator_range.h>
 #include <llvm/IR/Dominators.h>
@@ -32,15 +35,8 @@
 
 namespace cish {
 
-class AST;
-class LLVMBackend;
-class NameGenerator;
-class SourceInfo;
-
 class CishContext {
-private:
-  llvm::LLVMContext& llvmContext;
-
+protected:
   clang::FileSystemOptions fileOpts;
   clang::FileManager fileMgr;
   clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagIDs;
@@ -53,37 +49,40 @@ private:
   clang::SelectorTable sels;
   std::shared_ptr<clang::TargetOptions> targetOpts;
   std::shared_ptr<clang::TargetInfo> targetInfo;
+  std::unique_ptr<clang::ASTContext> astContext;
 
   // The AST class is also a builder (somewhat unfortunately) and one is needed
   // for the top-level structs and function declarations
   std::unique_ptr<AST> topLevelAST;
+  std::unique_ptr<NameGenerator> topLevelNames;
 
-protected:
-  std::unique_ptr<NameGenerator> nameGen;
-  std::unique_ptr<SourceInfo> si;
-  std::unique_ptr<clang::ASTContext> astContext;
-  std::unique_ptr<LLVMBackend> be;
   Map<clang::FunctionDecl*, std::unique_ptr<AST>> asts;
+  Map<std::string, std::unique_ptr<NameGenerator>> nameGens;
+  std::unique_ptr<IRClangMap> irClangMap;
 
 public:
   using func_iterator = decltype(asts)::const_key_iterator;
   using func_range = llvm::iterator_range<func_iterator>;
 
-public:
-  CishContext(const llvm::Module& m);
+protected:
+  CishContext(const std::string& triple);
+  CishContext() = delete;
   CishContext(const CishContext&) = delete;
   CishContext(CishContext&&) = delete;
+
+  NameGenerator& addNameGenerator(const std::string& name);
+
+public:
+  virtual ~CishContext() = default;
 
   AST& addAST(clang::FunctionDecl* f);
   AST& getAST(clang::FunctionDecl* f);
   const AST& getAST(clang::FunctionDecl* f) const;
 
-  llvm::LLVMContext& getLLVMContext() const;
   clang::ASTContext& getASTContext() const;
   const clang::LangOptions& getLangOptions() const;
-  LLVMBackend& getLLVMBackend() const;
-  NameGenerator& getNameGenerator() const;
-  const SourceInfo& getSourceInfo() const;
+  NameGenerator& getNameGenerator(const std::string& name) const;
+  NameGenerator& getNameGenerator(clang::FunctionDecl* f) const;
 
   func_range funcs();
 };

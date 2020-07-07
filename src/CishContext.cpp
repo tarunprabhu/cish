@@ -18,28 +18,23 @@
 //  ---------------------------------------------------------------------------
 
 #include "CishContext.h"
-#include "AST.h"
 #include "Diagnostics.h"
-#include "IRSourceInfo.h"
-#include "LLVMBackend.h"
-#include "NameGenerator.h"
 
 using namespace llvm;
 
 namespace cish {
 
-CishContext::CishContext(const Module& m)
-    : llvmContext(m.getContext()), fileMgr(fileOpts),
-      diagIDs(new clang::DiagnosticIDs()),
-      diagOpts(new clang::DiagnosticOptions()), diagEngine(diagIDs, diagOpts),
-      srcMgr(diagEngine, fileMgr), targetOpts(new clang::TargetOptions()),
-      targetInfo(), nameGen(new NameGenerator(*this)), si(new SourceInfo(m)) {
+CishContext::CishContext(const std::string& triple)
+    : fileMgr(fileOpts), diagIDs(new clang::DiagnosticIDs),
+      diagOpts(new clang::DiagnosticOptions), diagEngine(diagIDs, diagOpts),
+      srcMgr(diagEngine, fileMgr), targetOpts(new clang::TargetOptions),
+      targetInfo() {
   langOpts.CPlusPlus11 = true;
   langOpts.Bool = true;
 
   idents.reset(new clang::IdentifierTable(langOpts));
 
-  targetOpts->Triple = m.getTargetTriple();
+  targetOpts->Triple = triple;
   targetInfo.reset(clang::TargetInfo::CreateTargetInfo(diagEngine, targetOpts));
 
   astContext.reset(
@@ -49,8 +44,7 @@ CishContext::CishContext(const Module& m)
   // This must be done before the backends are created but after the ASTContext
   // has been initialized
   topLevelAST.reset(new AST(*this));
-
-  be.reset(new LLVMBackend(*this));
+  topLevelNames.reset(new NameGenerator);
 }
 
 AST& CishContext::addAST(clang::FunctionDecl* f) {
@@ -69,10 +63,6 @@ const AST& CishContext::getAST(clang::FunctionDecl* f) const {
   return *asts.at(f);
 }
 
-LLVMContext& CishContext::getLLVMContext() const {
-  return llvmContext;
-}
-
 clang::ASTContext& CishContext::getASTContext() const {
   return *astContext;
 }
@@ -81,16 +71,21 @@ const clang::LangOptions& CishContext::getLangOptions() const {
   return langOpts;
 }
 
-LLVMBackend& CishContext::getLLVMBackend() const {
-  return *be;
+NameGenerator& CishContext::addNameGenerator(const std::string& name) {
+  if(not nameGens.contains(name))
+    nameGens[name].reset(new NameGenerator(*topLevelNames));
+  return *nameGens.at(name);
 }
 
-NameGenerator& CishContext::getNameGenerator() const {
-  return *nameGen;
+NameGenerator& CishContext::getNameGenerator(const std::string& name) const {
+  return *nameGens.at(name);
 }
 
-const SourceInfo& CishContext::getSourceInfo() const {
-  return *si;
+NameGenerator&
+CishContext::getNameGenerator(clang::FunctionDecl* f) const {
+  if(not f)
+    return *topLevelNames;
+  return *nameGens.at(irClangMap->getUniqueName(f));
 }
 
 CishContext::func_range CishContext::funcs() {

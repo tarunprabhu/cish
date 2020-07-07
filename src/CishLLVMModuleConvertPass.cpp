@@ -17,24 +17,24 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "CishContext.h"
+#include "CishLLVMContext.h"
 #include "Diagnostics.h"
-#include "IRSourceInfo.h"
 #include "LLVMBackend.h"
 #include "LLVMCishMetadata.h"
+#include "LLVMSourceInfo.h"
 #include "LLVMUtils.h"
 #include "Options.h"
 
 using namespace llvm;
 namespace LLVM = cish::LLVM;
 
-class CishModuleConvertPass : public ModulePass {
+class CishLLVMModuleConvertPass : public ModulePass {
 public:
   static char ID;
 
 private:
-  cish::CishContext& cishContext;
-  const cish::SourceInfo& si;
+  cish::CishLLVMContext& cishContext;
+  const cish::LLVMSourceInfo& si;
   cish::LLVMBackend& be;
 
 protected:
@@ -55,9 +55,9 @@ protected:
   }
 
 public:
-  explicit CishModuleConvertPass(cish::CishContext& cishContext)
+  explicit CishLLVMModuleConvertPass(cish::CishLLVMContext& cishContext)
       : ModulePass(ID), cishContext(cishContext),
-        si(cishContext.getSourceInfo()), be(cishContext.getLLVMBackend()) {
+        si(cishContext.getLLVMSourceInfo()), be(cishContext.getLLVMBackend()) {
     ;
   }
 
@@ -131,8 +131,8 @@ public:
   }
 };
 
-char CishModuleConvertPass::ID = 0;
+char CishLLVMModuleConvertPass::ID = 0;
 
-Pass* createCishModuleConvertPass(cish::CishContext& cishContext) {
-  return new CishModuleConvertPass(cishContext);
+Pass* createCishLLVMModuleConvertPass(cish::CishLLVMContext& cishContext) {
+  return new CishLLVMModuleConvertPass(cishContext);
 }

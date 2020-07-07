@@ -102,7 +102,7 @@ public:
     AU.setPreservesAll();
   }
 
-  virtual bool runOnModule(Module& m) override {
+  virtual bool runOnModule(Module&) override {
     if(outFile == "-") {
       outs() << run() << "\n";
     } else {

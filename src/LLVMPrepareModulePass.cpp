@@ -17,7 +17,7 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "CishContext.h"
+#include "CishLLVMContext.h"
 #include "Diagnostics.h"
 #include "LLVMCishMetadata.h"
 #include "LLVMUtils.h"
@@ -28,12 +28,12 @@
 using namespace llvm;
 namespace LLVM = cish::LLVM;
 
-class IRPrepareModulePass : public ModulePass {
+class LLVMPrepareModulePass : public ModulePass {
 public:
   static char ID;
 
 protected:
-  cish::CishContext& cishContext;
+  cish::CishLLVMContext& cishContext;
 
 protected:
   bool allUsesIn(const Value* v, const cish::Set<Value*> container) const {
@@ -83,7 +83,7 @@ protected:
   }
 
 public:
-  explicit IRPrepareModulePass(cish::CishContext& cishContext)
+  explicit LLVMPrepareModulePass(cish::CishLLVMContext& cishContext)
       : ModulePass(ID), cishContext(cishContext) {
     ;
   }
@@ -118,8 +118,8 @@ public:
   }
 };
 
-char IRPrepareModulePass::ID = 0;
+char LLVMPrepareModulePass::ID = 0;
 
-Pass* createIRPrepareModulePass(cish::CishContext& cishContext) {
-  return new IRPrepareModulePass(cishContext);
+Pass* createLLVMPrepareModulePass(cish::CishLLVMContext& cishContext) {
+  return new LLVMPrepareModulePass(cishContext);
 }

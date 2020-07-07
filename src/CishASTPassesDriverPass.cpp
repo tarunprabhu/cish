@@ -77,7 +77,7 @@ public:
     AU.setPreservesAll();
   }
 
-  virtual bool runOnModule(Module& m) override {
+  virtual bool runOnModule(Module&) override {
     cish::Vector<cish::ASTPass*> passes = {
         createASTStripCastsPass(cishContext),
         createASTSimplifyOperatorsPass(cishContext),

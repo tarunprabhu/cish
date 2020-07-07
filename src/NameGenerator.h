@@ -23,6 +23,8 @@
 #include "Map.h"
 #include "Set.h"
 
+#include <llvm/Support/raw_ostream.h>
+
 namespace cish {
 
 class CishContext;
@@ -31,7 +33,6 @@ class CishContext;
 // Used to determine priorities when running the cleanup passes
 class NameGenerator {
 private:
-  CishContext& cishContext;
   const std::string globalPrefix;
 
   // The only reason this is a standard std::set is because the insert function
@@ -47,9 +48,13 @@ private:
 private:
   bool contains(const std::string& var) const;
 
+  llvm::raw_ostream& dump(const Set<std::string>& names,
+                          const std::string& label,
+                          llvm::raw_ostream& os) const;
+
 public:
-  NameGenerator(CishContext& cishContext);
-  NameGenerator(const NameGenerator&) = delete;
+  NameGenerator();
+  NameGenerator(const NameGenerator& parent);
   NameGenerator(NameGenerator&&) = delete;
 
   // These are variables that are explicitly known and can be safely associated
@@ -82,6 +87,8 @@ public:
   bool isGeneratedName(const std::string& name) const;
   bool isAmbiguousUserName(const std::string& name) const;
   bool isUserName(const std::string& name) const;
+
+  void dump(llvm::raw_ostream& os) const;
 };
 
 } // namespace cish

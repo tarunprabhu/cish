@@ -17,18 +17,18 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#ifndef CISH_IR_PASSES_H
-#define CISH_IR_PASSES_H
+#ifndef CISH_LLVM_PASSES_H
+#define CISH_LLVM_PASSES_H
 
 #include <llvm/Pass.h>
 
 namespace cish {
 
-class CishContext;
+class CishLLVMContext;
 
 } // namespace cish
 
-llvm::Pass* createIRPrepareFunctionPass(cish::CishContext& cishContext);
-llvm::Pass* createIRPrepareModulePass(cish::CishContext& cishContext);
+llvm::Pass* createLLVMPrepareFunctionPass(cish::CishLLVMContext& cishContext);
+llvm::Pass* createLLVMPrepareModulePass(cish::CishLLVMContext& cishContext);
 
-#endif // CISH_IR_PASSES_H
+#endif // CISH_LLVM_PASSES_H

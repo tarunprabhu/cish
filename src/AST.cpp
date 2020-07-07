@@ -30,6 +30,8 @@
 
 using namespace clang;
 
+bool g_bt = false;
+
 namespace cish {
 
 AST::AST(CishContext& cishContext)
@@ -433,7 +435,7 @@ void AST::remove(WhileStmt* whileStmt) {
   remove(whileStmt->getBody());
 }
 
-void AST::remove(DeclRefExpr* declRef) {
+void AST::remove(DeclRefExpr*) {
   ;
 }
 
@@ -561,18 +563,27 @@ void AST::addDef(VarDecl* var, Stmt* user) {
 }
 
 void AST::addUse(VarDecl* var, Stmt* user) {
+  if(g_bt) {
+    llvm::outs() << "add[" << user << "]: " << var->getName() << " => "
+                 << Clang::toString(user, astContext) << "\n"
+                 << getBacktrace() << "\n";
+  }
   useMap.at(var).insert(user);
 }
 
 void AST::removeUse(VarDecl* var, Stmt* stmt) {
-  llvm::outs() << "use[" << stmt << "]: " << var->getName() << " => "
-               << Clang::toString(stmt, astContext) << "\n";
+  if(g_bt)
+    llvm::outs() << "use[" << stmt << "]: " << var->getName() << " => "
+                 << Clang::toString(stmt, astContext) << "\n";
+                 // << getBacktrace() << "\n";
   useMap.at(var).erase(stmt);
 }
 
 void AST::removeDef(VarDecl* var, Stmt* stmt) {
-  llvm::outs() << "def[" << stmt << "]: " << var->getName() << " => "
-               << Clang::toString(stmt, astContext) << "\n";
+  if(g_bt)
+    llvm::outs() << "def[" << stmt << "]: " << var->getName() << " => "
+                 << Clang::toString(stmt, astContext) << "\n";
+                 // << getBacktrace() << "\n";
   defMap.at(var).erase(stmt);
 }
 
@@ -712,8 +723,8 @@ void AST::recalculateCFG() {
     Set<Stmt*>& uses = i.second;
     for(Stmt* use : uses.clone()) {
       if(pm.isOrphan(use)) {
-        llvm::outs() << "    use[" << use << "]" << i.first->getName() << " => "
-                     << Clang::toString(use, astContext) << "\n";
+        llvm::outs() << "    use[" << use << "]: " << i.first->getName()
+                     << " => " << Clang::toString(use, astContext) << "\n";
         uses.erase(use);
         if(auto* expr = dyn_cast<Expr>(use))
           en.remove(expr);
@@ -942,7 +953,7 @@ FloatingLiteral* AST::createFloatLiteral(double f) {
   return createFloatLiteral(llvm::APFloat(f), astContext.DoubleTy);
 }
 
-FloatingLiteral* AST::createFloatLiteral(long double f) {
+FloatingLiteral* AST::createFloatLiteral(long double) {
   fatal(error() << "UNIMPLEMENTED: Float literal for long double\n");
   return nullptr;
 }

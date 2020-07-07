@@ -17,8 +17,8 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#ifndef CISH_IR_SOURCE_INFO_H
-#define CISH_IR_SOURCE_INFO_H
+#ifndef CISH_LLVM_SOURCE_INFO_H
+#define CISH_LLVM_SOURCE_INFO_H
 
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/Module.h>
@@ -33,7 +33,7 @@ namespace cish {
 /// Parses the debug information contained within in the module if any
 /// and associates names found there with the corresponding LLVM values
 /// and types
-class SourceInfo {
+class LLVMSourceInfo {
 public:
   struct DbgValElements {
     llvm::Value* value;
@@ -84,11 +84,11 @@ protected:
   void runOnFunction(const llvm::Function& f);
   void runOnModule(const llvm::Module& m);
 
-  SourceInfo(const SourceInfo&) = delete;
-  SourceInfo(SourceInfo&&) = delete;
+  LLVMSourceInfo(const LLVMSourceInfo&) = delete;
+  LLVMSourceInfo(LLVMSourceInfo&&) = delete;
 
 public:
-  SourceInfo(const llvm::Module& m);
+  LLVMSourceInfo(const llvm::Module& m);
 
   DbgValElements parseDbgValCall(const llvm::CallInst& call) const;
 
@@ -110,4 +110,4 @@ public:
 
 } // namespace cish
 
-#endif // CISH_IR_SOURCE_INFO_H
+#endif // CISH_LLVM_SOURCE_INFO_H

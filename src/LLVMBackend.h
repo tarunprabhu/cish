@@ -41,7 +41,9 @@
 
 namespace cish {
 
-class SourceInfo;
+class CishLLVMContext;
+class LLVMClangMap;
+class LLVMSourceInfo;
 
 /// This is a single object that contains the maps from LLVM entities
 /// (types and values) to their corresponding Cish AST nodes and keeps track
@@ -49,7 +51,8 @@ class SourceInfo;
 /// and any that are generated
 class LLVMBackend : public BackendBase {
 private:
-  const SourceInfo& si;
+  const LLVMSourceInfo& si;
+  LLVMClangMap& llvmClangMap;
 
   // LLVM values may have multiple uses. But Clang's statements/expressions are
   // never uniqued. This is a map of a "template" for each LLVM value. The
@@ -170,7 +173,7 @@ protected:
   void addSwitchCase(const llvm::ConstantInt* value);
 
 public:
-  LLVMBackend(CishContext& cishContext);
+  LLVMBackend(CishLLVMContext& cishContext);
   LLVMBackend(const LLVMBackend&) = delete;
   LLVMBackend(LLVMBackend&&) = delete;
   ~LLVMBackend() = default;

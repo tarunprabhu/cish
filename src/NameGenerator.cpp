@@ -24,9 +24,16 @@
 
 namespace cish {
 
-NameGenerator::NameGenerator(CishContext& cishContext)
-    : cishContext(cishContext), globalPrefix(opts().prefix) {
+NameGenerator::NameGenerator() : globalPrefix(opts().prefix) {
   ;
+}
+
+NameGenerator::NameGenerator(const NameGenerator& parent) : NameGenerator() {
+  allNames = parent.allNames;
+  userNames = parent.userNames;
+  ambigNames = parent.ambigNames;
+  genNames = parent.genNames;
+  suffixes = parent.suffixes;
 }
 
 bool NameGenerator::contains(const std::string& var) const {
@@ -90,6 +97,23 @@ bool NameGenerator::isAmbiguousUserName(const std::string& name) const {
 
 bool NameGenerator::isGeneratedName(const std::string& name) const {
   return genNames.contains(name);
+}
+
+llvm::raw_ostream& NameGenerator::dump(const Set<std::string>& names,
+                                       const std::string& label,
+                                       llvm::raw_ostream& os) const {
+  os << "  " << label << ":\n";
+  for(const std::string& name : names)
+    os << "    " << name << "\n";
+
+  return os;
+}
+
+void NameGenerator::dump(llvm::raw_ostream& os) const {
+  os << "names:\n";
+  dump(userNames, "user", os);
+  dump(ambigNames, "ambiguous", os);
+  dump(genNames, "generated", os);
 }
 
 } // namespace cish

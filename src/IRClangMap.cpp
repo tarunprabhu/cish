@@ -17,24 +17,33 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#ifndef CISH_CISH_PASSES_H
-#define CISH_CISH_PASSES_H
-
-#include <llvm/Pass.h>
-
-#include <string>
+#include "IRClangMap.h"
 
 namespace cish {
 
-class CishContext;
-class CishLLVMContext;
+const std::string& IRClangMap::getUniqueName(clang::FunctionDecl* decl) const {
+  return fnames.at(decl);
+}
+
+const std::string& IRClangMap::getUniqueName(clang::VarDecl* decl) const {
+  return gnames.at(decl);
+}
+
+void IRClangMap::addFunction(const std::string& fname,
+                             clang::FunctionDecl* decl) {
+  fnames.insert(fname, decl);
+}
+
+void IRClangMap::addGlobal(const std::string& gname, clang::VarDecl* decl) {
+  gnames.insert(gname, decl);
+}
+
+clang::FunctionDecl* IRClangMap::getFunction(const std::string& name) const {
+  return fnames.at(name);
+}
+
+clang::VarDecl* IRClangMap::getGlobal(const std::string& name) const {
+  return gnames.at(name);
+}
 
 } // namespace cish
-
-llvm::Pass* createCishASTPassesDriverPass(cish::CishContext& cishContext);
-llvm::Pass* createCishASTWriterPass(cish::CishContext& cishContext);
-llvm::Pass*
-createCishLLVMFunctionConvertPass(cish::CishLLVMContext& cishContext);
-llvm::Pass* createCishLLVMModuleConvertPass(cish::CishLLVMContext& cishContext);
-
-#endif // CISH_CISH_PASSES_H

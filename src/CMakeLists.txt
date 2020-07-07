@@ -15,20 +15,23 @@ set(SOURCES
   CishContext.cpp
   CishASTPassesDriverPass.cpp
   CishASTWriterPass.cpp
-  CishFunctionConvertPass.cpp
-  CishModuleConvertPass.cpp
+  CishLLVMContext.cpp
+  CishLLVMFunctionConvertPass.cpp
+  CishLLVMModuleConvertPass.cpp
   ClangUtils.cpp
   Diagnostics.cpp
   ExprNumberMap.cpp
+  IRClangMap.cpp
   LLVMBackend.cpp
   LLVMCishMetadata.cpp
+  LLVMClangMap.cpp
+  LLVMPrepareFunctionPass.cpp
+  LLVMPrepareModulePass.cpp
+  LLVMSourceInfo.cpp
   LLVMStructureAnalysis.cpp
   LLVMUtils.cpp
-  IRPrepareFunctionPass.cpp
-  IRPrepareModulePass.cpp
-  IRSourceInfo.cpp
-  NameGenerator.cpp
   Logging.cpp
+  NameGenerator.cpp
   Options.cpp
   ParentMap.cpp
   StructureTree.cpp
@@ -36,6 +39,7 @@ set(SOURCES
 
 set(CISH cish)
 add_executable(${CISH} ${SOURCES})
+target_link_options(${CISH} PUBLIC -rdynamic)
 target_link_directories(${CISH} PUBLIC ${LLVM_LIBRARY_DIR} ${Clang_DIR})
 target_link_libraries(${CISH} clangAST clangBasic clangAnalysis LLVM)
 set_target_properties(${CISH}

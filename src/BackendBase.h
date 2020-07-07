@@ -35,7 +35,6 @@ class NameGenerator;
 class BackendBase {
 protected:
   CishContext& cishContext;
-  NameGenerator& names;
   clang::ASTContext& astContext;
   AST* ast;
 

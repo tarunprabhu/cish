@@ -272,7 +272,7 @@ protected:
       return true;
     }
 
-    bool canPropagateExpr(VarDecl * lhs, BinaryOperator * def) {
+    bool canPropagateExpr(VarDecl* lhs, BinaryOperator* def) {
       if(isRecursiveExpr(lhs, def->getRHS())
          or isLHSDefConstantForAllUses(lhs, def))
         return true;
@@ -280,7 +280,7 @@ protected:
     }
 
   public:
-    bool process(FunctionDecl * f) {
+    bool process(FunctionDecl*) {
       bool changed = false;
 
       // Finding vars to be propagated that have more than one definition is

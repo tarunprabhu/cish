@@ -62,9 +62,7 @@ protected:
   ASTStreamer& endst(bool newline = true);
   char back(unsigned skip = 0);
 
-  // The optional label is used if the block represents a basic block and a
-  // label is added before the block
-  ASTStreamer& beginBlock(const std::string& label = "");
+  ASTStreamer& beginBlock();
 
   // endst will be true when ending the body of a struct because a semicolon
   // must be added immediately after the block in that case

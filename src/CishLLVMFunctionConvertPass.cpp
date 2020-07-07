@@ -24,7 +24,7 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/Pass.h>
 
-#include "CishContext.h"
+#include "CishLLVMContext.h"
 #include "Diagnostics.h"
 #include "LLVMBackend.h"
 #include "LLVMCishMetadata.h"
@@ -443,21 +443,21 @@ void WalkUnstructured::walk(const StructNode*) {
 
 } // namespace cish
 
-class CishFunctionConvertPass : public FunctionPass {
+class CishLLVMFunctionConvertPass : public FunctionPass {
 public:
   static char ID;
 
 private:
-  cish::CishContext& cishContext;
+  cish::CishLLVMContext& cishContext;
 
 public:
-  CishFunctionConvertPass(cish::CishContext& cishContext)
+  CishLLVMFunctionConvertPass(cish::CishLLVMContext& cishContext)
       : FunctionPass(ID), cishContext(cishContext) {
     ;
   }
 
   virtual StringRef getPassName() const override {
-    return "Cish Function Pass";
+    return "Cish LLVM Function Pass";
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
@@ -498,8 +498,8 @@ public:
   }
 };
 
-char CishFunctionConvertPass::ID = 0;
+char CishLLVMFunctionConvertPass::ID = 0;
 
-Pass* createCishFunctionConvertPass(cish::CishContext& cishContext) {
-  return new CishFunctionConvertPass(cishContext);
+Pass* createCishLLVMFunctionConvertPass(cish::CishLLVMContext& cishContext) {
+  return new CishLLVMFunctionConvertPass(cishContext);
 }

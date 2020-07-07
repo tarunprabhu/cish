@@ -23,8 +23,6 @@
 #include "Options.h"
 #include "Vector.h"
 
-#include <clang/Analysis/CFG.h>
-
 using namespace clang;
 
 namespace cish {
@@ -34,17 +32,18 @@ protected:
   const Vector<std::string> loopVarsBase;
 
 protected:
-  std::string getNameFor(UnaryOperator* unOp) {
+  std::string getNameFor(UnaryOperator* unOp, const NameGenerator& names) {
     if(unOp->getOpcode() == UO_AddrOf) {
-      std::string newName = getNameFor(unOp->getSubExpr());
+      std::string newName = getNameFor(unOp->getSubExpr(), names);
       if(newName.size())
         return newName + "_a";
     }
     return "";
   }
 
-  std::string getNameFor(ArraySubscriptExpr* arrExpr) {
-    std::string newName = getNameFor(arrExpr->getBase());
+  std::string getNameFor(ArraySubscriptExpr* arrExpr,
+                         const NameGenerator& names) {
+    std::string newName = getNameFor(arrExpr->getBase(), names);
     if(newName.size())
       return newName + "_e";
     return "";
@@ -68,23 +67,22 @@ protected:
     return "";
   }
 
-  std::string getNameFor(DeclRefExpr* declRef) {
-    NameGenerator& names = cishContext.getNameGenerator();
+  std::string getNameFor(DeclRefExpr* declRef, const NameGenerator& names) {
     if(auto* var = dyn_cast<VarDecl>(declRef->getDecl()))
       if(not names.isGeneratedName(var->getName()))
         return var->getName();
     return "";
   }
 
-  std::string getNameFor(Expr* expr) {
+  std::string getNameFor(Expr* expr, const NameGenerator& names) {
     if(auto* unOp = dyn_cast<UnaryOperator>(expr))
-      return getNameFor(unOp);
+      return getNameFor(unOp, names);
     else if(auto* arrExpr = dyn_cast<ArraySubscriptExpr>(expr))
-      return getNameFor(arrExpr);
+      return getNameFor(arrExpr, names);
     else if(auto* memberExpr = dyn_cast<MemberExpr>(expr))
-      return getNameFor(memberExpr);
+      return getNameFor(memberExpr, names);
     else if(auto* declRef = dyn_cast<DeclRefExpr>(expr))
-      return getNameFor(declRef);
+      return getNameFor(declRef, names);
     else if(isa<CXXBoolLiteralExpr>(expr))
       return "cb";
     else if(isa<CharacterLiteral>(expr))
@@ -186,9 +184,7 @@ protected:
     return Vector<VarDecl*>();
   }
 
-  bool renameLoopVariables() {
-    NameGenerator& names = cishContext.getNameGenerator();
-
+  bool renameLoopVariables(NameGenerator& names) {
     Map<VarDecl*, std::string> newLoopVars;
     for(auto& i : getLoops()) {
       Stmt* loop = i.first;
@@ -224,8 +220,8 @@ public:
   bool process(FunctionDecl* f) {
     bool changed = false;
 
-    NameGenerator& names = cishContext.getNameGenerator();
-    changed |= renameLoopVariables();
+    NameGenerator& names = cishContext.getNameGenerator(f);
+    changed |= renameLoopVariables(names);
     Set<VarDecl*> renamed;
 
     bool iterChanged = false;
@@ -236,7 +232,7 @@ public:
         if(names.isGeneratedName(var->getName()) and (not renamed.contains(var))
            and ast->hasSingleDef(var)) {
           Expr* rhs = ast->getSingleDefRHS(var);
-          std::string newName = getNameFor(rhs);
+          std::string newName = getNameFor(rhs, names);
           if(auto* declRef = dyn_cast<DeclRefExpr>(rhs))
             if(auto* param = dyn_cast<ParmVarDecl>(declRef->getDecl()))
               newName = param->getName().str() + "_p";
