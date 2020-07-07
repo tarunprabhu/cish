@@ -306,6 +306,10 @@ public:
   bool operator>=(const Vector<T>& c2) const {
     return _impl >= c2._impl;
   }
+
+  Vector<T> clone() const {
+    return Vector(*this);
+  }
 };
 
 } // namespace cish

@@ -363,7 +363,7 @@ ASTStreamer& ASTStreamer::operator<<(QualType qual) {
   const Type* type = qual.getTypePtr();
   const ConstantArrayType* aty = dyn_cast<ConstantArrayType>(type);
   if(aty)
-    *this << getBaseType(aty);
+    *this << Clang::getBaseType(aty);
   else
     *this << type;
   if(qual.isConstQualified())
@@ -513,7 +513,7 @@ ASTStreamer& ASTStreamer::operator<<(const InitListExpr* list) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const DeclRefExpr* declRefExpr) {
-  const Decl* decl = declRefExpr->getFoundDecl();
+  const Decl* decl = declRefExpr->getDecl();
   if(const auto* namedDecl = dyn_cast<NamedDecl>(decl))
     return *this << namedDecl->getName();
 

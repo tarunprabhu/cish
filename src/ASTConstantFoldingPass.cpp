@@ -17,7 +17,6 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
@@ -69,11 +68,11 @@ protected:
     QualType type = lhs->getType();
     switch(op) {
     case BO_And:
-      return builder.createBoolLiteral(l & r, type);
+      return ast->createBoolLiteral(l & r, type);
     case BO_Or:
-      return builder.createBoolLiteral(l | r, type);
+      return ast->createBoolLiteral(l | r, type);
     case BO_Xor:
-      return builder.createBoolLiteral(l ^ r, type);
+      return ast->createBoolLiteral(l ^ r, type);
     default:
       fatal(error() << "Unexpected operator for binary operands: "
                     << BinaryOperator::getOpcodeStr(op));
@@ -93,13 +92,13 @@ protected:
     switch(op) {
     case BO_Add:
       res += r;
-      return builder.createIntLiteral(res, type);
+      return ast->createIntLiteral(res, type);
     case BO_Sub:
       res -= r;
-      return builder.createIntLiteral(res, type);
+      return ast->createIntLiteral(res, type);
     case BO_Mul:
       res *= r;
-      return builder.createIntLiteral(res, type);
+      return ast->createIntLiteral(res, type);
     case BO_Div:
     case BO_Rem:
       fatal(error() << "Not implemented: Operation in constant propagation: "
@@ -107,44 +106,44 @@ protected:
       break;
     case BO_And:
       res &= r;
-      return builder.createIntLiteral(res, type);
+      return ast->createIntLiteral(res, type);
     case BO_Or:
       res |= r;
-      return builder.createIntLiteral(res, type);
+      return ast->createIntLiteral(res, type);
     case BO_Xor:
       res ^= r;
-      return builder.createIntLiteral(res, type);
+      return ast->createIntLiteral(res, type);
     case BO_Shl:
       res <<= r;
-      return builder.createIntLiteral(res, type);
+      return ast->createIntLiteral(res, type);
     case BO_Shr:
       fatal(error() << "Not implemented: >> in constant propagation");
       break;
-      // return builder.createIntLiteral(res, type);
+      // return ast->createIntLiteral(res, type);
     case BO_EQ:
-      return builder.createBoolLiteral(l == r);
+      return ast->createBoolLiteral(l == r);
     case BO_NE:
-      return builder.createBoolLiteral(l != r);
+      return ast->createBoolLiteral(l != r);
     case BO_LT:
       if(isSigned)
-        return builder.createBoolLiteral(l.slt(r));
+        return ast->createBoolLiteral(l.slt(r));
       else
-        return builder.createBoolLiteral(l.ult(r));
+        return ast->createBoolLiteral(l.ult(r));
     case BO_LE:
       if(isSigned)
-        return builder.createBoolLiteral(l.sle(r));
+        return ast->createBoolLiteral(l.sle(r));
       else
-        return builder.createBoolLiteral(l.ule(r));
+        return ast->createBoolLiteral(l.ule(r));
     case BO_GT:
       if(isSigned)
-        return builder.createBoolLiteral(l.sgt(r));
+        return ast->createBoolLiteral(l.sgt(r));
       else
-        return builder.createBoolLiteral(l.ugt(r));
+        return ast->createBoolLiteral(l.ugt(r));
     case BO_GE:
       if(isSigned)
-        return builder.createBoolLiteral(l.sge(r));
+        return ast->createBoolLiteral(l.sge(r));
       else
-        return builder.createBoolLiteral(l.uge(r));
+        return ast->createBoolLiteral(l.uge(r));
     default:
       fatal(error() << "Unknown binary operator: "
                     << BinaryOperator::getOpcodeStr(op));
@@ -162,58 +161,58 @@ protected:
     QualType type = lhs->getType();
     switch(op) {
     case BO_Add:
-      return builder.createFloatLiteral(l + r, type);
+      return ast->createFloatLiteral(l + r, type);
     case BO_Sub:
-      return builder.createFloatLiteral(l - r, type);
+      return ast->createFloatLiteral(l - r, type);
     case BO_Mul:
-      return builder.createFloatLiteral(l * r, type);
+      return ast->createFloatLiteral(l * r, type);
     case BO_Div:
-      return builder.createFloatLiteral(l / r, type);
+      return ast->createFloatLiteral(l / r, type);
     case BO_Rem:
       fatal(error() << "Operator % not implemneted for floats");
     case BO_EQ:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpEqual:
-        return builder.createBoolLiteral(true);
+        return ast->createBoolLiteral(true);
       default:
-        return builder.createBoolLiteral(false);
+        return ast->createBoolLiteral(false);
       }
     case BO_NE:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpUnordered:
-        return builder.createBoolLiteral(true);
+        return ast->createBoolLiteral(true);
       default:
-        return builder.createBoolLiteral(false);
+        return ast->createBoolLiteral(false);
       }
     case BO_LT:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpLessThan:
-        return builder.createBoolLiteral(true);
+        return ast->createBoolLiteral(true);
       default:
-        return builder.createBoolLiteral(false);
+        return ast->createBoolLiteral(false);
       }
     case BO_LE:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpLessThan:
       case llvm::APFloat::cmpResult::cmpEqual:
-        return builder.createBoolLiteral(true);
+        return ast->createBoolLiteral(true);
       default:
-        return builder.createBoolLiteral(false);
+        return ast->createBoolLiteral(false);
       }
     case BO_GT:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpGreaterThan:
-        return builder.createBoolLiteral(true);
+        return ast->createBoolLiteral(true);
       default:
-        return builder.createBoolLiteral(false);
+        return ast->createBoolLiteral(false);
       }
     case BO_GE:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpGreaterThan:
       case llvm::APFloat::cmpResult::cmpEqual:
-        return builder.createBoolLiteral(true);
+        return ast->createBoolLiteral(true);
       default:
-        return builder.createBoolLiteral(false);
+        return ast->createBoolLiteral(false);
       }
     default:
       fatal(error() << "Unexpected binary operator for floating point: "
@@ -247,7 +246,7 @@ protected:
       if(isZero(binOp->getRHS()))
         return binOp->getLHS();
       else if(isZero(binOp->getLHS()))
-        return builder.createUnaryOperator(
+        return ast->createUnaryOperator(
             binOp->getRHS(), UO_Minus, binOp->getRHS()->getType());
       break;
     case BO_Mul:
@@ -309,12 +308,6 @@ public:
     case BO_Xor:
     case BO_Shl:
     case BO_Shr:
-    case BO_EQ:
-    case BO_NE:
-    case BO_LT:
-    case BO_LE:
-    case BO_GT:
-    case BO_GE:
       if(Expr* eval = evaluateIdentity(binOp)) {
         changed |= ast->replaceExprWith(binOp, eval);
       } else if(isConstant(lhs) and isConstant(rhs)) {
@@ -325,6 +318,8 @@ public:
           if(isConstant(lhsOp->getRHS())
              and canAssociate(lhsOp->getOpcode(), op)) {
             if(Expr* eval = evaluate(op, lhsOp->getRHS(), rhs)) {
+              llvm::errs() << "binOp1: " << Clang::toString(binOp, astContext)
+                           << "\n";
               changed |= ast->replaceExprWith(binOp->getLHS(), lhsOp->getLHS());
               changed |= ast->replaceExprWith(binOp->getRHS(), eval);
             }
@@ -335,6 +330,8 @@ public:
           if(isConstant(rhsOp->getLHS())
              and canAssociate(op, rhsOp->getOpcode())) {
             if(Expr* eval = evaluate(op, lhs, rhsOp->getLHS())) {
+              llvm::errs() << "binOp2: " << Clang::toString(binOp, astContext)
+                           << "\n";
               changed |= ast->replaceExprWith(binOp->getLHS(), eval);
               changed |= ast->replaceExprWith(binOp->getRHS(), rhsOp->getRHS());
             }
@@ -350,8 +347,7 @@ public:
   }
 
 public:
-  ASTConstantFoldingPass(CishContext& context)
-      : ASTFunctionPass(context) {
+  ASTConstantFoldingPass(CishContext& context) : ASTFunctionPass(context) {
     ;
   }
 

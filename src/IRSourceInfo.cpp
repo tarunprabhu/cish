@@ -165,7 +165,7 @@ void SourceInfo::collectStructs(ArrayType* aty, const DIType* md) {
   if(const auto* comp = dyn_cast<DICompositeType>(md)) {
     switch(comp->getTag()) {
     case dwarf::DW_TAG_array_type:
-      return collectStructs(getBaseType(aty), comp->getBaseType());
+      return collectStructs(LLVM::getBaseType(aty), comp->getBaseType());
     default:
       if(opts().verbose)
         warning() << "Unexpected tag for array type: " << *aty << "\n";
@@ -339,7 +339,7 @@ void SourceInfo::runOnFunction(const Function& f) {
     // the return argument
     bool sret = false;
     if(fty->getNumParams())
-      sret = getArg(f, 0).hasStructRetAttr();
+      sret = LLVM::getArg(f, 0).hasStructRetAttr();
 
     for(const DINode* op : subp->getRetainedNodes()) {
       if(const auto* di = dyn_cast<DILocalVariable>(op)) {
@@ -367,7 +367,7 @@ void SourceInfo::runOnFunction(const Function& f) {
 
     // Associate names
     for(const auto& i : sourceArgs)
-      valueNames[&getArg(f, i.first)] = i.second->getName();
+      valueNames[&LLVM::getArg(f, i.first)] = i.second->getName();
 
     for(const DILocalVariable* di : sourceLocals)
       if(dbgElems.contains(di))

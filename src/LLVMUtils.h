@@ -20,14 +20,22 @@
 #ifndef CISH_LLVM_UTILS_H
 #define CISH_LLVM_UTILS_H
 
+#include "List.h"
 #include "Vector.h"
 
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Function.h>
 
 // A collection of utilities to because LLVM's API is inconsistent across
 // versions and missing some useful functions in some versions
 
 namespace cish {
+
+namespace LLVM {
+
+List<llvm::Loop*> collectLoops(const llvm::LoopInfo& li);
+
+bool isMetadataFunction(const llvm::Function& f);
 
 /// @param f The llvm::Function
 /// @param i The argument requested
@@ -57,10 +65,14 @@ llvm::Type* getBaseType(llvm::ArrayType* aty);
 
 const llvm::Value* stripCasts(const llvm::Value* v);
 
+std::string formatName(const std::string& name);
+
 template <typename T>
 llvm::ArrayRef<T> makeArrayRef(const cish::Vector<T>& vec) {
   return llvm::ArrayRef<T>(vec.data(), vec.size());
 }
+
+} // namespace LLVM
 
 } // namespace cish
 

@@ -55,18 +55,15 @@ public:
       if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
         if(unOp->getOpcode() == UO_Minus) {
           binOp->setOpcode(BO_Sub);
-          ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
-          changed |= true;
+          changed |= ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
         }
       } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
         llvm::APInt ival = intLit->getValue();
         if(ival.isNegative()) {
           ival.negate();
           binOp->setOpcode(BO_Sub);
-          ast->replaceExprWith(
-              binOp->getRHS(),
-              builder.createIntLiteral(ival, intLit->getType()));
-          changed |= true;
+          changed |= ast->replaceExprWith(
+              binOp->getRHS(), ast->createIntLiteral(ival, intLit->getType()));
         }
       }
       break;
@@ -78,18 +75,15 @@ public:
       if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
         if(unOp->getOpcode() == UO_Minus) {
           binOp->setOpcode(BO_Add);
-          ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
-          changed |= true;
+          changed |= ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
         }
       } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
         llvm::APInt ival = intLit->getValue();
         if(ival.isNegative()) {
           ival.negate();
           binOp->setOpcode(BO_Add);
-          ast->replaceExprWith(
-              binOp->getRHS(),
-              builder.createIntLiteral(ival, intLit->getType()));
-          changed |= true;
+          changed |= ast->replaceExprWith(
+              binOp->getRHS(), ast->createIntLiteral(ival, intLit->getType()));
         }
       }
       break;
@@ -99,10 +93,9 @@ public:
       // Replace: op1 <= op2
       //
       if(auto* subOp = dyn_cast<BinaryOperator>(lhs)) {
-        if((subOp->getOpcode() == BO_Sub) and isOne(subOp->getRHS())) {
+        if((subOp->getOpcode() == BO_Sub) and Clang::isOne(subOp->getRHS())) {
           binOp->setOpcode(BO_LE);
-          ast->replaceExprWith(binOp->getLHS(), subOp->getRHS());
-          changed |= true;
+          changed |= ast->replaceExprWith(binOp->getLHS(), subOp->getLHS());
         }
       }
       break;
@@ -123,8 +116,11 @@ public:
         // Match:   *&op
         // Replace: op
         //
-        if(subOp->getOpcode() == UO_AddrOf)
+        if(subOp->getOpcode() == UO_AddrOf) {
+          if(VarDecl* var = Clang::getVar(subOp->getSubExpr()))
+            ast->resetAddressTaken(var);
           changed |= ast->replaceExprWith(unOp, subOp->getSubExpr());
+        }
       break;
     case UO_LNot:
       if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr())) {
@@ -142,22 +138,28 @@ public:
         switch(binOp->getOpcode()) {
         case BO_EQ:
           binOp->setOpcode(BO_NE);
-          changed |= true;
+          changed |= ast->replaceExprWith(unOp, binOp);
+          break;
         case BO_NE:
           binOp->setOpcode(BO_EQ);
-          changed |= true;
+          changed |= ast->replaceExprWith(unOp, binOp);
+          break;
         case BO_GT:
           binOp->setOpcode(BO_LE);
-          changed |= true;
+          changed |= ast->replaceExprWith(unOp, binOp);
+          break;
         case BO_GE:
           binOp->setOpcode(BO_LT);
-          changed |= true;
+          changed |= ast->replaceExprWith(unOp, binOp);
+          break;
         case BO_LT:
           binOp->setOpcode(BO_GE);
-          changed |= true;
+          changed |= ast->replaceExprWith(unOp, binOp);
+          break;
         case BO_LE:
           binOp->setOpcode(BO_GT);
-          changed |= true;
+          changed |= ast->replaceExprWith(unOp, binOp);
+          break;
         default:
           break;
         }
@@ -171,7 +173,8 @@ public:
   }
 
 public:
-  ASTSimplifyOperatorsPass(CishContext& context) : ASTFunctionPass(context) {
+  ASTSimplifyOperatorsPass(CishContext& context)
+      : ASTFunctionPass(context, PostOrder | IterateUntilConvergence) {
     ;
   }
 

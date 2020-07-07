@@ -17,18 +17,49 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#ifndef CISH_IR_PASSES_H
-#define CISH_IR_PASSES_H
+#ifndef CISH_AST_PASS_H
+#define CISH_AST_PASS_H
 
-#include <llvm/Pass.h>
+#include <clang/AST/ASTContext.h>
 
 namespace cish {
 
 class CishContext;
+class AST;
+
+class ASTPass {
+protected:
+  static constexpr unsigned ModifiesAST = 0x1;
+  static constexpr unsigned PostOrder = 0x2;
+  static constexpr unsigned IterateUntilConvergence = 0x4;
+
+protected:
+  CishContext& cishContext;
+  clang::ASTContext& astContext;
+  unsigned flags;
+  AST* ast;
+
+private:
+  bool hasFlag(unsigned flag) const;
+
+protected:
+  ASTPass(CishContext& cishContext, unsigned flags);
+  ASTPass(const ASTPass&) = delete;
+  ASTPass(ASTPass&&) = delete;
+
+  bool hasModifiesAST() const;
+  bool hasPostorder() const;
+  bool hasIterateUntilConvergence() const;
+
+public:
+  virtual ~ASTPass() = default;
+
+  virtual llvm::StringRef getPassName() const = 0;
+  virtual llvm::StringRef getPassLongName() const;
+
+  virtual bool runOnFunction(clang::FunctionDecl* f) = 0;
+};
 
 } // namespace cish
 
-llvm::Pass* createIRPrepareFunctionPass(cish::CishContext& cishContext);
-llvm::Pass* createIRPrepareModulePass(cish::CishContext& cishContext);
-
-#endif // CISH_IR_PASSES_H
+#endif // CISH_AST_PASS_H

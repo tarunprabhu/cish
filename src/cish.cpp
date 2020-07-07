@@ -24,7 +24,6 @@
 #include "IRPasses.h"
 #include "IRSourceInfo.h"
 #include "LLVMBackend.h"
-#include "LLVMFrontend.h"
 #include "NameGenerator.h"
 #include "Options.h"
 #include "Set.h"
@@ -93,7 +92,8 @@ int main(int argc, char* argv[]) {
   // Now that the clang AST Context has been set up, get down to business
   llvm::legacy::PassManager pm;
   pm.add(llvm::createDemoteRegisterToMemoryPass());
-  pm.add(createIRPreparePass(cishContext));
+  pm.add(createIRPrepareModulePass(cishContext));
+  pm.add(createIRPrepareFunctionPass(cishContext));
   pm.add(createCishModuleConvertPass(cishContext));
   pm.add(createCishFunctionConvertPass(cishContext));
   pm.add(createCishASTPassesDriverPass(cishContext));

@@ -18,7 +18,6 @@
 //  ---------------------------------------------------------------------------
 
 #include "AST.h"
-#include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
@@ -39,14 +38,19 @@ public:
     do {
       iterChanged = false;
 
-      for(VarDecl* var : ast->vars())
+      for(VarDecl* var : ast->getVars()) {
         if(not ast->isUsed(var))
-          for(Stmt* def : ast->getTopLevelDefs(var))
-            iterChanged |= ast->erase(def);
+          for(Stmt* def : ast->getDefs(var).clone())
+            if(ast->isTopLevel(def))
+              iterChanged |= ast->erase(def);
+      }
 
-      for(VarDecl* var : ast->getVars())
-        if(ast->hasZeroTopLevelDefs(var) and ast->hasZeroTopLevelUses(var))
+      for(VarDecl* var : ast->getVars().clone()) {
+        if(ast->hasZeroDefs(var) and ast->hasZeroUses(var)) {
           iterChanged |= ast->erase(var);
+          f->removeDecl(var);
+        }
+      }
 
       changed |= iterChanged;
     } while(iterChanged);
@@ -55,7 +59,7 @@ public:
   }
 
 public:
-  ASTDCEPass(CishContext& context) : ASTFunctionPass(context, true) {
+  ASTDCEPass(CishContext& context) : ASTFunctionPass(context, ModifiesAST) {
     ;
   }
 

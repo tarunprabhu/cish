@@ -17,7 +17,7 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "Structure.h"
+#include "StructureTree.h"
 #include "Diagnostics.h"
 #include "Map.h"
 
@@ -243,6 +243,15 @@ bool StructNode::operator==(const StructNode& other) const {
 
 bool StructNode::operator!=(const StructNode& other) const {
   return this != &other;
+}
+
+Entry::Entry(llvm::LLVMContext& llvmContext, StructNode& entry)
+    : StructNode(StructNode::S_Entry) {
+  addSuccessor(llvm::ConstantInt::getTrue(llvmContext), entry);
+}
+
+StructNode& Entry::getEntry() const {
+  return getSuccessor();
 }
 
 Block::Block(const BasicBlock& bb) : StructNode(StructNode::S_Block), bb(bb) {

@@ -18,7 +18,6 @@
 //  ---------------------------------------------------------------------------
 
 #include "AST.h"
-#include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
 #include "ClangUtils.h"
 
@@ -36,7 +35,7 @@ namespace cish {
 
 class ASTConvertLoopsPass : public ASTFunctionPass<ASTConvertLoopsPass> {
 protected:
-  struct Loop {
+  struct LoopInfo {
     VarDecl* var;
     Stmt* initStmt;
     Expr* init;
@@ -49,18 +48,18 @@ protected:
       return valid;
     }
 
-    Loop()
+    LoopInfo()
         : var(nullptr), initStmt(nullptr), init(nullptr), cond(nullptr),
           latch(nullptr), step(nullptr), valid(false) {
       ;
     }
 
-    Loop(VarDecl* var,
-         Stmt* initStmt,
-         Expr* init,
-         IfStmt* cond,
-         Stmt* latch,
-         Expr* step)
+    LoopInfo(VarDecl* var,
+             Stmt* initStmt,
+             Expr* init,
+             IfStmt* cond,
+             Stmt* latch,
+             Expr* step)
         : var(var), initStmt(initStmt), init(init), cond(cond), latch(latch),
           step(step), valid(true) {
       ;
@@ -76,6 +75,8 @@ protected:
   };
 
 protected:
+  Vector<DoStmt*> doLoops;
+  Vector<WhileStmt*> whileLoops;
   const Map<BinaryOperator::Opcode, BinaryOperator::Opcode> invOps;
 
 protected:
@@ -120,13 +121,13 @@ protected:
   // loop.
   // FIXME: Relax the conditions to be able to simplify more loops
   bool isLoopVariable(VarDecl* var, Stmt* loop) {
-    for(Stmt* use : ast->tluses(var))
+    for(Stmt* use : ast->getUses(var))
       if(not ast->isContainedIn(use, loop))
         return false;
 
     unsigned init = 0;
     unsigned incr = 0;
-    for(Stmt* def : ast->tldefs(var))
+    for(Stmt* def : ast->getDefs(var))
       if((not ast->isContainedIn(def, loop)) and dominates(def, loop))
         init += 1;
       else if(ast->isContainedIn(def, loop))
@@ -135,51 +136,56 @@ protected:
     return (init <= 1) and (incr == 1);
   }
 
-  Loop getLoopFor(Stmt* loop) {
+  LoopInfo getLoopInfo(WhileStmt* loop) {
+    return LoopInfo();
+  }
+
+  LoopInfo getLoopInfo(DoStmt* loop) {
+    CompoundStmt* body = cast<CompoundStmt>(loop->getBody());
     Vector<IfStmt*> exiting;
     Vector<VarDecl*> loopVars;
-    for(Stmt* stmt : ast->children(loop)) {
+    for(Stmt* stmt : body->body()) {
       if(isExiting(stmt)) {
         IfStmt* ifStmt = cast<IfStmt>(stmt);
         exiting.push_back(ifStmt);
-        for(VarDecl* var : getVarsInStmt(ifStmt->getCond()))
+        for(VarDecl* var : Clang::getVarsInStmt(ifStmt->getCond()))
           if(isLoopVariable(var, loop))
             loopVars.push_back(var);
       }
     }
 
     if(not((exiting.size() == 1) and (loopVars.size() == 1)))
-      return Loop();
+      return LoopInfo();
 
     // The loop variable has a single definition outside the loop and that
     // definition is the initial value of the variable
     VarDecl* var = loopVars.front();
     IfStmt* cond = exiting.front();
 
-    // If there is a single loop variable, then it checks that there is a single
+    // If there is a single loop variable, then check that there is a single
     // initialization value and a single latch
     BinaryOperator* init = nullptr;
     Vector<BinaryOperator*> latches;
-    for(Stmt* def : ast->tldefs(var))
+    for(Stmt* def : ast->getDefs(var)) {
       if(not ast->isContainedIn(def, loop))
         init = cast<BinaryOperator>(def);
       else
         latches.push_back(cast<BinaryOperator>(def));
+    }
 
-    CompoundStmt* body = cast<CompoundStmt>(cast<DoStmt>(loop)->getBody());
     if(*body->body_begin() == cond) {
       // If the first statement in the loop is the exiting if statement, then
       // the loop should be transformed into a while loop.
       // FIXME: We may be able to do something smarter and convert it into a for
       // loop even in this case
-      return Loop(var, init, init->getRHS(), cond, nullptr, nullptr);
+      return LoopInfo(var, init, init->getRHS(), cond, nullptr, nullptr);
     } else if(latches.size() == 1) {
       // There should only be one statement after the loop exit block
       // and the end of the loop. That should be a def of the loop variable
       BinaryOperator* latch = latches.front();
       Expr* step = nullptr;
       if(auto* bin = dyn_cast<BinaryOperator>(latch->getRHS()))
-        step = getVar(bin->getLHS()) ? bin->getRHS() : bin->getLHS();
+        step = Clang::getVar(bin->getLHS()) ? bin->getRHS() : bin->getLHS();
 
       if(step) {
         Stmt** stmts = body->body_begin();
@@ -188,34 +194,11 @@ protected:
           if(stmts[i] == cond)
             break;
         if((i == (body->size() - 2)) and (stmts[i + 1] == latch))
-          return Loop(var, init, init->getRHS(), cond, latch, step);
+          return LoopInfo(var, init, init->getRHS(), cond, latch, step);
       }
     }
 
-    return Loop();
-  }
-
-  Stmt* getLoopBody(Stmt* loop) {
-    if(auto* doStmt = dyn_cast<DoStmt>(loop))
-      return doStmt->getBody();
-    else if(auto* forStmt = dyn_cast<ForStmt>(loop))
-      return forStmt->getBody();
-    else if(auto* whileStmt = dyn_cast<WhileStmt>(loop))
-      return whileStmt->getBody();
-    else
-      fatal(error() << "Not a loop: " << loop->getStmtClassName());
-    return nullptr;
-  }
-
-  void setLoopBody(Stmt* loop, Stmt* body) {
-    if(auto* doStmt = dyn_cast<DoStmt>(loop))
-      return doStmt->setBody(body);
-    else if(auto* forStmt = dyn_cast<ForStmt>(loop))
-      return forStmt->setBody(body);
-    else if(auto* whileStmt = dyn_cast<WhileStmt>(loop))
-      return whileStmt->setBody(body);
-    else
-      fatal(error() << "Not a loop: " << loop->getStmtClassName());
+    return LoopInfo();
   }
 
   // This tries to normalize for loops so the LHS of the condition consists
@@ -231,16 +214,21 @@ protected:
     //   (var <op> step) <= end  ...  var <= end <inv-op> step
     //
     if(auto* subOp = dyn_cast<BinaryOperator>(lhs)) {
-      if(getVar(subOp->getLHS())) {
-        if((op == BO_LE) and (isEqual(subOp->getRHS(), step))) {
+      if(Clang::getVar(subOp->getLHS())) {
+        if((op == BO_LE) and (Clang::isEqual(subOp->getRHS(), step))) {
           switch(subOp->getOpcode()) {
           case BO_Add:
           case BO_Sub:
           case BO_Mul:
           case BO_Div:
-            cond->setLHS(subOp->getLHS());
-            cond->setRHS(builder.createBinaryOperator(
-                rhs, step, invOps.at(subOp->getOpcode()), step->getType()));
+            ast->replaceExprWith(cond->getLHS(),
+                                 ast->cloneExpr(subOp->getLHS()));
+            ast->replaceExprWith(
+                cond->getRHS(),
+                ast->createBinaryOperator(ast->cloneExpr(rhs),
+                                          ast->cloneExpr(step),
+                                          invOps.at(subOp->getOpcode()),
+                                          step->getType()));
             break;
           default:
             break;
@@ -252,13 +240,13 @@ protected:
     return cond;
   }
 
-  bool replaceLoopWithForLoop(Stmt* loop,
-                              VarDecl* var,
-                              Stmt* initStmt,
-                              Expr* init,
-                              IfStmt* exit,
-                              Stmt* latch,
-                              Expr* step) {
+  bool replaceWithForLoop(DoStmt* loop,
+                          VarDecl* var,
+                          Stmt* initStmt,
+                          Expr* init,
+                          IfStmt* exit,
+                          Stmt* latch,
+                          Expr* step) {
     bool changed = false;
 
     // FIXME: There may be other increment conditions for the loop variable
@@ -272,75 +260,120 @@ protected:
       BinaryOperator::Opcode stepOp = latchRhs->getOpcode();
       BinaryOperator::Opcode condOp = cond->getOpcode();
 
-      BinaryOperator* newInit = builder.createBinaryOperator(
-          latchLhs, init, BO_Assign, latchLhs->getType());
-      BinaryOperator* newCondLhs = builder.createBinaryOperator(
-          cond->getLHS(), step, invOps.at(stepOp), step->getType());
-      BinaryOperator* newCond = builder.createBinaryOperator(
-          newCondLhs, cond->getRHS(), invOps.at(condOp), newCondLhs->getType());
+      BinaryOperator* newInit
+          = ast->createBinaryOperator(ast->cloneExpr(latchLhs),
+                                      ast->cloneExpr(init),
+                                      BO_Assign,
+                                      latchLhs->getType());
+      BinaryOperator* newCondLhs
+          = ast->createBinaryOperator(ast->cloneExpr(cond->getLHS()),
+                                      ast->cloneExpr(step),
+                                      invOps.at(stepOp),
+                                      step->getType());
+      BinaryOperator* newCond
+          = ast->createBinaryOperator(newCondLhs,
+                                      ast->cloneExpr(cond->getRHS()),
+                                      invOps.at(condOp),
+                                      newCondLhs->getType());
       newCond = normalizeForLoopCondition(newCond, stepOp, step);
-      BinaryOperator* newLatch = builder.createBinaryOperator(
-          latchLhs, latchRhs, BO_Assign, latchLhs->getType());
-      ForStmt* forStmt = builder.createForStmt(
-          newInit, newCond, newLatch, getLoopBody(loop));
+      BinaryOperator* newLatch
+          = ast->createBinaryOperator(ast->cloneExpr(latchLhs),
+                                      ast->cloneExpr(latchRhs),
+                                      BO_Assign,
+                                      latchLhs->getType());
 
-      setLoopBody(loop, nullptr);
+      ast->erase(initStmt);
+      ast->erase(exit);
+      ast->erase(latch);
+      Stmt* body = ast->clone(loop->getBody());
+      ForStmt* forStmt = ast->createForStmt(newInit, newCond, newLatch, body);
+
       changed |= ast->replaceStmtWith(loop, forStmt);
-      changed |= ast->erase(initStmt);
-      changed |= ast->erase(exit);
-      changed |= ast->erase(latch);
     }
 
     return changed;
   }
 
-  bool replaceLoopWithWhileLoop(Stmt* loop, VarDecl* var, IfStmt* cond) {
-    fatal(error() << "Not implemented: replace while loop\n");
-    return true;
+  bool replaceWithWhileLoop(DoStmt* loop, VarDecl* var, IfStmt* cond) {
+    bool changed = false;
+
+    fatal(error() << "Not implemented: replace do loop with while loop\n");
+
+    return changed;
+  }
+
+  bool replaceWithForLoop(WhileStmt* loop,
+                          VarDecl* var,
+                          Stmt* initStmt,
+                          Expr* init,
+                          IfStmt* exit,
+                          Stmt* latch,
+                          Expr* step) {
+    bool changed = false;
+
+    fatal(error() << "Not implemented: replace while loop with for loop\n");
+
+    return changed;
   }
 
 public:
+  bool process(DoStmt* doStmt) {
+    doLoops.push_back(doStmt);
+
+    return false;
+  }
+
+  bool process(WhileStmt* whileStmt) {
+    whileLoops.push_back(whileStmt);
+
+    return false;
+  }
+
   bool process(FunctionDecl* f) {
     bool changed = false;
 
-    Vector<Stmt*> loops = ast->getLoops();
-    std::sort(loops.begin(), loops.end(), [&](Stmt* a, Stmt* b) {
-      return ast->getDepth(a) < ast->getDepth(b);
-    });
-    std::reverse(loops.begin(), loops.end());
-    for(Stmt* l : loops) {
-      if(Loop loop = getLoopFor(l)) {
-        if(loop.isForLoop())
-          changed |= replaceLoopWithForLoop(l,
-                                            loop.var,
-                                            loop.initStmt,
-                                            loop.init,
-                                            loop.cond,
-                                            loop.latch,
-                                            loop.step);
+    // // The loops must be processed from the inside out. The innermost loops
+    // // will have the greatest depth
+    // std::sort(loops.begin(), loops.end(), [&](Stmt* a, Stmt* b) {
+    //   return ast->getDepth(a) < ast->getDepth(b);
+    // });
+    // std::reverse(loops.begin(), loops.end());
+
+    for(DoStmt* loop : doLoops) {
+      if(LoopInfo li = getLoopInfo(loop)) {
+        if(li.isForLoop())
+          changed |= replaceWithForLoop(
+              loop, li.var, li.initStmt, li.init, li.cond, li.latch, li.step);
         else
-          changed |= replaceLoopWithWhileLoop(l, loop.var, loop.cond);
+          changed |= replaceWithWhileLoop(loop, li.var, li.cond);
       }
     }
 
+    for(WhileStmt* loop : whileLoops)
+      if(LoopInfo li = getLoopInfo(loop))
+        changed |= replaceWithForLoop(
+            loop, li.var, li.initStmt, li.init, li.cond, li.latch, li.step);
+
+    llvm::errs() << "changed: " << changed << "\n";
     return changed;
   }
 
 public:
   ASTConvertLoopsPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext, true), invOps({
-                                                {BO_Add, BO_Sub},
-                                                {BO_Sub, BO_Add},
-                                                {BO_Mul, BO_Div},
-                                                {BO_Div, BO_Mul},
+      : ASTFunctionPass(cishContext, ModifiesAST | PostOrder),
+        invOps({
+            {BO_Add, BO_Sub},
+            {BO_Sub, BO_Add},
+            {BO_Mul, BO_Div},
+            {BO_Div, BO_Mul},
 
-                                                {BO_EQ, BO_NE},
-                                                {BO_NE, BO_EQ},
-                                                {BO_GT, BO_LE},
-                                                {BO_LE, BO_GT},
-                                                {BO_LT, BO_GE},
-                                                {BO_GE, BO_LT},
-                                            }) {
+            {BO_EQ, BO_NE},
+            {BO_NE, BO_EQ},
+            {BO_GT, BO_LE},
+            {BO_LE, BO_GT},
+            {BO_LT, BO_GE},
+            {BO_GE, BO_LT},
+        }) {
     ;
   }
 

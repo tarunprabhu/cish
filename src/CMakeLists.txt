@@ -1,14 +1,11 @@
 set(SOURCES
   cish.cpp
   AST.cpp
-  ASTBuilder.cpp
   ASTConstantFoldingPass.cpp
   ASTConvertLoopsPass.cpp
   ASTDeadCodeEliminationPass.cpp
-  ASTDefUseCalculatorPass.cpp
-  ASTExprNumberingPass.cpp
   ASTExprPropagationPass.cpp
-  ASTFunctionPass.cpp
+  ASTPass.cpp
   ASTRenameVarsPass.cpp
   ASTSimplifyOperatorsPass.cpp
   ASTStreamer.cpp
@@ -22,15 +19,19 @@ set(SOURCES
   CishModuleConvertPass.cpp
   ClangUtils.cpp
   Diagnostics.cpp
+  ExprNumberMap.cpp
   LLVMBackend.cpp
-  LLVMFrontend.cpp
+  LLVMCishMetadata.cpp
+  LLVMStructureAnalysis.cpp
   LLVMUtils.cpp
-  IRPreparePass.cpp
+  IRPrepareFunctionPass.cpp
+  IRPrepareModulePass.cpp
   IRSourceInfo.cpp
   NameGenerator.cpp
   Logging.cpp
   Options.cpp
-  Structure.cpp
+  ParentMap.cpp
+  StructureTree.cpp
   StructureAnalysis.cpp)
 
 set(CISH cish)

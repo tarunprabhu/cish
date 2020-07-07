@@ -23,9 +23,11 @@
 #include "ASTPasses.h"
 #include "CishContext.h"
 #include "ClangUtils.h"
+#include "Options.h"
 #include "Logging.h"
 
 using namespace llvm;
+namespace Clang = cish::Clang;
 
 // This is not really a pass
 class CishASTPassesDriverPass : public ModulePass {
@@ -37,15 +39,28 @@ private:
   unsigned passIdx;
 
 protected:
-  void log(clang::FunctionDecl* f, cish::ASTPass* pass = nullptr) {
-    if(cish::Logger log
-       = cish::Logger::openFile(f->getName(), passIdx++, "cish")) {
-      if(pass)
-        log() << "// After " << pass->getPassName() << "\n\n";
-      else
-        log() << "// Initial AST\n\n";
-      log() << cish::toString(f, f->getASTContext()) << "\n";
-    }
+  std::string getTag(const std::string& base) {
+    std::string buf;
+    raw_string_ostream ss(buf);
+    ss << base;
+    if(passIdx)
+      ss << "." << passIdx;
+    return ss.str();
+  }
+
+  void
+  logAST(clang::FunctionDecl* f, const std::string& tag) {
+
+    if(cish::opts().has(cish::LogCategory::AST))
+      if(cish::Logger log = cish::Logger::openFile(f->getName(), tag, "cish"))
+        log() << Clang::toString(f, f->getASTContext()) << "\n";
+  }
+
+  void logCFG(clang::FunctionDecl* f, const std::string& tag) {
+    if(cish::opts().has(cish::LogCategory::CFG))
+      if(cish::Logger log = cish::Logger::openFile(f->getName(), tag, "cfg"))
+        cishContext.getAST(f).getCFG()->print(
+            log(), cishContext.getLangOptions(), true);
   }
 
 public:
@@ -78,10 +93,14 @@ public:
     for(clang::FunctionDecl* f : cishContext.funcs()) {
       cish::message() << "Processing function " << f->getName() << "\n";
       passIdx = 0;
-      log(f);
+      logAST(f, "init");
+      logCFG(f, "init");
       for(cish::ASTPass* pass : passes) {
         pass->runOnFunction(f);
-        log(f, pass);
+        passIdx += 1;
+        // The Cish pass names will always be prefixed with "cish-"
+        logAST(f, getTag(pass->getPassName().substr(5)));
+        logCFG(f, getTag(pass->getPassName().substr(5)));
       }
     }
 

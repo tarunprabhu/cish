@@ -28,7 +28,7 @@
 
 namespace cish {
 
-class ASTBuilder;
+class AST;
 class CishContext;
 class NameGenerator;
 
@@ -37,7 +37,7 @@ protected:
   CishContext& cishContext;
   NameGenerator& names;
   clang::ASTContext& astContext;
-  ASTBuilder& builder;
+  AST* ast;
 
   // The statements comprising the body of the current function being
   // converted

@@ -27,13 +27,15 @@
 
 namespace cish {
 
+namespace Clang {
+
 /// @param aty The clang::ArrayType
 /// @returns The innermost non-array type within @aty
 const clang::Type* getBaseType(const clang::ArrayType* aty);
 
 clang::Expr* stripCasts(clang::Expr* expr);
 
-  /// @returns true if both lhs and rhs are constants of equal value
+/// @returns true if both lhs and rhs are constants of equal value
 bool isEqual(clang::Expr* lhs, clang::Expr* rhs);
 bool isConstant(clang::Expr*, uint64_t val);
 bool isZero(clang::Expr*);
@@ -49,6 +51,8 @@ Vector<clang::BinaryOperator*> getForIncs(clang::ForStmt* forStmt);
 
 std::string toString(clang::Stmt* stmt, clang::ASTContext& astContext);
 std::string toString(clang::FunctionDecl* f, clang::ASTContext& astContext);
+
+} // namespace Clang
 
 } // namespace cish
 

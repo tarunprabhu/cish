@@ -29,6 +29,8 @@ using namespace clang;
 
 namespace cish {
 
+namespace Clang {
+
 class FindVarsInStmt : public RecursiveASTVisitor<FindVarsInStmt> {
 protected:
   Set<VarDecl*>& vars;
@@ -39,7 +41,7 @@ public:
   }
 
   bool VisitDeclRefExpr(DeclRefExpr* ref) {
-    if(auto* var = dyn_cast<VarDecl>(ref->getFoundDecl()))
+    if(auto* var = dyn_cast<VarDecl>(ref->getDecl()))
       if(not isa<ParmVarDecl>(var))
         vars.insert(var);
     return true;
@@ -98,7 +100,7 @@ bool isOne(Expr* expr) {
 
 VarDecl* getVar(Expr* expr) {
   if(auto* ref = dyn_cast<DeclRefExpr>(expr))
-    if(auto* var = dyn_cast<VarDecl>(ref->getFoundDecl()))
+    if(auto* var = dyn_cast<VarDecl>(ref->getDecl()))
       return var;
   return nullptr;
 }
@@ -189,5 +191,7 @@ std::string toString(FunctionDecl* f, ASTContext& astContext) {
 
   return ss.str();
 }
+
+} // namespace Clang
 
 } // namespace cish

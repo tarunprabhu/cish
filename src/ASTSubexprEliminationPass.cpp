@@ -17,9 +17,9 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
 #include "ClangUtils.h"
+#include "NameGenerator.h"
 
 using namespace clang;
 
@@ -34,29 +34,40 @@ namespace cish {
 // expressions into the code
 class ASTSubexprEliminationPass
     : public ASTFunctionPass<ASTSubexprEliminationPass> {
+protected:
+  bool canPropagateSubexpr(VarDecl* var, Stmt* def) {
+    // This is a bit of an optimization and may not always be useful so it may
+    // be a good idea to provide a knob to control it.
+    // The idea is that eliminating subexpressions where the variable is a
+    // generated variable is not terribly useful. So only do it for those
+    // variables that may have come from the source code
+    NameGenerator& names = cishContext.getNameGenerator();
+    if(names.isGeneratedName(var->getName()))
+      return false;
+
+    for(VarDecl* var : Clang::getVarsInStmt(def))
+      if(not ast->hasSingleDef(var))
+        return false;
+    return true;
+  }
+
 public:
   bool process(FunctionDecl* f) {
     bool changed = false;
 
     Map<Expr*, VarDecl*> repl;
-    for(VarDecl* lhs : ast->vars()) {
-      if(Expr* def = ast->getSingleDefRHS(lhs)) {
-        if(ast->getEqvExprs(def).size() > 1) {
-          bool replace = true;
-          for(VarDecl* var : getVarsInStmt(def))
-            if(not ast->hasSingleDef(var))
-              replace = false;
-          if(replace)
+    for(VarDecl* lhs : ast->getVars())
+      if(Expr* def = ast->getSingleDefRHS(lhs))
+        if(ast->getEqvExprs(def).size() > 1)
+          if(canPropagateSubexpr(lhs, def))
             repl[def] = lhs;
-        }
-      }
-    }
 
     for(auto& i : repl) {
       Expr* expr = i.first;
-      Expr* repl = builder.createDeclRefExpr(i.second);
-      llvm::errs() << toString(expr, astContext) << " => "
-                   << toString(repl, astContext) << "\n";
+      Expr* repl = ast->createDeclRefExpr(i.second);
+      llvm::errs() << Clang::toString(expr, astContext) << " => "
+                   << Clang::toString(repl, astContext) << " |"
+                   << ast->getEqvExprs(expr).size() << "|\n";
       changed |= ast->replaceEqvUsesWith(expr, repl);
     }
 

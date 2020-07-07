@@ -17,7 +17,6 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "ASTBuilder.h"
 #include "ASTFunctionPass.h"
 #include "Map.h"
 #include "NameGenerator.h"
@@ -71,7 +70,7 @@ protected:
 
   std::string getNameFor(DeclRefExpr* declRef) {
     NameGenerator& names = cishContext.getNameGenerator();
-    if(auto* var = dyn_cast<VarDecl>(declRef->getFoundDecl()))
+    if(auto* var = dyn_cast<VarDecl>(declRef->getDecl()))
       if(not names.isGeneratedName(var->getName()))
         return var->getName();
     return "";
@@ -100,7 +99,7 @@ protected:
   }
 
   VarDecl* getVarByName(const std::string& name) {
-    for(VarDecl* var : ast->vars())
+    for(VarDecl* var : ast->getVars())
       if(var->getName() == name)
         return var;
     return nullptr;
@@ -163,9 +162,9 @@ protected:
         return allInitializedVariablesLoopLocal(lhs, loop, vars)
                and allInitializedVariablesLoopLocal(rhs, loop, vars);
       } else if(binOp->getOpcode() == BO_Assign) {
-        VarDecl* var = cast<VarDecl>(cast<DeclRefExpr>(lhs)->getFoundDecl());
-        for(Stmt* use : ast->tluses(var))
-          if(not((use == loop) or ast->isContainedIn(use, loop)))
+        VarDecl* var = cast<VarDecl>(cast<DeclRefExpr>(lhs)->getDecl());
+        for(Stmt* use : ast->getUses(var))
+          if(not ast->isContainedIn(use, loop))
             return false;
         vars.push_back(var);
       } else {
@@ -208,14 +207,14 @@ protected:
     for(const auto& i : newLoopVars) {
       const std::string& name = i.second;
       if(VarDecl* var = getVarByName(name))
-        var->setDeclName(builder.createDeclName(names.getNewVarName()));
+        var->setDeclName(ast->createDeclName(names.getNewVarName()));
     }
 
     // Rename loop variables
     for(auto& i : newLoopVars) {
       VarDecl* var = i.first;
       const std::string& name = i.second;
-      var->setDeclName(builder.createDeclName(name));
+      var->setDeclName(ast->createDeclName(name));
     }
 
     return newLoopVars.size();
@@ -233,17 +232,17 @@ public:
     do {
       iterChanged = false;
 
-      for(VarDecl* var : ast->vars()) {
+      for(VarDecl* var : ast->getVars()) {
         if(names.isGeneratedName(var->getName()) and (not renamed.contains(var))
            and ast->hasSingleDef(var)) {
           Expr* rhs = ast->getSingleDefRHS(var);
           std::string newName = getNameFor(rhs);
           if(auto* declRef = dyn_cast<DeclRefExpr>(rhs))
-            if(auto* param = dyn_cast<ParmVarDecl>(declRef->getFoundDecl()))
+            if(auto* param = dyn_cast<ParmVarDecl>(declRef->getDecl()))
               newName = param->getName().str() + "_p";
           if((var->getName() != newName) and newName.size()) {
             var->setDeclName(
-                builder.createDeclName(names.getNewName(newName, false)));
+                ast->createDeclName(names.getNewName(newName, false)));
             renamed.insert(var);
             iterChanged |= true;
           }

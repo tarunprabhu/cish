@@ -42,6 +42,33 @@ using namespace clang;
 
 namespace cish {
 
+static Vector<CFGBlock*> getSuccessors(CFGBlock* block) {
+  // ***********************************************************************
+  //                     FIXME: Possible bug here
+  //
+  // In some cases, a potentially unreachable block ends up here. This may
+  // be the result of the AST getting construction not being correct
+  // becausae of a bug in AST.cpp that does not do the replacements
+  // correctly, but I can't seem to figure out if that is actually the
+  // case because dumping the AST looks correct. As a temporary workaround
+  // look for a potentially unreachable block and handle it correctly
+  // Once it is properly fixed, this function should go away and wherever it
+  // is used, just call the succs() method on the CFGBlock directly
+  // ------------------------------------------------------------------------
+
+  Vector<CFGBlock*> succs;
+  for(CFGBlock::AdjacentBlock& adj : block->succs()) {
+    if(adj.isReachable()) {
+      if(CFGBlock* succ = adj.getReachableBlock())
+        succs.push_back(succ);
+    } else if(CFGBlock* succ = adj.getPossiblyUnreachableBlock()) {
+      succs.push_back(succ);
+    }
+  }
+
+  return succs;
+}
+
 class ASTPropagateExprsPass : public ASTFunctionPass<ASTPropagateExprsPass> {
 protected:
   bool isDefBeforeUseInRootBlock(Set<Stmt*>& rhsDefs,
@@ -109,7 +136,7 @@ protected:
     }
 
     seen.insert(block);
-    for(CFGBlock* succ : block->succs())
+    for(CFGBlock* succ : getSuccessors(block))
       if(succ and isDefBeforeUseInBlock(defs, succ, defSeen, seen, uses))
         return true;
 
@@ -181,8 +208,8 @@ protected:
   }
 
   bool canPropagateCopy(VarDecl* lhs, VarDecl* rhs, Stmt* def) {
-    Set<Stmt*> defs = ast->getTopLevelDefsSet(rhs);
-    Set<Stmt*> uses = ast->getTopLevelUsesSet(lhs);
+    Set<Stmt*> defs = ast->getTopLevelDefs(rhs);
+    Set<Stmt*> uses = ast->getTopLevelUses(lhs);
     if(uses.size() == 0)
       return true;
 
@@ -196,145 +223,146 @@ protected:
 
     // Look at the rest of the graph
     Set<CFGBlock*> seen = {rootBlock};
-    for(CFGBlock* succ : rootBlock->succs())
+    for(CFGBlock* succ : getSuccessors(rootBlock))
       if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
         return false;
 
-    // There should be no uses left
-    if(uses.size())
-      fatal(error() << "Did not encounter all uses: " << lhs->getName());
+      // There should be no uses left
+      if(uses.size())
+        fatal(error() << "Did not encounter all uses: " << lhs->getName());
 
-    return true;
-  }
-
-  bool isRecursiveExpr(VarDecl* lhs, Stmt* lhsDef) {
-    for(VarDecl* var : getVarsInStmt(lhsDef)) {
-      for(Stmt* def : ast->tldefs(var)) {
-        Expr* rhs = cast<BinaryOperator>(def)->getRHS();
-        if(getVarsInStmt(rhs).contains(lhs))
-          return true;
-      }
-    }
-    return false;
-  }
-
-  bool isLHSDefConstantForAllUses(VarDecl* lhs, BinaryOperator* def) {
-    Set<Stmt*> uses = ast->getTopLevelUsesSet(lhs);
-    CFGBlock* rootBlock = ast->getCFGBlock(def);
-
-    for(VarDecl* var : getVarsInStmt(def->getRHS())) {
-      Set<Stmt*> defs = ast->getTopLevelDefsSet(var);
-
-      if(isDefBeforeUseInRootBlock(defs, rootBlock, def, uses))
-        return false;
-
-      // If all the uses have already been seen, nothing more to be done
-      if(uses.size()) {
-        // Look at the rest of the graph
-        Set<CFGBlock*> seen = {rootBlock};
-        for(CFGBlock* succ : rootBlock->succs())
-          if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
-            return false;
-
-        // There should be no uses left
-        if(uses.size())
-          fatal(error() << "Did not encounter all uses: " << lhs->getName());
-      }
-    }
-
-    return true;
-  }
-
-  bool canPropagateExpr(VarDecl* lhs, BinaryOperator* def) {
-    if(isRecursiveExpr(lhs, def->getRHS())
-       or isLHSDefConstantForAllUses(lhs, def))
       return true;
-    return false;
-  }
+    }
 
-public:
-  bool process(FunctionDecl* f) {
-    bool changed = false;
-
-    // Finding vars to be propagated that have more than one definition is
-    // possible, but is more difficult because a more complicated
-    // flow-sensitive analysis will need to be done to determine whether or
-    // not the RHS is constant before uses of the LHS.
-    // But since this comes from the output of a compiler that has probably
-    // already converted everything to SSA form and then had reg2mem done to it,
-    // it is likely that there are few variables that have more than one
-    // definition.
-    // Also, because the input is from a compiler, there is no need to check
-    // if the definition dominates all the uses
-    Map<VarDecl*, DeclRefExpr*> replVars;
-    do {
-      replVars.clear();
-      for(VarDecl* lhs : ast->vars())
-        if(ast->hasSingleDef(lhs)
-           and (not ast->hasZeroUses(lhs)) and (not ast->hasAddressTaken(lhs)))
-          if(auto* def = dyn_cast<DeclRefExpr>(ast->getSingleDefRHS(lhs)))
-            if(auto* rhs = dyn_cast<VarDecl>(def->getFoundDecl()))
-              if(canPropagateCopy(lhs, rhs, ast->getSingleDef(lhs)))
-                replVars[lhs] = def;
-
-      for(auto& i : replVars) {
-        VarDecl* var = i.first;
-        DeclRefExpr* def = i.second;
-        changed |= ast->replaceAllUsesWith(var, def);
+    bool isRecursiveExpr(VarDecl * lhs, Stmt * lhsDef) {
+      for(VarDecl* var : Clang::getVarsInStmt(lhsDef)) {
+        for(Stmt* def : ast->getTopLevelDefs(var)) {
+          Expr* rhs = cast<BinaryOperator>(def)->getRHS();
+          if(Clang::getVarsInStmt(rhs).contains(lhs))
+            return true;
+        }
       }
-    } while(replVars.size());
+      return false;
+    }
 
-    // Now that any variables are propagated, check if there are any
-    // "simple" expressions that can be propagated. The expressions are intended
-    // to be "short" in length and have not more than one operator. This is
-    // to strike a balance between having plenty of complicated expressions
-    // all over the place which are hard to read and having everything assigned
-    // to a variable first which is also hard to read
-    // Because the input is from a compiler, there is no need to check if the
-    // definition dominates all the uses
-    Map<VarDecl*, Expr*> replExprs;
-    do {
-      replExprs.clear();
-      for(VarDecl* lhs : ast->vars())
-        if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
-           and (not ast->hasAddressTaken(lhs)))
-          if(Expr* def = ast->getSingleDefRHS(lhs))
-            if(isReplaceable(def)
-               and canPropagateExpr(
-                   lhs, cast<BinaryOperator>(ast->getSingleDef(lhs))))
-              replExprs[lhs] = def;
+    bool isLHSDefConstantForAllUses(VarDecl * lhs, BinaryOperator * def) {
+      Set<Stmt*> uses = ast->getTopLevelUses(lhs);
+      CFGBlock* rootBlock = ast->getCFGBlock(def);
 
-      for(auto& i : replExprs) {
-        VarDecl* var = i.first;
-        Expr* repl = i.second;
-        changed |= ast->replaceAllUsesWith(var, repl);
+      for(VarDecl* var : Clang::getVarsInStmt(def->getRHS())) {
+        Set<Stmt*> defs = ast->getTopLevelDefs(var);
+
+        if(isDefBeforeUseInRootBlock(defs, rootBlock, def, uses))
+          return false;
+
+        // If all the uses have already been seen, nothing more to be done
+        if(uses.size()) {
+          // Look at the rest of the graph
+          Set<CFGBlock*> seen = {rootBlock};
+          for(CFGBlock* succ : getSuccessors(rootBlock))
+            if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
+              return false;
+
+          // There should be no uses left
+          if(uses.size())
+            fatal(error() << "Did not encounter all uses: " << lhs->getName());
+        }
       }
-    } while(replExprs.size());
 
-    return changed;
-  }
+      return true;
+    }
 
-public:
-  ASTPropagateExprsPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext) {
-    ;
-  }
+    bool canPropagateExpr(VarDecl * lhs, BinaryOperator * def) {
+      if(isRecursiveExpr(lhs, def->getRHS())
+         or isLHSDefConstantForAllUses(lhs, def))
+        return true;
+      return false;
+    }
 
-  ASTPropagateExprsPass(const ASTPropagateExprsPass&) = delete;
-  ASTPropagateExprsPass(ASTPropagateExprsPass&&) = delete;
-  virtual ~ASTPropagateExprsPass() = default;
+  public:
+    bool process(FunctionDecl * f) {
+      bool changed = false;
 
-  virtual llvm::StringRef getPassName() const override {
-    return "cish-eprop";
-  }
+      // Finding vars to be propagated that have more than one definition is
+      // possible, but is more difficult because a more complicated
+      // flow-sensitive analysis will need to be done to determine whether or
+      // not the RHS is constant before uses of the LHS.
+      // But since this comes from the output of a compiler that has probably
+      // already converted everything to SSA form and then had reg2mem done to
+      // it, it is likely that there are few variables that have more than one
+      // definition.
+      // Also, because the input is from a compiler, there is no need to check
+      // if the definition dominates all the uses
+      Map<VarDecl*, DeclRefExpr*> replVars;
+      do {
+        replVars.clear();
+        for(VarDecl* lhs : ast->getVars())
+          if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
+             and (not ast->hasAddressTaken(lhs)))
+            if(auto* def = dyn_cast<DeclRefExpr>(ast->getSingleDefRHS(lhs)))
+              if(auto* rhs = dyn_cast<VarDecl>(def->getDecl()))
+                if(canPropagateCopy(lhs, rhs, ast->getSingleDef(lhs)))
+                  replVars[lhs] = def;
 
-  virtual llvm::StringRef getPassLongName() const override {
-    return "Cish AST Expression Propagation";
-  }
-};
+        for(auto& i : replVars) {
+          VarDecl* var = i.first;
+          DeclRefExpr* def = i.second;
+          changed |= ast->replaceAllUsesWith(var, def);
+        }
+      } while(replVars.size());
+
+      // Now that any variables are propagated, check if there are any
+      // "simple" expressions that can be propagated. The expressions are
+      // intended to be "short" in length and have not more than one operator.
+      // This is to strike a balance between having plenty of complicated
+      // expressions all over the place which are hard to read and having
+      // everything assigned to a variable first which is also hard to read
+      // Because the input is from a compiler, there is no need to check if the
+      // definition dominates all the uses
+      Map<VarDecl*, Expr*> replExprs;
+      do {
+        replExprs.clear();
+        for(VarDecl* lhs : ast->getVars())
+          if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
+             and (not ast->hasAddressTaken(lhs)))
+            if(Expr* def = ast->getSingleDefRHS(lhs))
+              if(isReplaceable(def)
+                 and canPropagateExpr(
+                     lhs, cast<BinaryOperator>(ast->getSingleDef(lhs))))
+                replExprs[lhs] = def;
+
+        for(auto& i : replExprs) {
+          VarDecl* var = i.first;
+          Expr* repl = i.second;
+          changed |= ast->replaceAllUsesWith(var, repl);
+        }
+      } while(replExprs.size());
+
+      return changed;
+    }
+
+  public:
+    ASTPropagateExprsPass(CishContext & cishContext)
+        : ASTFunctionPass(cishContext) {
+      ;
+    }
+
+    ASTPropagateExprsPass(const ASTPropagateExprsPass&) = delete;
+    ASTPropagateExprsPass(ASTPropagateExprsPass &&) = delete;
+    virtual ~ASTPropagateExprsPass() = default;
+
+    virtual llvm::StringRef getPassName() const override {
+      return "cish-eprop";
+    }
+
+    virtual llvm::StringRef getPassLongName() const override {
+      return "Cish AST Expression Propagation";
+    }
+  };
 
 } // namespace cish
 
-cish::ASTPass* createASTPropagateExprsPass(cish::CishContext& cishContext) {
+cish::ASTPass*
+createASTPropagateExprsPass(cish::CishContext& cishContext) {
   return new cish::ASTPropagateExprsPass(cishContext);
 }

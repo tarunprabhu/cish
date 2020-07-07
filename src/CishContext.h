@@ -33,9 +33,7 @@
 namespace cish {
 
 class AST;
-class ASTBuilder;
 class LLVMBackend;
-class LLVMFrontend;
 class NameGenerator;
 class SourceInfo;
 
@@ -56,13 +54,15 @@ private:
   std::shared_ptr<clang::TargetOptions> targetOpts;
   std::shared_ptr<clang::TargetInfo> targetInfo;
 
+  // The AST class is also a builder (somewhat unfortunately) and one is needed
+  // for the top-level structs and function declarations
+  std::unique_ptr<AST> topLevelAST;
+
 protected:
   std::unique_ptr<NameGenerator> nameGen;
   std::unique_ptr<SourceInfo> si;
   std::unique_ptr<clang::ASTContext> astContext;
-  std::unique_ptr<LLVMFrontend> fe;
   std::unique_ptr<LLVMBackend> be;
-  std::unique_ptr<ASTBuilder> builder;
   Map<clang::FunctionDecl*, std::unique_ptr<AST>> asts;
 
 public:
@@ -81,11 +81,9 @@ public:
   llvm::LLVMContext& getLLVMContext() const;
   clang::ASTContext& getASTContext() const;
   const clang::LangOptions& getLangOptions() const;
-  LLVMFrontend& getLLVMFrontend() const;
   LLVMBackend& getLLVMBackend() const;
   NameGenerator& getNameGenerator() const;
   const SourceInfo& getSourceInfo() const;
-  ASTBuilder& getASTBuilder();
 
   func_range funcs();
 };

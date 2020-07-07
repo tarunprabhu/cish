@@ -21,6 +21,7 @@
 #define CISH_AST_FUNCTION_PASS_H
 
 #include "AST.h"
+#include "ASTPass.h"
 #include "CishContext.h"
 #include "Diagnostics.h"
 
@@ -30,82 +31,150 @@ using clang::cast;
 using clang::dyn_cast;
 using clang::isa;
 
-#define DECLARE_SPECIALIZABLE_(FUNC)                                 \
-  template <typename ClangT>                                         \
-  struct has_##FUNC {                                                \
-  private:                                                           \
-    template <typename T>                                            \
-    static constexpr auto check(T*) -> typename std::is_same<        \
-        decltype(std::declval<T>().FUNC(std::declval<ClangT>())),    \
-        bool>::type;                                                 \
-                                                                     \
-    template <typename>                                              \
-    static constexpr std::false_type check(...);                     \
-                                                                     \
-    typedef decltype(check<PassImpl>(0)) type;                       \
-                                                                     \
-  public:                                                            \
-    static constexpr bool value = type::value;                       \
-  };                                                                 \
-                                                                     \
-  template <class ClangT,                                            \
-            std::enable_if_t<has_process<ClangT*>::value, int> = 0>  \
-  bool derived_##FUNC(ClangT* cls) {                                 \
-    return static_cast<PassImpl*>(this)->FUNC(cls);                  \
-  }                                                                  \
-                                                                     \
-  template <class ClangT,                                            \
-            std::enable_if_t<!has_process<ClangT*>::value, int> = 0> \
-  bool derived_##FUNC(ClangT*) {                                     \
-    return false;                                                    \
+#define DECLARE_SPECIALIZED(FUNC)                                 \
+  template <class ClangT>                                         \
+  struct has_##FUNC {                                             \
+  private:                                                        \
+    template <typename T>                                         \
+    static constexpr auto check(T*) -> typename std::is_same<     \
+        decltype(std::declval<T>().FUNC(std::declval<ClangT>())), \
+        bool>::type;                                              \
+                                                                  \
+    template <typename>                                           \
+    static constexpr std::false_type check(...);                  \
+                                                                  \
+    typedef decltype(check<PassImpl>(0)) type;                    \
+                                                                  \
+  public:                                                         \
+    static constexpr bool value = type::value;                    \
   }
 
+#define DEFINE_CALL_SPECIALIZED(FUNC)                               \
+  template <class ClangT,                                           \
+            std::enable_if_t<has_##FUNC<ClangT*>::value, int> = 0>  \
+  bool derived_##FUNC(ClangT* stmt) {                               \
+    return static_cast<PassImpl*>(this)->FUNC(stmt);                \
+  }                                                                 \
+                                                                    \
+  template <class ClangT,                                           \
+            std::enable_if_t<!has_##FUNC<ClangT*>::value, int> = 0> \
+  bool derived_##FUNC(ClangT*) {                                    \
+    return false;                                                   \
+  }
+
+#define CALL_SPECIALIZED_BEFORE(FUNC, stmt) \
+  do {                                      \
+    if(not hasPostorder())                  \
+      changed |= derived_##FUNC(stmt);      \
+  } while(0)
+
+#define CALL_SPECIALIZED_AFTER(FUNC, stmt) \
+  do {                                     \
+    if(hasPostorder())                     \
+      changed |= derived_##FUNC(stmt);     \
+  } while(0)
+
 namespace cish {
-
-class ASTPass {
-protected:
-  CishContext& cishContext;
-  clang::ASTContext& astContext;
-  AST* ast;
-  ASTBuilder& builder;
-  bool modifiesAST;
-
-protected:
-  ASTPass(CishContext& cishContext, bool modifiesAST = false);
-  ASTPass(const ASTPass&) = delete;
-  ASTPass(ASTPass&&) = delete;
-
-public:
-  virtual ~ASTPass() = default;
-
-  virtual llvm::StringRef getPassName() const = 0;
-  virtual llvm::StringRef getPassLongName() const;
-
-  virtual bool runOnFunction(clang::FunctionDecl* f) = 0;
-};
 
 template <class PassImpl>
 class ASTFunctionPass : public ASTPass {
 private:
-  DECLARE_SPECIALIZABLE_(process)
-  DECLARE_SPECIALIZABLE_(beginFunction)
-  DECLARE_SPECIALIZABLE_(endFunction)
+  DECLARE_SPECIALIZED(initialize);
+  DECLARE_SPECIALIZED(process);
+  DECLARE_SPECIALIZED(finalize);
 
-protected:
-  bool beginFunction(clang::FunctionDecl* f) {
+private:
+  DEFINE_CALL_SPECIALIZED(initialize)
+  DEFINE_CALL_SPECIALIZED(process)
+  DEFINE_CALL_SPECIALIZED(finalize)
+
+  // ************************* PROBABLY SERIOUS BUG **************************
+  //
+  //                     FIXME: There is surely a bug here.
+  //
+  // For some reason, the template that checks for the existence of a derived
+  // class member function process(T*) works correctly. But for initialize()
+  // and finalize(), it always returns true even if those functions are not
+  // defined in the derived class. For the moment, the workaround of renaming
+  // the private initialize() and finalize() functions in this class works
+  // but really should not rely on something like this
+  // -------------------------------------------------------------------------
+  bool doInitialize(clang::FunctionDecl* f) {
     bool changed = false;
 
-    changed |= derived_beginFunction(f);
-    // Nothing to be done in the base class by default
+    CALL_SPECIALIZED_BEFORE(initialize, f);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(initialize, f);
 
     return changed;
   }
 
-  bool endFunction(clang::FunctionDecl* f) {
+  bool doFinalize(clang::FunctionDecl* f) {
     bool changed = false;
 
-    changed |= derived_endFunction(f);
-    // Nothing to be done in the base class by default
+    CALL_SPECIALIZED_BEFORE(finalize, f);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(finalize, f);
+
+    return changed;
+  }
+
+  bool process(clang::CXXBoolLiteralExpr* boolLiteral) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, boolLiteral);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, boolLiteral);
+
+    return changed;
+  }
+
+  bool process(clang::CharacterLiteral* charLiteral) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, charLiteral);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, charLiteral);
+
+    return changed;
+  }
+
+  bool process(clang::IntegerLiteral* intLiteral) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, intLiteral);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, intLiteral);
+
+    return changed;
+  }
+
+  bool process(clang::FloatingLiteral* floatLiteral) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, floatLiteral);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, floatLiteral);
+
+    return changed;
+  }
+
+  bool process(clang::StringLiteral* stringLiteral) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, stringLiteral);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, stringLiteral);
+
+    return changed;
+  }
+
+  bool process(clang::CXXNullPtrLiteralExpr* nullLiteral) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, nullLiteral);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, nullLiteral);
 
     return changed;
   }
@@ -113,9 +182,20 @@ protected:
   bool process(clang::CompoundStmt* compoundStmt) {
     bool changed = false;
 
-    changed |= derived_process(compoundStmt);
+    CALL_SPECIALIZED_BEFORE(process, compoundStmt);
     for(clang::Stmt* stmt : compoundStmt->body())
       changed |= process(stmt);
+    CALL_SPECIALIZED_AFTER(process, compoundStmt);
+
+    return changed;
+  }
+
+  bool process(clang::NullStmt* nullStmt) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, nullStmt);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, nullStmt);
 
     return changed;
   }
@@ -123,44 +203,13 @@ protected:
   bool process(clang::IfStmt* ifStmt) {
     bool changed = false;
 
-    changed |= derived_process(ifStmt);
+    CALL_SPECIALIZED_BEFORE(process, ifStmt);
     changed |= process(ifStmt->getCond());
     if(clang::Stmt* thn = ifStmt->getThen())
       changed |= process(thn);
     if(clang::Stmt* els = ifStmt->getElse())
       changed |= process(els);
-
-    return changed;
-  }
-
-  bool process(clang::DoStmt* doStmt) {
-    bool changed = false;
-
-    changed |= derived_process(doStmt);
-    changed |= process(doStmt->getCond());
-    changed |= process(doStmt->getBody());
-
-    return changed;
-  }
-
-  bool process(clang::ForStmt* forStmt) {
-    bool changed = false;
-
-    changed |= derived_process(forStmt);
-    changed |= process(forStmt->getInit());
-    changed |= process(forStmt->getCond());
-    changed |= process(forStmt->getInc());
-    changed |= process(forStmt->getBody());
-
-    return changed;
-  }
-
-  bool process(clang::WhileStmt* whileStmt) {
-    bool changed = false;
-
-    changed |= derived_process(whileStmt);
-    changed |= process(whileStmt->getCond());
-    changed |= process(whileStmt->getBody());
+    CALL_SPECIALIZED_AFTER(process, ifStmt);
 
     return changed;
   }
@@ -168,11 +217,12 @@ protected:
   bool process(clang::SwitchStmt* switchStmt) {
     bool changed = false;
 
-    changed |= derived_process(switchStmt);
+    CALL_SPECIALIZED_BEFORE(process, switchStmt);
     changed |= process(switchStmt->getCond());
     for(clang::SwitchCase* kase = switchStmt->getSwitchCaseList(); kase;
         kase = kase->getNextSwitchCase())
       changed |= process(kase);
+    CALL_SPECIALIZED_AFTER(process, switchStmt);
 
     return changed;
   }
@@ -180,8 +230,9 @@ protected:
   bool process(clang::CaseStmt* caseStmt) {
     bool changed = false;
 
-    changed |= derived_process(caseStmt);
+    CALL_SPECIALIZED_BEFORE(process, caseStmt);
     changed |= process(caseStmt->getSubStmt());
+    CALL_SPECIALIZED_AFTER(process, caseStmt);
 
     return changed;
   }
@@ -189,8 +240,44 @@ protected:
   bool process(clang::DefaultStmt* defaultStmt) {
     bool changed = false;
 
-    changed |= derived_process(defaultStmt);
+    CALL_SPECIALIZED_BEFORE(process, defaultStmt);
     changed |= process(defaultStmt->getSubStmt());
+    CALL_SPECIALIZED_AFTER(process, defaultStmt);
+
+    return changed;
+  }
+
+  bool process(clang::DoStmt* doStmt) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, doStmt);
+    changed |= process(doStmt->getCond());
+    changed |= process(doStmt->getBody());
+    CALL_SPECIALIZED_AFTER(process, doStmt);
+
+    return changed;
+  }
+
+  bool process(clang::ForStmt* forStmt) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, forStmt);
+    changed |= process(forStmt->getInit());
+    changed |= process(forStmt->getCond());
+    changed |= process(forStmt->getInc());
+    changed |= process(forStmt->getBody());
+    CALL_SPECIALIZED_AFTER(process, forStmt);
+
+    return changed;
+  }
+
+  bool process(clang::WhileStmt* whileStmt) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, whileStmt);
+    changed |= process(whileStmt->getCond());
+    changed |= process(whileStmt->getBody());
+    CALL_SPECIALIZED_AFTER(process, whileStmt);
 
     return changed;
   }
@@ -198,22 +285,20 @@ protected:
   bool process(clang::ReturnStmt* retStmt) {
     bool changed = false;
 
-    changed |= derived_process(retStmt);
+    CALL_SPECIALIZED_BEFORE(process, retStmt);
     if(clang::Expr* retValue = retStmt->getRetValue())
       changed |= process(retValue);
+    CALL_SPECIALIZED_AFTER(process, retStmt);
 
     return changed;
-  }
-
-  bool process(clang::NullStmt*) {
-    return false;
   }
 
   bool process(clang::LabelStmt* labelStmt) {
     bool changed = false;
 
-    changed |= derived_process(labelStmt);
+    CALL_SPECIALIZED_BEFORE(process, labelStmt);
     changed |= process(labelStmt->getSubStmt());
+    CALL_SPECIALIZED_AFTER(process, labelStmt);
 
     return changed;
   }
@@ -221,7 +306,9 @@ protected:
   bool process(clang::GotoStmt* gotoStmt) {
     bool changed = false;
 
-    changed |= derived_process(gotoStmt);
+    CALL_SPECIALIZED_BEFORE(process, gotoStmt);
+    changed |= process(gotoStmt->getLabel()->getStmt());
+    CALL_SPECIALIZED_AFTER(process, gotoStmt);
 
     return changed;
   }
@@ -229,7 +316,9 @@ protected:
   bool process(clang::BreakStmt* breakStmt) {
     bool changed = false;
 
-    changed |= derived_process(breakStmt);
+    CALL_SPECIALIZED_BEFORE(process, breakStmt);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, breakStmt);
 
     return changed;
   }
@@ -237,7 +326,9 @@ protected:
   bool process(clang::ContinueStmt* continueStmt) {
     bool changed = false;
 
-    changed |= derived_process(continueStmt);
+    CALL_SPECIALIZED_BEFORE(process, continueStmt);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, continueStmt);
 
     return changed;
   }
@@ -245,7 +336,7 @@ protected:
   bool process(clang::DeclStmt* declStmt) {
     bool changed = false;
 
-    changed |= derived_process(declStmt);
+    CALL_SPECIALIZED_BEFORE(process, declStmt);
     for(clang::Decl* decl : declStmt->decls()) {
       if(auto* var = dyn_cast<clang::VarDecl>(decl)) {
         if(var->hasInit())
@@ -255,54 +346,7 @@ protected:
                       << decl->getDeclKindName());
       }
     }
-
-    return changed;
-  }
-
-  bool process(clang::CXXBoolLiteralExpr* boolLiteral) {
-    bool changed = false;
-
-    changed |= derived_process(boolLiteral);
-
-    return changed;
-  }
-
-  bool process(clang::CharacterLiteral* charLiteral) {
-    bool changed = false;
-
-    changed |= derived_process(charLiteral);
-
-    return changed;
-  }
-
-  bool process(clang::IntegerLiteral* intLiteral) {
-    bool changed = false;
-
-    changed |= derived_process(intLiteral);
-
-    return changed;
-  }
-
-  bool process(clang::FloatingLiteral* floatLiteral) {
-    bool changed = false;
-
-    changed |= derived_process(floatLiteral);
-
-    return changed;
-  }
-
-  bool process(clang::StringLiteral* stringLiteral) {
-    bool changed = false;
-
-    changed |= derived_process(stringLiteral);
-
-    return changed;
-  }
-
-  bool process(clang::CXXNullPtrLiteralExpr* nullLiteral) {
-    bool changed = false;
-
-    changed |= derived_process(nullLiteral);
+    CALL_SPECIALIZED_AFTER(process, declStmt);
 
     return changed;
   }
@@ -310,27 +354,9 @@ protected:
   bool process(clang::DeclRefExpr* declRef) {
     bool changed = false;
 
-    changed |= derived_process(declRef);
-
-    return changed;
-  }
-
-  bool process(clang::InitListExpr* initList) {
-    bool changed = false;
-
-    changed |= derived_process(initList);
-    for(unsigned i = 0; i < initList->getNumInits(); i++)
-      changed |= process(initList->getInit(i));
-
-    return changed;
-  }
-
-  bool process(clang::BinaryOperator* binOp) {
-    bool changed = false;
-
-    changed |= derived_process(binOp);
-    changed |= process(binOp->getLHS());
-    changed |= process(binOp->getRHS());
+    CALL_SPECIALIZED_BEFORE(process, declRef);
+    // Do nothing
+    CALL_SPECIALIZED_AFTER(process, declRef);
 
     return changed;
   }
@@ -338,8 +364,20 @@ protected:
   bool process(clang::UnaryOperator* unOp) {
     bool changed = false;
 
-    changed |= derived_process(unOp);
+    CALL_SPECIALIZED_BEFORE(process, unOp);
     changed |= process(unOp->getSubExpr());
+    CALL_SPECIALIZED_AFTER(process, unOp);
+
+    return changed;
+  }
+
+  bool process(clang::BinaryOperator* binOp) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, binOp);
+    changed |= process(binOp->getLHS());
+    changed |= process(binOp->getRHS());
+    CALL_SPECIALIZED_AFTER(process, binOp);
 
     return changed;
   }
@@ -347,39 +385,11 @@ protected:
   bool process(clang::ConditionalOperator* condOp) {
     bool changed = false;
 
-    changed |= derived_process(condOp);
+    CALL_SPECIALIZED_BEFORE(process, condOp);
     changed |= process(condOp->getCond());
     changed |= process(condOp->getTrueExpr());
     changed |= process(condOp->getFalseExpr());
-
-    return changed;
-  }
-
-  bool process(clang::CallExpr* callExpr) {
-    bool changed = false;
-
-    changed |= derived_process(callExpr);
-    changed |= process(callExpr->getCallee());
-    for(clang::Expr* arg : callExpr->arguments())
-      changed |= process(arg);
-
-    return changed;
-  }
-
-  bool process(clang::MemberExpr* memberExpr) {
-    bool changed = false;
-
-    changed |= derived_process(memberExpr);
-    changed |= process(memberExpr->getBase());
-
-    return changed;
-  }
-
-  bool process(clang::CStyleCastExpr* castExpr) {
-    bool changed = false;
-
-    changed |= derived_process(castExpr);
-    changed |= process(castExpr->getSubExpr());
+    CALL_SPECIALIZED_AFTER(process, condOp);
 
     return changed;
   }
@@ -387,9 +397,53 @@ protected:
   bool process(clang::ArraySubscriptExpr* arrExpr) {
     bool changed = false;
 
-    changed |= derived_process(arrExpr);
+    CALL_SPECIALIZED_BEFORE(process, arrExpr);
     changed |= process(arrExpr->getBase());
     changed |= process(arrExpr->getIdx());
+    CALL_SPECIALIZED_AFTER(process, arrExpr);
+
+    return changed;
+  }
+
+  bool process(clang::CStyleCastExpr* castExpr) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, castExpr);
+    changed |= process(castExpr->getSubExpr());
+    CALL_SPECIALIZED_AFTER(process, castExpr);
+
+    return changed;
+  }
+
+  bool process(clang::CallExpr* callExpr) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, callExpr);
+    changed |= process(callExpr->getCallee());
+    for(clang::Expr* arg : callExpr->arguments())
+      changed |= process(arg);
+    CALL_SPECIALIZED_AFTER(process, callExpr);
+
+    return changed;
+  }
+
+  bool process(clang::MemberExpr* memberExpr) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, memberExpr);
+    changed |= process(memberExpr->getBase());
+    CALL_SPECIALIZED_AFTER(process, memberExpr);
+
+    return changed;
+  }
+
+  bool process(clang::InitListExpr* initList) {
+    bool changed = false;
+
+    CALL_SPECIALIZED_BEFORE(process, initList);
+    for(unsigned i = 0; i < initList->getNumInits(); i++)
+      changed |= process(initList->getInit(i));
+    CALL_SPECIALIZED_AFTER(process, initList);
 
     return changed;
   }
@@ -456,7 +510,7 @@ protected:
     else if(auto* cnull = dyn_cast<clang::CXXNullPtrLiteralExpr>(stmt))
       return process(cnull);
     else
-      fatal(error() << "Unknown exprssion: " << stmt->getStmtClassName());
+      fatal(error() << "Unknown expression: " << stmt->getStmtClassName());
 
     return false;
   }
@@ -464,15 +518,16 @@ protected:
   bool process(clang::FunctionDecl* f) {
     bool changed = false;
 
-    changed |= derived_process(f);
+    CALL_SPECIALIZED_BEFORE(process, f);
     changed |= process(f->getBody());
+    CALL_SPECIALIZED_AFTER(process, f);
 
     return changed;
   }
 
 public:
-  ASTFunctionPass(CishContext& cishContext, bool modifiesAST = false)
-      : ASTPass(cishContext, modifiesAST) {
+  ASTFunctionPass(CishContext& cishContext, unsigned flags = 0)
+      : ASTPass(cishContext, flags) {
     ;
   }
 
@@ -486,11 +541,20 @@ public:
     ast = &cishContext.getAST(f);
     message() << getPassLongName() << "\n";
 
-    changed |= process(f);
+    changed |= doInitialize(f);
+    if(hasIterateUntilConvergence()) {
+      bool iterChanged;
+      do {
+        iterChanged = process(f);
+        changed |= iterChanged;
+      } while(iterChanged);
+    } else {
+      changed |= process(f);
+    }
+    changed |= doFinalize(f);
 
-    bool defUseOnly = not modifiesAST;
     if(changed)
-      ast->recalculate(defUseOnly);
+      ast->recalculate();
 
     return changed;
   }

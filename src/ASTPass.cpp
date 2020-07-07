@@ -17,20 +17,35 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#include "ASTFunctionPass.h"
+#include "ASTPass.h"
 #include "CishContext.h"
 
 namespace cish {
 
-ASTPass::ASTPass(CishContext& cishContext, bool modifiesAST)
+ASTPass::ASTPass(CishContext& cishContext, unsigned flags)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      ast(nullptr), builder(cishContext.getASTBuilder()),
-      modifiesAST(modifiesAST) {
+      flags(flags), ast(nullptr) {
   ;
 }
 
 llvm::StringRef ASTPass::getPassLongName() const {
   return "Cish AST Pass (Unnamed)";
+}
+
+bool ASTPass::hasFlag(unsigned flag) const {
+  return (flags & flag) == flag;
+}
+
+bool ASTPass::hasModifiesAST() const {
+  return hasFlag(ModifiesAST);
+}
+
+bool ASTPass::hasPostorder() const {
+  return hasFlag(PostOrder);
+}
+
+bool ASTPass::hasIterateUntilConvergence() const {
+  return hasFlag(IterateUntilConvergence);
 }
 
 } // namespace cish

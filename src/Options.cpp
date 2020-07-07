@@ -28,7 +28,7 @@ namespace cish {
 
 static cl::OptionCategory cishOptionCategory("Cish Options", "");
 
-static cl::list<cish::StripCasts> optStripCasts(
+static cl::bits<cish::StripCasts> optStripCasts(
     "strip-casts",
     cl::desc("Which casts, if any, to strip from the output"),
     cl::values(
@@ -49,7 +49,7 @@ static cl::opt<std::string> optPrefix(
     cl::init("_"),
     cl::cat(cishOptionCategory));
 
-static cl::list<cish::Annotations> optAnnotations(
+static cl::bits<cish::Annotations> optAnnotations(
     "annotate",
     cl::desc("Add annotations to the output"),
     cl::values(
@@ -80,7 +80,7 @@ static cl::opt<unsigned>
     optOffset("indent-offset",
               cl::desc("Number of spaces to use for indentation. If 0, tabs "
                        "are used instead of spaces"),
-              cl::value_desc("<n>"),
+              cl::value_desc("n"),
               cl::init(4),
               cl::cat(cishOptionCategory));
 
@@ -101,12 +101,25 @@ static cl::opt<bool> optVerbose("verbose",
                                 cl::init(false),
                                 cl::cat(cishOptionCategory));
 
-static cl::opt<bool>
-    optLog("log",
-           cl::desc("Create logs of the conversion (WARNING - "
-                    "Creates many files in the current directory)"),
-           cl::init(false),
-           cl::cat(cishOptionCategory));
+static cl::bits<LogCategory> optLog(
+    "log",
+    cl::desc("Create logs of the conversion (WARNING - "
+             "Creates many files in the current directory)"),
+    cl::values(
+        clEnumValN(cish::LogCategory::IR,
+                   "ir",
+                   "Log the prepared LLVM IR before structure analysis"),
+        clEnumValN(cish::LogCategory::Structure,
+                   "structure",
+                   "Log each step of the structure analysis"),
+        clEnumValN(cish::LogCategory::AST,
+                   "ast",
+                   "Record the program after each AST transformation pass"),
+        clEnumValN(cish::LogCategory::CFG,
+                   "cfg",
+                   "Record the CFG after each AST transformation pass"),
+        clEnumValN(cish::LogCategory::All, "all", "Log everything")),
+    cl::cat(cishOptionCategory));
 
 static cl::opt<std::string>
     optLogDir("log-dir",
@@ -140,46 +153,27 @@ const Options& opts() {
 }
 
 Options::Options()
-    : stripCasts(0), annotations(0), fileIn(optFilename), fileOut(optOutput),
-      prefix(optPrefix), indentStyle(optIndentStyle), indentOffset(optOffset),
-      parens(optParens), verbose(optVerbose), log(optLog), logDir(optLogDir) {
+    : fileIn(optFilename), fileOut(optOutput), prefix(optPrefix),
+      indentStyle(optIndentStyle), indentOffset(optOffset), parens(optParens),
+      verbose(optVerbose), logDir(optLogDir),
+      stripCasts(parse<StripCasts>(optStripCasts.getBits())),
+      annotations(parse<Annotations>(optAnnotations.getBits())),
+      log(parse<LogCategory>(optLog.getBits())) {
   // Sanity checks
   if(indentOffset > 8)
     fatal(error() << "Invalid value for offset. Min 0, Max 8");
-
-  if(optStripCasts.size())
-    for(StripCasts cst : optStripCasts)
-      set(cst);
-  else
-    set(StripCasts::Never);
-
-  if(optAnnotations.size())
-    for(Annotations ann : optAnnotations)
-      set(ann);
-  else
-    set(Annotations::None);
-}
-
-void Options::set(StripCasts cst) {
-  stripCasts |= (unsigned)cst;
-}
-
-void Options::set(Annotations ann) {
-  annotations |= (unsigned)ann;
 }
 
 bool Options::has(StripCasts cst) const {
-  if(cst == StripCasts::Never) {
-    return stripCasts == 0;
-  } else {
-    unsigned i = (unsigned)cst;
-    return (stripCasts & i) == i;
-  }
+  return has(cst, stripCasts);
 }
 
 bool Options::has(Annotations ann) const {
-  unsigned i = (unsigned)ann;
-  return (annotations & i) == i;
+  return has(ann, annotations);
+}
+
+bool Options::has(LogCategory cat) const {
+  return has(cat, log);
 }
 
 } // namespace cish

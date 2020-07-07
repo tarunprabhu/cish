@@ -17,8 +17,8 @@
 //  along with Cish.  If not, see <https://www.gnu.org/licenses/>.
 //  ---------------------------------------------------------------------------
 
-#ifndef CISH_STRUCTURE_H
-#define CISH_STRUCTURE_H
+#ifndef CISH_STRUCTURE_TREE_H
+#define CISH_STRUCTURE_TREE_H
 
 #include <llvm/IR/Instructions.h>
 
@@ -127,6 +127,25 @@ public:
   bool operator!=(const StructNode& other) const;
 };
 
+// This a special node whose only purpose is to serve as the root of the
+// control tree. This will be the sole predecessor of the StructNode
+// corresponding to the function entry block. The function entry block is also
+// its sole successor
+class Entry : protected StructNode {
+public:
+  Entry(llvm::LLVMContext& llvmContext, StructNode& entry);
+  Entry(const Entry&) = delete;
+  Entry(Entry&&) = delete;
+  virtual ~Entry() = default;
+
+  StructNode& getEntry() const;
+
+public:
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_Entry;
+  }
+};
+
 // Just a wrapper around a basic block so it can be added to the tree
 // This also keeps track of whether or not the block has been reduced
 class Block : public StructNode {
@@ -142,8 +161,8 @@ public:
   const llvm::BasicBlock& getLLVM() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_Block;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_Block;
   }
 };
 
@@ -166,8 +185,8 @@ public:
   const_iterator end() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_Sequence;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_Sequence;
   }
 };
 
@@ -202,8 +221,8 @@ public:
   bool isInverted() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_IfThen;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_IfThen;
   }
 };
 
@@ -220,8 +239,8 @@ public:
   const StructNode& getElse() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_IfThenElse;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_IfThenElse;
   }
 };
 
@@ -253,8 +272,8 @@ public:
   bool isInLoopWithUniqueExit() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_IfThenBreak;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_IfThenBreak;
   }
 };
 
@@ -272,8 +291,8 @@ public:
   const std::string& getName() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_Label;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_Label;
   }
 };
 
@@ -295,8 +314,8 @@ public:
   const llvm::BranchInst& getLLVMBranchInst() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_IfThenGoto;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_IfThenGoto;
   }
 };
 
@@ -316,8 +335,8 @@ public:
   unsigned getLoopDepth() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_LoopHeader;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_LoopHeader;
   }
 };
 
@@ -336,8 +355,8 @@ public:
   const llvm::BasicBlock& getBlock() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_LoopLatch;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_LoopLatch;
   }
 };
 
@@ -373,8 +392,8 @@ public:
   virtual ~EndlessLoop() = default;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_EndlessLoop;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_EndlessLoop;
   }
 };
 
@@ -394,8 +413,8 @@ public:
   const LoopLatch& getLatch() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_ForLoop;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_ForLoop;
   }
 };
 
@@ -419,8 +438,8 @@ public:
   const List<IfThenBreak*>& getExits() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_SimplifiedLoop;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_SimplifiedLoop;
   }
 };
 
@@ -460,11 +479,11 @@ public:
   const Vector<Case>& getCases() const;
 
 public:
-  static bool classof(const StructNode* ct) {
-    return ct->getKind() == StructNode::S_Switch;
+  static bool classof(const StructNode* node) {
+    return node->getKind() == StructNode::S_Switch;
   }
 };
 
 } // namespace cish
 
-#endif // CISH_STRUCTURE_H
+#endif // CISH_STRUCTURE_TREE_H

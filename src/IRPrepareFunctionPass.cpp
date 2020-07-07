@@ -33,6 +33,8 @@
 #include "IRSourceInfo.h"
 #include "List.h"
 #include "Logging.h"
+#include "LLVMCishMetadata.h"
+#include "LLVMUtils.h"
 #include "Map.h"
 #include "NameGenerator.h"
 #include "Options.h"
@@ -42,12 +44,9 @@
 #include <regex>
 
 using namespace llvm;
+namespace LLVM = cish::LLVM;
 
-/// This LLVM pass moves all branch instructions into their own basic blocks
-/// The intention is to make it to try and recreate a reasonable approximation
-/// of the control flow in the result C-ish program without having to resort
-/// to gotos everwhere
-class IRPreparePass : public FunctionPass {
+class IRPrepareFunctionPass : public FunctionPass {
 public:
   static char ID;
 
@@ -65,27 +64,14 @@ private:
     return bbs.size() <= 1;
   }
 
-  void collectLoops(Loop* loop, cish::Set<Loop*>& loops) {
-    loops.insert(loop);
-    for(Loop* subLoop : *loop)
-      collectLoops(subLoop, loops);
-  }
-
-  cish::Set<Loop*> collectLoops(LoopInfo& li) {
-    cish::Set<Loop*> loops;
-    for(Loop* loop : li)
-      collectLoops(loop, loops);
-    return loops;
-  }
-
 public:
-  explicit IRPreparePass(cish::CishContext& cishContext)
+  explicit IRPrepareFunctionPass(cish::CishContext& cishContext)
       : FunctionPass(ID), cishContext(cishContext) {
     ;
   }
 
   virtual StringRef getPassName() const override {
-    return "Cish Prepare Pass";
+    return "Cish Prepare Function Pass";
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
@@ -169,7 +155,7 @@ public:
     // Move the branch instruction in the exiting branch of a loop to its own
     // basic block. Also make the header an empty block so it only acts as
     // the target of a backedge and does nothing else
-    cish::Set<Loop*> loops = collectLoops(li);
+    cish::List<Loop*> loops = LLVM::collectLoops(li);
     cish::Map<BasicBlock*, Loop*> preheaders;
     for(Loop* loop : loops) {
       SmallVector<BasicBlock*, 4> exiting;
@@ -207,15 +193,22 @@ public:
       }
     }
 
-    if(cish::Logger log = cish::Logger::openFile(f.getName(), "prepared", "ll"))
-      log() << *f.getParent();
+    // Add metadata
+    for(Instruction& inst : instructions(f))
+      if(isa<ResumeInst>(inst) or isa<UnreachableInst>(inst))
+        LLVM::addCishMetadataIgnore(inst);
+
+    if(cish::opts().has(cish::LogCategory::IR))
+      if(cish::Logger log
+         = cish::Logger::openFile(f.getName(), "prepared", "ll"))
+        log() << *f.getParent();
 
     return true;
   }
 };
 
-char IRPreparePass::ID = 0;
+char IRPrepareFunctionPass::ID = 0;
 
-Pass* createIRPreparePass(cish::CishContext& cishContext) {
-  return new IRPreparePass(cishContext);
+Pass* createIRPrepareFunctionPass(cish::CishContext& cishContext) {
+  return new IRPrepareFunctionPass(cishContext);
 }

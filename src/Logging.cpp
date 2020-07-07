@@ -69,7 +69,7 @@ raw_ostream& Logger::operator()() {
 Logger Logger::openFile(const std::string& base,
                         const std::string& tag,
                         const std::string& ext) {
-  if(not opts().log)
+  if(opts().has(LogCategory::None))
     return Logger();
 
   std::string buf;

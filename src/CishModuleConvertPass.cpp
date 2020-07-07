@@ -21,10 +21,12 @@
 #include "Diagnostics.h"
 #include "IRSourceInfo.h"
 #include "LLVMBackend.h"
-#include "LLVMFrontend.h"
+#include "LLVMCishMetadata.h"
+#include "LLVMUtils.h"
 #include "Options.h"
 
 using namespace llvm;
+namespace LLVM = cish::LLVM;
 
 class CishModuleConvertPass : public ModulePass {
 public:
@@ -32,21 +34,30 @@ public:
 
 private:
   cish::CishContext& cishContext;
+  const cish::SourceInfo& si;
+  cish::LLVMBackend& be;
 
 protected:
-  bool isMetadataFunction(const Function& f) {
-    FunctionType* fty = f.getFunctionType();
-    if(fty->getReturnType()->isMetadataTy())
-      return true;
-    for(Type* param : fty->params())
-      if(param->isMetadataTy())
-        return true;
-    return false;
+  std::string getName(llvm::StructType* sty) {
+    if(si.hasName(sty))
+      return si.getName(sty);
+    else if(sty->hasName())
+      if(sty->getName().find("struct.") == 0)
+        return LLVM::formatName(sty->getName().substr(7));
+      else if(sty->getName().find("class.") == 0)
+        return LLVM::formatName(sty->getName().substr(6));
+      else if(sty->getName().find("union.") == 0)
+        return LLVM::formatName(sty->getName().substr(6));
+      else
+        return LLVM::formatName(sty->getName());
+    else
+      return be.getNewVar("struct");
   }
 
 public:
   explicit CishModuleConvertPass(cish::CishContext& cishContext)
-      : ModulePass(ID), cishContext(cishContext) {
+      : ModulePass(ID), cishContext(cishContext),
+        si(cishContext.getSourceInfo()), be(cishContext.getLLVMBackend()) {
     ;
   }
 
@@ -55,64 +66,22 @@ public:
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
+    AU.addRequired<LoopInfoWrapperPass>();
     AU.setPreservesAll();
   }
 
   virtual bool runOnModule(Module& m) override {
     cish::message() << "Running " << getPassName() << "\n";
 
-    const cish::SourceInfo& si = cishContext.getSourceInfo();
-    cish::LLVMFrontend& fe = cishContext.getLLVMFrontend();
-    cish::LLVMBackend& be = cishContext.getLLVMBackend();
-
-    if(cish::opts().log) {
-      std::string buf;
-      raw_string_ostream filename(buf);
-      if(cish::opts().logDir.size())
-        filename << cish::opts().logDir << "/";
-      std::string file = m.getSourceFileName();
-      size_t start = file.rfind('/');
-      size_t end = file.rfind('.');
-      if(start == std::string::npos)
-        start = 0;
-      filename << file.substr(start, end - start) << ".prepared.ll";
-      std::error_code ec;
-      raw_fd_ostream fs(filename.str(), ec);
-      if(not ec) {
-        fs << m << "\n";
-        fs.close();
-        cish::message() << "Wrote prepare LLVM IR to " << filename.str()
-                        << "\n";
-      } else {
-        cish::warning() << "Could not write to log file " << filename.str()
-                        << "\n";
-      }
-    }
-
-    // First find anything that we know are never going to be
-    // converted. These would be any LLVM debug and lifetime intrinsics but
-    // could be other things as well
-    for(const Function& f : m.functions()) {
-      if(isMetadataFunction(f) or f.getName().startswith("llvm.lifetime")
-         or f.getName().startswith("llvm.dbg.")) {
-        fe.addIgnoreValue(&f);
-        for(const Use& u : f.uses())
-          fe.addIgnoreValue(u.getUser());
-      }
-    }
-
     // Add all the structs to the context first so a decl exists for each of
     // them first because there may be recursive structs
     for(StructType* sty : m.getIdentifiedStructTypes())
-      be.add(sty, fe.getName(sty));
+      be.add(sty, getName(sty));
 
     // Then add bodies for them
     for(StructType* sty : m.getIdentifiedStructTypes()) {
       cish::Vector<std::string> fields;
       for(unsigned i = 0; i < sty->getNumElements(); i++) {
-        Type* ety = sty->getElementType(i);
-        if(not isa<StructType>(ety))
-          fe.handle(sty->getElementType(i));
         if(si.hasElementName(sty, i))
           fields.push_back(si.getElementName(sty, i));
         else
@@ -121,15 +90,41 @@ public:
       be.add(sty, fields);
     }
 
-    for(const GlobalVariable& g : m.globals())
-      fe.handle(&g);
+    for(const GlobalVariable& g : m.globals()) {
+      if(not si.isStringLiteral(g))
+        be.add(g, be.getName(g, "g"));
+    }
 
-    for(const Function& f : m.functions())
-      if(not isMetadataFunction(f))
-        fe.handle(&f);
+    for(const Function& f : m.functions()) {
+      if(not LLVM::isMetadataFunction(f)) {
+        std::string fname = be.getName(f);
+        cish::Vector<std::string> argNames(f.getFunctionType()->getNumParams());
+        if(f.size()) {
+          for(const Argument& arg : f.args()) {
+            unsigned i = arg.getArgNo();
+            if(si.hasName(arg))
+              argNames[i] = si.getName(arg);
+            else if(arg.hasName())
+              argNames[i] = LLVM::formatName(arg.getName());
+            else
+              argNames[i] = "arg_" + std::to_string(i);
+          }
+          be.add(f, fname, argNames);
+
+          for(const BasicBlock& bb : f) {
+            if(bb.hasNPredecessors(0))
+              be.add(bb);
+            else
+              be.add(bb, be.getNewVar("bb"));
+          }
+        } else if(not LLVM::hasCishMetadataIgnore(f)) {
+          be.add(f, fname, argNames);
+        }
+      }
+    }
 
     for(const GlobalAlias& alias : m.aliases()) {
-      cish::fatal(cish::error() << "NOT IMPLEMENTED: " << alias);
+      cish::fatal(cish::error() << "Unimplemented GlobalAlias");
     }
 
     return false;

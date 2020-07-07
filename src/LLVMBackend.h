@@ -20,6 +20,7 @@
 #ifndef CISH_LLVM_BACKEND_H
 #define CISH_LLVM_BACKEND_H
 
+#include "AST.h"
 #include "BackendBase.h"
 #include "Map.h"
 #include "Set.h"
@@ -40,13 +41,20 @@
 
 namespace cish {
 
+class SourceInfo;
+
 /// This is a single object that contains the maps from LLVM entities
 /// (types and values) to their corresponding Cish AST nodes and keeps track
 /// of names of entities that were determined from DebugInfo or elsewehere
 /// and any that are generated
 class LLVMBackend : public BackendBase {
 private:
-  Map<const llvm::Value*, clang::Stmt*> l2c;
+  const SourceInfo& si;
+
+  // LLVM values may have multiple uses. But Clang's statements/expressions are
+  // never uniqued. This is a map of a "template" for each LLVM value. The
+  // Clang statement for the LLVM value should be cloned when being used.
+  // Every statement in this map should be an orphan
   Map<llvm::Type*, clang::QualType> types;
 
   // In SSA form, all values are "assigned" to some variable and that
@@ -70,44 +78,73 @@ private:
   Map<llvm::StructType*, clang::RecordDecl*> udts;
   Map<llvm::StructType*, Vector<clang::FieldDecl*>> fields;
   Map<const llvm::Function*, clang::FunctionDecl*> funcs;
+  Map<const llvm::Argument*, clang::ParmVarDecl*> args;
   Map<const llvm::BasicBlock*, clang::LabelDecl*> blocks;
+  Map<const llvm::AllocaInst*, clang::VarDecl*> locals;
+  Map<const llvm::GlobalVariable*, clang::VarDecl*> globals;
+  Map<const llvm::GlobalAlias*, clang::VarDecl*> aliases;
+
+  // When processing llvm::ConstantExpr, we may end up creating an instruction
+  // that implements the same operation. Those are kept here for easy cleanup.
+  // Right now, we only make one pass over the function, but if that ever
+  // changes, better to have it around so it's not converted every time
+  Map<const llvm::ConstantExpr*,
+      std::unique_ptr<llvm::Instruction,
+                      std::function<void(llvm::Instruction*)>>>
+      cexprs;
 
 protected:
-  template <
-      typename ClassT,
-      typename... Args,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClassT>::value, int> = 0>
-  ClassT* add(const llvm::Value& val, ClassT* ast) {
-    return llvm::dyn_cast<ClassT>(l2c[&val] = ast);
-  }
+  const llvm::ConstantDataArray*
+  getStringLiteral(const llvm::Instruction& inst);
+  const llvm::Instruction&
+  getInstructionForConstantExpr(const llvm::ConstantExpr& cexpr);
 
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  ClangT* get(const llvm::Value* val) const {
-    return llvm::dyn_cast<ClangT>(l2c.at(val));
-  }
+  clang::QualType get(llvm::IntegerType* ity);
+  clang::QualType get(llvm::PointerType* pty);
+  clang::QualType get(llvm::ArrayType* aty);
+  clang::QualType get(llvm::FunctionType* fty);
+  clang::QualType get(llvm::VectorType* vty);
+  clang::QualType get(llvm::Type* type);
 
-  template <
-      typename ClangT = clang::Stmt,
-      std::enable_if_t<std::is_base_of<clang::Stmt, ClangT>::value, int> = 0>
-  ClangT* get(const llvm::Value& val) const {
-    return get<ClangT>(&val);
-  }
+  clang::Expr* get(const llvm::AllocaInst& alloca);
+  // clang::Expr* get(const llvm::AtomicCmpXchgInst& axchg);
+  // clang::Expr* get(const llvm::AtomicRMWInst& rmw);
+  clang::Expr* get(const llvm::BinaryOperator& op);
+  clang::Expr* get(const llvm::CastInst& cst);
+  clang::Expr* get(const llvm::InvokeInst& invoke);
+  clang::Expr* get(const llvm::CallInst& call);
+  clang::Expr* get(const llvm::CmpInst& cmp);
+  clang::Expr* get(const llvm::ExtractElementInst& extract);
+  clang::Expr* get(const llvm::ExtractValueInst& extract);
+  clang::Expr* get(const llvm::FenceInst& fence);
+  clang::Expr* get(const llvm::GetElementPtrInst& gep);
+  clang::Expr* get(const llvm::IndirectBrInst& br);
+  clang::Expr* get(const llvm::InsertElementInst& insert);
+  clang::Expr* get(const llvm::InsertValueInst& insert);
+  clang::Expr* get(const llvm::LandingPadInst& pad);
+  clang::Expr* get(const llvm::LoadInst& load);
+  clang::Expr* get(const llvm::PHINode& phi);
+  clang::Expr* get(const llvm::SelectInst& select);
+  clang::Expr* get(const llvm::ShuffleVectorInst& shuffle);
+  clang::Expr* get(const llvm::UnaryOperator& op);
 
-  template <
-      typename ClangT,
-      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
-  ClangT* get(const llvm::Value* val) const {
-    return llvm::dyn_cast<ClangT>(get<clang::DeclRefExpr>(val)->getFoundDecl());
-  }
+  clang::Expr* get(const llvm::ConstantInt& cint);
+  clang::Expr* get(const llvm::ConstantFP& cfp);
+  clang::Expr* get(const llvm::ConstantPointerNull& cnull);
+  clang::Expr* get(const llvm::ConstantAggregateZero& czero);
+  clang::Expr* get(const llvm::ConstantExpr& cexpr);
+  clang::Expr* get(const llvm::UndefValue& undef);
+  clang::Expr* get(const llvm::ConstantDataSequential& cseq);
+  clang::Expr* get(const llvm::ConstantArray& carray);
+  clang::Expr* get(const llvm::ConstantStruct& cstruct);
+  clang::Expr* get(const llvm::ConstantVector& cvec);
 
-  template <
-      typename ClangT,
-      std::enable_if_t<std::is_base_of<clang::Decl, ClangT>::value, int> = 0>
-  ClangT* get(const llvm::Value& val) const {
-    return get<ClangT>(&val);
-  }
+  clang::Expr* get(const llvm::Argument& arg);
+  clang::Expr* get(const llvm::Function& f);
+  clang::Expr* get(const llvm::GlobalAlias& alias);
+  clang::Expr* get(const llvm::GlobalVariable& g);
+
+  clang::Expr* get(const llvm::Value* v);
 
   clang::QualType get(llvm::Type* type) const;
   clang::DeclRefExpr& getTemp(const llvm::Value& val) const;
@@ -131,14 +168,15 @@ protected:
                                   const llvm::Instruction& inst);
 
   void addSwitchCase(const llvm::ConstantInt* value);
-  clang::Expr* replace(clang::Expr* src, clang::Expr* old, clang::Expr* repl);
 
 public:
-  LLVMBackend(CishContext& context);
-  LLVMBackend() = delete;
+  LLVMBackend(CishContext& cishContext);
   LLVMBackend(const LLVMBackend&) = delete;
   LLVMBackend(LLVMBackend&&) = delete;
   ~LLVMBackend() = default;
+
+  std::string getName(const llvm::Value* v, const std::string& prefix = "");
+  std::string getName(const llvm::Value& v, const std::string& prefix = "");
 
   bool has(const llvm::Value* v) const;
   bool has(const llvm::Value& v) const;
@@ -168,47 +206,23 @@ public:
   /// End the compound statement
   void endBlock();
 
-  void add(const llvm::AllocaInst& alloca, const std::string& name);
-  void add(const llvm::AtomicCmpXchgInst& axchg);
-  void add(const llvm::AtomicRMWInst& rmw);
-  void add(const llvm::BinaryOperator& op);
   void add(const llvm::BranchInst& br);
-  void add(const llvm::CastInst& cst);
-  void add(const llvm::InvokeInst& invoke);
   void add(const llvm::CallInst& call);
   void add(const llvm::CatchReturnInst& catchRet);
   void add(const llvm::CatchSwitchInst& catchSwitch);
   void add(const llvm::CleanupReturnInst& cleanup);
-  void add(const llvm::CmpInst& cmp);
-  void add(const llvm::ExtractElementInst& extract);
-  void add(const llvm::ExtractValueInst& extract);
   void add(const llvm::FenceInst& fence);
   void add(const llvm::CatchPadInst& pad);
-  void add(const llvm::GetElementPtrInst& gep);
   void add(const llvm::IndirectBrInst& br);
+  void add(const llvm::InvokeInst& invoke);
   void add(const llvm::InsertElementInst& insert);
   void add(const llvm::InsertValueInst& insert);
   void add(const llvm::LandingPadInst& pad);
-  void add(const llvm::LoadInst& load);
-  void add(const llvm::PHINode& phi, const std::string& name);
   void add(const llvm::ResumeInst& resume);
   void add(const llvm::ReturnInst& returnInst);
-  void add(const llvm::SelectInst& select);
   void add(const llvm::ShuffleVectorInst& shuffle);
   void add(const llvm::StoreInst& store);
   void add(const llvm::SwitchInst& sw);
-  void add(const llvm::UnaryOperator& op);
-  void add(const llvm::UnreachableInst& unreachable);
-
-  void add(const llvm::ConstantInt& cint);
-  void add(const llvm::ConstantFP& cfp);
-  void add(const llvm::ConstantPointerNull& cnull);
-  void add(const llvm::ConstantAggregateZero& czero);
-  void add(const llvm::UndefValue& cundef);
-  void add(const llvm::ConstantDataSequential& cseq);
-  void add(const llvm::ConstantStruct& cstruct);
-  void add(const llvm::ConstantExpr& cexpr, const llvm::Value& val);
-  void add(const llvm::ConstantArray& carray);
 
   void add(const llvm::Function& f,
            const std::string& name,
@@ -216,15 +230,8 @@ public:
   void add(const llvm::GlobalVariable& g, const std::string& name);
   void add(const llvm::GlobalAlias& g, const std::string& name);
   void add(const llvm::Argument& arg, const std::string& name);
-
+  void add(const llvm::AllocaInst& alloca, const std::string& name);
   void add(const llvm::BasicBlock& bb, const std::string& name = "");
-
-  void add(llvm::IntegerType* ity);
-  void add(llvm::PointerType* pty);
-  void add(llvm::ArrayType* aty);
-  void add(llvm::FunctionType* fty);
-  void add(llvm::VectorType* vty);
-  void add(llvm::Type* type);
 
   // Struct types need to be added in two phases because they may be
   // recursive. In the first phase, all the structs are added and they are all

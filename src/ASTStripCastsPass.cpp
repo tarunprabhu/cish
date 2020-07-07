@@ -33,36 +33,38 @@ namespace cish {
 class ASTStripCastsPass : public ASTFunctionPass<ASTStripCastsPass> {
 public:
   bool process(CStyleCastExpr* castExpr) {
+    bool changed = false;
     const Type* type = castExpr->getType().getTypePtr();
     Expr* expr = castExpr->getSubExpr();
-    if(opts().has(StripCasts::Never)) {
-      return false;
+    if(opts().has(StripCasts::None)) {
+      changed |= false;
     } else if(opts().has(StripCasts::All)) {
-      return ast->replaceExprWith(castExpr, expr);
+      changed |= ast->replaceExprWith(castExpr, expr);
     } else if(const auto* pty = dyn_cast<PointerType>(type)) {
       if(isa<FunctionProtoType>(pty->getPointeeType())) {
         if(opts().has(StripCasts::Function))
-          return ast->replaceExprWith(castExpr, expr);
+          changed |= ast->replaceExprWith(castExpr, expr);
       } else if(isa<VectorType>(pty->getPointeeType())) {
         if(opts().has(StripCasts::Vector))
-          return ast->replaceExprWith(castExpr, expr);
+          changed |= ast->replaceExprWith(castExpr, expr);
       } else {
         if(opts().has(StripCasts::Pointer))
-          return ast->replaceExprWith(castExpr, expr);
+          changed |= ast->replaceExprWith(castExpr, expr);
       }
     } else if(type->isScalarType()) {
       if(opts().has(StripCasts::Scalar))
-        return ast->replaceExprWith(castExpr, expr);
+        changed |= ast->replaceExprWith(castExpr, expr);
     } else if(isa<VectorType>(type)) {
       if(opts().has(StripCasts::Vector))
-        return ast->replaceExprWith(castExpr, expr);
+        changed |= ast->replaceExprWith(castExpr, expr);
     }
 
-    return false;
+    return changed;
   }
 
 public:
-  ASTStripCastsPass(CishContext& cishContext) : ASTFunctionPass(cishContext) {
+  ASTStripCastsPass(CishContext& cishContext)
+      : ASTFunctionPass(cishContext, PostOrder) {
     ;
   }
 

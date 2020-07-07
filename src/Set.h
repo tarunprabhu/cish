@@ -189,6 +189,10 @@ public:
   bool operator>=(const Set<T>& c2) const {
     return _impl >= c2.getImpl();
   }
+
+  Set<T, Compare> clone() const {
+    return Set(*this);
+  }
 };
 
 } // namespace cish

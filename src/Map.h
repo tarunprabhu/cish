@@ -248,6 +248,10 @@ public:
   bool operator>=(const Map<K, V>& c2) const {
     return _impl >= c2.getImpl();
   }
+
+  Map<K, V, Compare> clone() const {
+    return Map<K, V>(*this);
+  }
 };
 
 } // namespace cish

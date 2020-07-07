@@ -19,11 +19,9 @@
 
 #include "CishContext.h"
 #include "AST.h"
-#include "ASTBuilder.h"
 #include "Diagnostics.h"
 #include "IRSourceInfo.h"
 #include "LLVMBackend.h"
-#include "LLVMFrontend.h"
 #include "NameGenerator.h"
 
 using namespace llvm;
@@ -47,27 +45,28 @@ CishContext::CishContext(const Module& m)
   astContext.reset(
       new clang::ASTContext(langOpts, srcMgr, *idents, sels, builtins));
   astContext->InitBuiltinTypes(*targetInfo);
-  builder.reset(new ASTBuilder(*astContext));
+
+  // This must be done before the backends are created but after the ASTContext
+  // has been initialized
+  topLevelAST.reset(new AST(*this));
+
   be.reset(new LLVMBackend(*this));
-  fe.reset(new LLVMFrontend(*this));
 }
 
 AST& CishContext::addAST(clang::FunctionDecl* f) {
-  asts.emplace(f, new AST(*this, f));
+  asts.emplace(f, new AST(*this, f, *topLevelAST));
 
   return getAST(f);
 }
 
 AST& CishContext::getAST(clang::FunctionDecl* f) {
+  if(not f)
+    return *topLevelAST;
   return *asts.at(f);
 }
 
 const AST& CishContext::getAST(clang::FunctionDecl* f) const {
   return *asts.at(f);
-}
-
-ASTBuilder& CishContext::getASTBuilder() {
-  return *builder;
 }
 
 LLVMContext& CishContext::getLLVMContext() const {
@@ -80,10 +79,6 @@ clang::ASTContext& CishContext::getASTContext() const {
 
 const clang::LangOptions& CishContext::getLangOptions() const {
   return langOpts;
-}
-
-LLVMFrontend& CishContext::getLLVMFrontend() const {
-  return *fe;
 }
 
 LLVMBackend& CishContext::getLLVMBackend() const {

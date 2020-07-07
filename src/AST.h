@@ -20,9 +20,9 @@
 #ifndef CISH_AST_H
 #define CISH_AST_H
 
-#include "ASTBuilder.h"
-#include "List.h"
+#include "ExprNumberMap.h"
 #include "Map.h"
+#include "ParentMap.h"
 #include "Set.h"
 #include "Vector.h"
 
@@ -37,8 +37,6 @@
 namespace cish {
 
 class ASTPass;
-class ASTDefUseCalculatorPass;
-class ASTExprNumberingPass;
 class CishContext;
 
 // Single class that keeps track of the AST. Any modifications to the AST
@@ -46,28 +44,14 @@ class CishContext;
 // graph and parent-child relationships between statements consistent
 class AST {
 protected:
-  struct StmtInfo {
-    clang::CompoundStmt* body;
-    clang::Stmt* ctrl;
-    unsigned depth;
-
-    StmtInfo(clang::CompoundStmt* body, clang::Stmt* ctrl, unsigned depth)
-        : body(body), ctrl(ctrl), depth(depth) {
-      ;
-    }
-  };
-
-  using ExprNum = int64_t;
-
-protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
-  ASTBuilder& builder;
   clang::FunctionDecl* decl;
+  ParentMap pm;
+  ExprNumberMap en;
 
 private:
-  ASTPass* defUseCalculator;
-  ASTPass* exprNumberingCalculator;
+  clang::FullSourceLoc invLoc;
 
 protected:
   clang::CFG::BuildOptions cfgBuildOpts;
@@ -76,134 +60,116 @@ protected:
   std::unique_ptr<clang::CFGStmtMap> cfgStmtMap;
   std::unique_ptr<clang::DominatorTree> dt;
 
-  // Clang does not unique anything because that is impossible to do in order
-  // to correctly associate souce information. But that makes a lot of the
-  // AST transformations a little more difficult. But it may not be safe to do
-  // uniquing ourselves because it may break something in Clang. Instead, just
-  // maintain a map of equivalent expressions instead
-  Map<ExprNum, Set<clang::Expr*>> eqvExprs;
-  Map<clang::Expr*, ExprNum> exprNums;
-
-  // The loops in the function because those are usually "interesting" and
-  // therefore worthy of keeping separately
-  Vector<clang::Stmt*> loopStmts;
-
-  // Each of the statements here are only the "top-level" statements
-  // These are either control structures (if, while, for, switch) or
-  // statements terminated by a semicolon. It is easy to think of these as
-  // occupying a "line of code"
-  Map<clang::Stmt*, StmtInfo> stmtInfo;
-
-  // Map from a compound statement to its corresponding control structure
-  // If statements may have up to two
-  Map<clang::CompoundStmt*, clang::Stmt*> ctrls;
-
-  // These are the statements contained within each control structure or
-  // function body. The function body is a special "statement" and the key
-  // is nullptr in this map
-  Map<clang::Stmt*, Set<clang::Stmt*>> subStmts;
-
-  // This map is the closure of the subStmts map
-  Map<clang::Stmt*, Set<clang::Stmt*>> descendants;
-
   // For now, every def of a variable is an assignment statement.
   // In clang-speak, this would be a BinaryOperator where the operand is
-  // BO_*Assign. When returning the def, it will return the entire statement
+  // BO_Assign. When returning the def, it will return the entire statement
   Map<clang::VarDecl*, Set<clang::Stmt*>> defMap;
 
   // The uses are the nearest Expr containing the variable directly.
+  // The Expr in the use will be a DeclRefExpr but since those are not uniqued,
+  // they can't be used to keep the map
   Map<clang::VarDecl*, Set<clang::Stmt*>> useMap;
-
-  // These are uses at the expression level. Comes in handy when replacing
-  Map<clang::Expr*, Set<clang::Stmt*>> exprUseMap;
-
-  // These are the top-level uses. The top-level statements are those that
-  // are either a control structure or a statement terminated by a semicolon
-  // The statements can be though of as those that would normally be considered
-  // a "line of code" (so the semi-colon terminated statements in a for loop
-  // declaration don't count). If the statement is a control structure, the
-  // variable is used in the following ways:
-  //
-  //   IfStmt, WhileStmt, DoStmt, SwitchStmt: In the condition expression
-  //   ForStmt: In either the initialzation statement, the condition expression
-  //            or the increment expression
-  //
-  Map<clang::VarDecl*, Set<clang::Stmt*>> tlUseMap;
-  Map<clang::VarDecl*, Set<clang::Stmt*>> tlDefMap;
 
   // Variables that have their address taken
   Set<clang::VarDecl*> addrTaken;
 
-  // Local variables in the function
-  // Keep this separate because function parameters are also VarDecl's, so
-  // it's a bit messy keeping track of everything
-  List<clang::VarDecl*> locals;
-
-public:
-  using loop_iterator = decltype(loopStmts)::const_iterator;
-  using loop_range = llvm::iterator_range<loop_iterator>;
-  using child_iterator = decltype(subStmts)::mapped_type::const_iterator;
-  using child_range = llvm::iterator_range<child_iterator>;
-  using tl_iterator = decltype(stmtInfo)::const_key_iterator;
-  using tl_range = llvm::iterator_range<tl_iterator>;
-  using var_iterator = decltype(locals)::const_iterator;
-  using var_range = llvm::iterator_range<var_iterator>;
-  using def_iterator = decltype(defMap)::mapped_type::const_iterator;
-  using def_range = llvm::iterator_range<def_iterator>;
-  using use_iterator = decltype(useMap)::mapped_type::const_iterator;
-  using use_range = llvm::iterator_range<use_iterator>;
-  using tluse_iterator = decltype(tlUseMap)::mapped_type::const_iterator;
-  using tluse_range = llvm::iterator_range<tluse_iterator>;
-  using tldef_iterator = decltype(tlDefMap)::mapped_type::const_iterator;
-  using tldef_range = llvm::iterator_range<tldef_iterator>;
+  Set<clang::VarDecl*> locals;
+  Set<clang::VarDecl*> globals;
 
 protected:
-  ExprNum addExpr(clang::Expr* expr);
-  ExprNum getExprNum(clang::Expr* expr) const;
-  bool hasExprNum(clang::Expr* expr) const;
-
-  void addChild(clang::Stmt* stmt,
-                clang::CompoundStmt* body,
-                clang::Stmt* construct,
-                unsigned depth);
-
-  void associateStmts(clang::CompoundStmt* body,
-                      clang::Stmt* construct,
-                      unsigned stmtDepth);
-
+  void add(clang::Expr* expr, clang::Stmt* user);
+  void remove(clang::Expr* expr, clang::Stmt* user);
   void addDef(clang::VarDecl* var, clang::Stmt* user);
   void addUse(clang::VarDecl* var, clang::Stmt* user);
-  void addExprUse(clang::Expr* expr, clang::Stmt* user);
-  void addTopLevelDef(clang::VarDecl* var, clang::Stmt* user);
-  void addTopLevelUse(clang::Stmt* stmt, clang::Stmt* user);
-
-  Set<clang::Stmt*> getUses(clang::VarDecl* var);
-  Set<clang::Stmt*> getDefs(clang::VarDecl* var);
 
   bool replace(clang::UnaryOperator* unOp, clang::Expr* repl);
-  bool replace(clang::BinaryOperator* binOp, clang::Expr* repl, bool lhs);
   bool
-  replace(clang::ArraySubscriptExpr* arrExpr, clang::Expr* repl, bool base);
-  bool replace(clang::CallExpr* callExpr, clang::Expr* repl, long arg);
+  replace(clang::BinaryOperator* binOp, clang::Expr* repl, bool replaceLHS);
+  bool replace(clang::ArraySubscriptExpr* arrExpr,
+               clang::Expr* repl,
+               bool replaceBase);
+  bool replace(clang::CallExpr* callExpr, clang::Expr* repl, long i);
   bool replace(clang::CStyleCastExpr* castExpr, clang::Expr* repl);
   bool replace(clang::MemberExpr* memberExpr, clang::Expr* repl);
   bool replace(clang::ReturnStmt* retStmt, clang::Expr* repl);
   bool replace(clang::IfStmt* ifStmt, clang::Expr* repl);
   bool replace(clang::SwitchStmt* switchStmt, clang::Expr* repl);
   bool replace(clang::DoStmt* doStmt, clang::Expr* repl);
-  bool replace(clang::ForStmt* forStmt, clang::Expr* repl, bool cond);
+  bool replace(clang::ForStmt* forStmt, clang::Expr* repl);
   bool replace(clang::WhileStmt* whileStmt, clang::Expr* repl);
   bool replace(clang::Stmt* parent, clang::Expr* expr, clang::Expr* repl);
 
   void recalculateCFG();
-  void recalculateStructure();
   void recalculateDefUse();
 
+  clang::Stmt* clone(clang::CXXBoolLiteralExpr*);
+  clang::Stmt* clone(clang::CharacterLiteral*);
+  clang::Stmt* clone(clang::IntegerLiteral*);
+  clang::Stmt* clone(clang::FloatingLiteral*);
+  clang::Stmt* clone(clang::StringLiteral*);
+  clang::Stmt* clone(clang::CXXNullPtrLiteralExpr*);
+  clang::Stmt* clone(clang::UnaryOperator*);
+  clang::Stmt* clone(clang::BinaryOperator*);
+  clang::Stmt* clone(clang::ConditionalOperator*);
+  clang::Stmt* clone(clang::ArraySubscriptExpr*);
+  clang::Stmt* clone(clang::CallExpr*);
+  clang::Stmt* clone(clang::CStyleCastExpr*);
+  clang::Stmt* clone(clang::MemberExpr*);
+  clang::Stmt* clone(clang::InitListExpr*);
+  clang::Stmt* clone(clang::DeclRefExpr*);
+  clang::Stmt* clone(clang::CompoundStmt*);
+  clang::Stmt* clone(clang::IfStmt*);
+  clang::Stmt* clone(clang::SwitchStmt*);
+  clang::Stmt* clone(clang::CaseStmt*);
+  clang::Stmt* clone(clang::DefaultStmt*);
+  clang::Stmt* clone(clang::DoStmt*);
+  clang::Stmt* clone(clang::ForStmt*);
+  clang::Stmt* clone(clang::WhileStmt*);
+  clang::Stmt* clone(clang::GotoStmt*);
+  clang::Stmt* clone(clang::BreakStmt*);
+  clang::Stmt* clone(clang::ContinueStmt*);
+  clang::Stmt* clone(clang::ReturnStmt*);
+  clang::Stmt* clone(clang::NullStmt*);
+  clang::Stmt* clone(clang::LabelStmt*);
+
+  void remove(clang::CXXBoolLiteralExpr*);
+  void remove(clang::CharacterLiteral*);
+  void remove(clang::IntegerLiteral*);
+  void remove(clang::FloatingLiteral*);
+  void remove(clang::StringLiteral*);
+  void remove(clang::CXXNullPtrLiteralExpr*);
+  void remove(clang::UnaryOperator*);
+  void remove(clang::BinaryOperator*);
+  void remove(clang::ConditionalOperator*);
+  void remove(clang::ArraySubscriptExpr*);
+  void remove(clang::CallExpr*);
+  void remove(clang::CStyleCastExpr*);
+  void remove(clang::MemberExpr*);
+  void remove(clang::InitListExpr*);
+  void remove(clang::DeclRefExpr*);
+  void remove(clang::CompoundStmt*);
+  void remove(clang::IfStmt*);
+  void remove(clang::SwitchStmt*);
+  void remove(clang::CaseStmt*);
+  void remove(clang::DefaultStmt*);
+  void remove(clang::DoStmt*);
+  void remove(clang::ForStmt*);
+  void remove(clang::WhileStmt*);
+  void remove(clang::GotoStmt*);
+  void remove(clang::BreakStmt*);
+  void remove(clang::ContinueStmt*);
+  void remove(clang::ReturnStmt*);
+  void remove(clang::NullStmt*);
+  void remove(clang::LabelStmt*);
+  void remove(clang::Stmt*);
+
+  clang::LabelStmt* createLabelStmt(clang::LabelDecl*);
+
 public:
-  AST(CishContext& cishContext, clang::FunctionDecl* decl);
+  AST(CishContext& cishContext);
+  AST(CishContext& cishContext, clang::FunctionDecl* decl, const AST&);
   AST(const AST&) = delete;
   AST(AST&&) = delete;
-  ~AST();
 
   clang::FunctionDecl* getFunction() const;
 
@@ -217,62 +183,148 @@ public:
   bool erase(clang::VarDecl* var);
 
   const clang::DominatorTree& getDominatorTree() const;
-  clang::Stmt* getParent(clang::Stmt*) const;
   clang::CFG* getCFG() const;
   clang::CFGBlock* getCFGBlock(clang::Stmt* stmt) const;
   const clang::CFG::BuildOptions& getCFGBuildOpts() const;
 
   bool hasAddressTaken(clang::VarDecl* var) const;
+  void resetAddressTaken(clang::VarDecl* var);
 
-  const Set<clang::Expr*>& getEqvExprs(clang::Expr* expr) const;
-
-  unsigned getNumUses(clang::VarDecl* var) const;
+  Set<clang::Stmt*> getTopLevelDefs(clang::VarDecl* var) const;
+  const Set<clang::Stmt*>& getDefs(clang::VarDecl* var) const;
   unsigned getNumDefs(clang::VarDecl* var) const;
-  Vector<clang::Stmt*> getTopLevelUses(clang::VarDecl* var) const;
-  Set<clang::Stmt*> getTopLevelUsesSet(clang::VarDecl* var) const;
-  Vector<clang::Stmt*> getTopLevelDefs(clang::VarDecl* var) const;
-  Set<clang::Stmt*> getTopLevelDefsSet(clang::VarDecl* var) const;
-  unsigned getNumTopLevelDefs(clang::VarDecl* var) const;
-  unsigned getNumTopLevelUses(clang::VarDecl* var) const;
   bool isDefined(clang::VarDecl* var) const;
-  bool isUsed(clang::VarDecl* var) const;
-  bool hasSingleDef(clang::VarDecl* var) const;
-  bool hasSingleUse(clang::VarDecl* var) const;
   bool hasZeroDefs(clang::VarDecl* var) const;
-  bool hasZeroUses(clang::VarDecl* var) const;
-  bool hasSingleTopLevelDef(clang::VarDecl* var) const;
-  bool hasSingleTopLevelUse(clang::VarDecl* var) const;
-  bool hasZeroTopLevelDefs(clang::VarDecl* var) const;
-  bool hasZeroTopLevelUses(clang::VarDecl* var) const;
+  bool hasSingleDef(clang::VarDecl* var) const;
   clang::Stmt* getSingleDef(clang::VarDecl* var) const;
   clang::Expr* getSingleDefRHS(clang::VarDecl* var) const;
+
+  Set<clang::Stmt*> getTopLevelUses(clang::VarDecl* var) const;
+  const Set<clang::Stmt*>& getUses(clang::VarDecl* var) const;
+  unsigned getNumUses(clang::VarDecl* var) const;
+  bool isUsed(clang::VarDecl* var) const;
+  bool hasZeroUses(clang::VarDecl* var) const;
+  bool hasSingleUse(clang::VarDecl* var) const;
   clang::Stmt* getSingleUse(clang::VarDecl* var) const;
 
-  bool isStructureFor(const clang::FunctionDecl* f) const;
-  bool isContainedIn(clang::Stmt* needle,
-                     clang::Stmt* haystack = nullptr) const;
-  bool isDirectlyContainedIn(clang::Stmt* needle,
-                             clang::Stmt* haystack = nullptr) const;
+  const Set<clang::VarDecl*>& getVars() const;
+
+  bool isContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
+  bool isDirectlyContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
   bool isTopLevel(clang::Stmt* stmt) const;
-  unsigned getDepth(clang::Stmt* stmt) const;
-  clang::CompoundStmt* getBodyFor(clang::Stmt* stmt) const;
-  clang::Stmt* getConstructFor(clang::Stmt* stmt) const;
+  const Set<clang::Expr*>& getEqvExprs(clang::Expr* expr) const;
 
-  Vector<clang::Stmt*> getLoops() const;
-  Vector<clang::VarDecl*> getVars() const;
+  // AST construction functions
+  clang::Stmt* clone(clang::Stmt* stmt);
+  clang::Expr* cloneExpr(clang::Expr* expr);
 
-  loop_range loops() const;
-  tl_range tlstmts() const;
-  var_range vars() const;
-  tluse_range tluses(clang::VarDecl* var) const;
-  tldef_range tldefs(clang::VarDecl* var) const;
-  child_range children(clang::Stmt* stmt) const;
+  void setFunctionBody(clang::Stmt* body);
 
-  void recalculate(bool defUseOnly);
+  clang::DeclarationNameInfo getDeclarationNameInfo(const std::string& name);
+  clang::IdentifierInfo& getIdentifierInfo(const std::string& name);
+  clang::DeclarationName createDeclName(const std::string& name);
 
-public:
-  friend class ASTDefUseCalculatorPass;
-  friend class ASTExprNumberingPass;
+  // Decls
+  clang::RecordDecl* createStruct(const std::string& name);
+  clang::FieldDecl* createField(const std::string& name,
+                                clang::QualType type,
+                                clang::RecordDecl* strct);
+  clang::FunctionDecl* createFunction(const std::string& name,
+                                      clang::QualType type);
+  clang::ParmVarDecl* createParam(const std::string& name,
+                                  clang::QualType type,
+                                  clang::FunctionDecl* func);
+  clang::VarDecl* createLocalVariable(const std::string& name,
+                                          clang::QualType type,
+                                          clang::FunctionDecl* func);
+  clang::VarDecl* createGlobalVariable(const std::string& name,
+                                           clang::QualType type);
+
+  clang::LabelDecl* createLabelDecl(clang::FunctionDecl* f,
+                                    const std::string& name);
+
+  // Literals
+  clang::CXXBoolLiteralExpr* createBoolLiteral(bool b);
+  clang::CXXBoolLiteralExpr* createBoolLiteral(bool b, clang::QualType type);
+  clang::CharacterLiteral* createCharacterLiteral(unsigned c);
+  clang::IntegerLiteral* createIntLiteral(const llvm::APInt& i,
+                                          clang::QualType type);
+  clang::IntegerLiteral* createIntLiteral(short i);
+  clang::IntegerLiteral* createIntLiteral(unsigned short i);
+  clang::IntegerLiteral* createIntLiteral(int i);
+  clang::IntegerLiteral* createIntLiteral(unsigned int i);
+  clang::IntegerLiteral* createIntLiteral(long i);
+  clang::IntegerLiteral* createIntLiteral(unsigned long i);
+  clang::FloatingLiteral* createFloatLiteral(const llvm::APFloat& f,
+                                             clang::QualType type);
+  clang::FloatingLiteral* createFloatLiteral(float f);
+  clang::FloatingLiteral* createFloatLiteral(double g);
+  clang::FloatingLiteral* createFloatLiteral(long double f);
+  clang::StringLiteral* createStringLiteral(llvm::StringRef str,
+                                            clang::QualType type);
+  clang::StringLiteral* createStringLiteral(const std::string& str,
+                                            clang::QualType type);
+  clang::StringLiteral* createStringLiteral(const char* cstr,
+                                            clang::QualType type);
+  clang::CXXNullPtrLiteralExpr* createNullptr(clang::QualType type);
+
+  // Exprs
+  clang::DeclRefExpr* createDeclRefExpr(clang::ValueDecl* decl);
+  clang::UnaryOperator* createUnaryOperator(clang::Expr* lhs,
+                                            clang::UnaryOperator::Opcode op,
+                                            clang::QualType type);
+  clang::BinaryOperator* createBinaryOperator(clang::Expr* lhs,
+                                              clang::Expr* rhs,
+                                              clang::BinaryOperator::Opcode op,
+                                              clang::QualType type);
+  clang::ConditionalOperator* createConditionalOperator(clang::Expr* cond,
+                                                        clang::Expr* t,
+                                                        clang::Expr* f,
+                                                        clang::QualType type);
+  clang::ArraySubscriptExpr* createArraySubscriptExpr(clang::Expr* arr,
+                                                      clang::Expr* idx,
+                                                      clang::QualType type);
+  clang::CallExpr* createCallExpr(clang::Expr* callee,
+                                  const Vector<clang::Expr*>& args,
+                                  clang::QualType type);
+  clang::CStyleCastExpr* createCastExpr(clang::Expr* expr,
+                                        clang::QualType type);
+  clang::MemberExpr* createMemberExpr(clang::Expr* base,
+                                      clang::ValueDecl* member,
+                                      clang::QualType type);
+  clang::InitListExpr* createInitListExpr(const Vector<clang::Expr*>& exprs);
+
+  // Statements. These can only be top-level statements. Exprs can also be
+  // top level statements at times, but these can never appear as an operand
+  // of an expression
+  clang::NullStmt* createNullStmt();
+  clang::CompoundStmt* createCompoundStmt(const Vector<clang::Stmt*>& stmts);
+  clang::CompoundStmt* createCompoundStmt(clang::Stmt* stmt);
+  clang::IfStmt*
+  createIfStmt(clang::Expr* cond, clang::Stmt* thn, clang::Stmt* els = nullptr);
+  clang::SwitchStmt* createSwitchStmt(clang::Expr* cond, clang::Stmt* body);
+  clang::CaseStmt* createCaseStmt(clang::Expr* value, clang::Stmt* body);
+  clang::DefaultStmt* createDefaultStmt(clang::Stmt* body);
+  clang::DoStmt* createDoStmt(clang::Stmt* body, clang::Expr* cond);
+  clang::WhileStmt* createWhileStmt(clang::Expr* cond, clang::Stmt* body);
+  clang::ForStmt* createForStmt(clang::Stmt* init,
+                                clang::Expr* cond,
+                                clang::Expr* inc,
+                                clang::Stmt* body);
+  clang::GotoStmt* createGotoStmt(clang::LabelDecl* label);
+  clang::BreakStmt* createBreakStmt();
+  clang::ContinueStmt* createContinueStmt();
+  clang::ReturnStmt* createReturnStmt(clang::Expr* retExpr);
+
+  clang::DeclStmt* createDeclStmt(clang::Decl* decl);
+
+  // FIXME: This should probably go away. Right now it is used for "temporary"
+  // variables which themselves should probably go away
+  clang::DeclRefExpr* createVariable(const std::string& name,
+                                     clang::QualType type,
+                                     clang::DeclContext* parent);
+
+  void recalculate();
 };
 
 } // namespace cish

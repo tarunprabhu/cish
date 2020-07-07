@@ -24,28 +24,25 @@
 
 #include <llvm/Support/CommandLine.h>
 
-namespace llvm {
-namespace cl {
-class OptionCategory;
-}
-} // namespace llvm
-
 namespace cish {
 
+// All enums that behave as flags should begin with All and end with None
+// The None option is not available to the user and is for internal use
+// only.
 enum class StripCasts {
-  Never = 0x0,
-  Function = 0x1,
-  Pointer = 0x2,
-  Scalar = 0x4,
-  Vector = 0x8,
-  All = 0xffff,
+  All,
+  Function,
+  Pointer,
+  Scalar,
+  Vector,
+  None,
 };
 
 enum class Annotations {
-  None = 0x0,
-  Source = 0x1,
-  Cish = 0x2,
-  All = 0xffff,
+  All,
+  Source,
+  Cish,
+  None,
 };
 
 enum class IndentStyle {
@@ -59,35 +56,59 @@ enum class Parens {
   Smart,  // Be "smart" about adding parentheses to operands of operators
 };
 
+enum class LogCategory {
+  All,
+  IR,        // Log the prepared LLVM IR prior to structure analysis
+  Structure, // Log each reduction during structure analysis
+  AST,       // Log the output of each AST transformation pass
+  CFG,       // Log the CFG after each AST transformation pass
+  None,
+};
+
 class Options {
 private:
-  unsigned stripCasts;
-  unsigned annotations;
+  template <typename Enum>
+  unsigned parse(unsigned flags) {
+    if(flags & (1 << (unsigned)Enum::All))
+      flags = ~0x0U;
+    return flags;
+  }
 
-private:
-  void set(StripCasts cst);
-  void set(Annotations ann);
+  template <typename Enum>
+  bool has(Enum e, const unsigned flags) const {
+    if(e == Enum::All)
+      return flags == ~0x0U;
+    else if(e == Enum::None)
+      return flags == 0;
+    else
+      return flags & (1 << (unsigned)e);
+  }
 
 public:
-  std::string fileIn;
-  std::string fileOut;
+  const std::string fileIn;
+  const std::string fileOut;
 
   // The prefix string to use for generated variable names
-  std::string prefix;
-  IndentStyle indentStyle;
-  unsigned indentOffset;
-  Parens parens;
-  bool verbose;
-  bool log;
-  std::string logDir;
+  const std::string prefix;
+  const IndentStyle indentStyle;
+  const unsigned indentOffset;
+  const Parens parens;
+  const bool verbose;
+  const std::string logDir;
+
+private:
+  const unsigned stripCasts;
+  const unsigned annotations;
+  const unsigned log;
 
 public:
   Options();
   Options(const Options&) = delete;
   Options(Options&&) = delete;
 
-  bool has(StripCasts cst) const;
-  bool has(Annotations ann) const;
+  bool has(StripCasts) const;
+  bool has(Annotations) const;
+  bool has(LogCategory) const;
 };
 
 // Exposes the singular global object containing the parsed command line

@@ -27,9 +27,9 @@
 #include "CishContext.h"
 #include "Diagnostics.h"
 #include "LLVMBackend.h"
-#include "LLVMFrontend.h"
+#include "LLVMCishMetadata.h"
+#include "LLVMStructureAnalysis.h"
 #include "Set.h"
-#include "StructureAnalysis.h"
 #include "Vector.h"
 
 using namespace llvm;
@@ -38,13 +38,11 @@ namespace cish {
 
 class WalkerBase {
 protected:
-  LLVMFrontend& fe;
   LLVMBackend& be;
   const Function& func;
 
 protected:
-  WalkerBase(LLVMFrontend& fe, LLVMBackend& be, const Function& func)
-      : fe(fe), be(be), func(func) {
+  WalkerBase(LLVMBackend& be, const Function& func) : be(be), func(func) {
     ;
   }
 
@@ -76,7 +74,7 @@ protected:
   virtual void handle(const Instruction& inst) override;
 
 public:
-  WalkStructured(LLVMFrontend& fe, LLVMBackend& be, const Function& func);
+  WalkStructured(LLVMBackend& be, const Function& func);
   WalkStructured(const WalkStructured&) = delete;
   WalkStructured(WalkStructured&&) = delete;
   virtual ~WalkStructured() = default;
@@ -84,10 +82,8 @@ public:
   virtual void walk(const StructNode* node) override;
 };
 
-WalkStructured::WalkStructured(LLVMFrontend& fe,
-                               LLVMBackend& be,
-                               const Function& func)
-    : WalkerBase(fe, be, func) {
+WalkStructured::WalkStructured(LLVMBackend& be, const Function& func)
+    : WalkerBase(be, func) {
   ;
 }
 
@@ -97,18 +93,23 @@ void WalkStructured::handle(const Instruction& inst) {
   // ignore any branch instruction. But the conditions of the branches still
   // need to be handled because the expression there should be converted
   //
-  if(not fe.isIgnoreValue(inst)) {
-    if(isa<AllocaInst>(inst) or isa<CallInst>(inst) or isa<InvokeInst>(inst)
-       or isa<StoreInst>(inst) or isa<ReturnInst>(inst)) {
-      fe.handle(static_cast<const Value&>(inst));
-    } else if(const auto* swtch = dyn_cast<SwitchInst>(&inst)) {
-      fe.handle(swtch->getCondition());
-      for(const auto& i : swtch->cases())
-        fe.handle(i.getCaseValue());
-    } else if(const auto* br = dyn_cast<BranchInst>(&inst)) {
-      if(br->isConditional())
-        fe.handle(br->getCondition());
-    }
+  if(not LLVM::hasCishMetadataIgnore(inst)) {
+    if(const auto* call = dyn_cast<CallInst>(&inst))
+      if(call->getType()->isVoidTy())
+        be.add(*call);
+      else
+        fatal(error() << "Deal with calls that return a value correctly");
+    else if(const auto* invoke = dyn_cast<InvokeInst>(&inst))
+      if(invoke->getType()->isVoidTy())
+        be.add(*invoke);
+      else
+        fatal(error() << "Deal with invokes that return a value correctly");
+    else if(const auto* store = dyn_cast<StoreInst>(&inst))
+      be.add(*store);
+    else if(const auto* ret = dyn_cast<ReturnInst>(&inst))
+      be.add(*ret);
+    else if(const auto* swtch = dyn_cast<SwitchInst>(&inst))
+      be.add(*swtch);
   }
 }
 
@@ -258,7 +259,7 @@ protected:
   virtual void walk(const StructNode& node) override;
 
 public:
-  WalkSemiStructured(LLVMFrontend& fe, LLVMBackend& be, const Function& f);
+  WalkSemiStructured(LLVMBackend& be, const Function& f);
   WalkSemiStructured(const WalkSemiStructured&) = delete;
   WalkSemiStructured(WalkSemiStructured&&) = delete;
   virtual ~WalkSemiStructured() = default;
@@ -266,10 +267,8 @@ public:
   virtual void walk(const StructNode* node) override;
 };
 
-WalkSemiStructured::WalkSemiStructured(LLVMFrontend& fe,
-                                       LLVMBackend& be,
-                                       const Function& func)
-    : WalkStructured(fe, be, func) {
+WalkSemiStructured::WalkSemiStructured(LLVMBackend& be, const Function& func)
+    : WalkStructured(be, func) {
   ;
 }
 
@@ -383,7 +382,7 @@ protected:
   virtual void handle(const Instruction&) override;
 
 public:
-  WalkUnstructured(LLVMFrontend& fe, LLVMBackend& be, const Function& f);
+  WalkUnstructured(LLVMBackend& be, const Function& f);
   WalkUnstructured(const WalkUnstructured&) = delete;
   WalkUnstructured(WalkUnstructured&&) = delete;
   virtual ~WalkUnstructured() = default;
@@ -391,10 +390,8 @@ public:
   virtual void walk(const StructNode*) override;
 };
 
-WalkUnstructured::WalkUnstructured(LLVMFrontend& fe,
-                                   LLVMBackend& be,
-                                   const Function& func)
-    : WalkerBase(fe, be, func) {
+WalkUnstructured::WalkUnstructured(LLVMBackend& be, const Function& func)
+    : WalkerBase(be, func) {
   ;
 }
 
@@ -413,13 +410,25 @@ void WalkUnstructured::handle(const Instruction& inst) {
   // idea because it may look like a violation of semantics if the calls
   // are side-effecting, so just handle all calls as statements
   //
-  // AllocaInst are local variable declarations and get treated like
-  // statements.
-  if(not fe.isIgnoreValue(inst)) {
-    if(isa<AllocaInst>(inst) or isa<CallInst>(inst) or isa<InvokeInst>(inst)
-       or isa<StoreInst>(inst) or isa<SwitchInst>(inst) or isa<BranchInst>(inst)
-       or isa<ReturnInst>(inst))
-      fe.handle(static_cast<const Value&>(inst));
+  if(not LLVM::hasCishMetadataIgnore(inst)) {
+    if(const auto* call = dyn_cast<CallInst>(&inst))
+      if(call->getType()->isVoidTy())
+        be.add(*call);
+      else
+        fatal(error() << "Deal with calls that return a value correctly");
+    else if(const auto* invoke = dyn_cast<InvokeInst>(&inst))
+      if(invoke->getType()->isVoidTy())
+        be.add(*invoke);
+      else
+        fatal(error() << "Deal with invokes that return a value correctly");
+    else if(auto* store = dyn_cast<StoreInst>(&inst))
+      be.add(*store);
+    else if(auto* sw = dyn_cast<SwitchInst>(&inst))
+      be.add(*sw);
+    else if(auto* br = dyn_cast<BranchInst>(&inst))
+      be.add(*br);
+    else if(auto* ret = dyn_cast<ReturnInst>(&inst))
+      be.add(*ret);
   }
 }
 
@@ -452,7 +461,7 @@ public:
   }
 
   virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
-    AU.addRequired<StructureAnalysisWrapperPass>();
+    AU.addRequired<LoopInfoWrapperPass>();
     AU.setPreservesAll();
   }
 
@@ -460,23 +469,26 @@ public:
     cish::message() << "Running " << getPassName() << " on " << f.getName()
                     << "\n";
 
-    cish::LLVMFrontend& fe = cishContext.getLLVMFrontend();
+    LoopInfo& li = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     cish::LLVMBackend& be = cishContext.getLLVMBackend();
-
-    const auto& analysis = getAnalysis<StructureAnalysisWrapperPass>();
+    cish::LLVMStructureAnalysis analysis(f, li);
 
     be.beginFunction(f);
 
-    switch(analysis.getStructureKind()) {
-    case cish::StructureKind::Unstructured:
-      cish::WalkUnstructured(fe, be, f).walk(nullptr);
+    for(Instruction& inst : instructions(f))
+      if(auto* alloca = dyn_cast<AllocaInst>(&inst))
+        be.add(*alloca, be.getName(*alloca, "local"));
+
+    switch(analysis.calculate()) {
+    case cish::StructureAnalysis::Unstructured:
+      cish::WalkUnstructured(be, f).walk(nullptr);
       break;
-    case cish::StructureKind::SemiStructured:
-      cish::WalkSemiStructured(fe, be, f).walk(&analysis.getStructured());
+    case cish::StructureAnalysis::SemiStructured:
+      cish::WalkSemiStructured(be, f).walk(&analysis.getStructured());
       break;
-    case cish::StructureKind::PerfectlyStructured:
-    case cish::StructureKind::Structured:
-      cish::WalkStructured(fe, be, f).walk(&analysis.getStructured());
+    case cish::StructureAnalysis::PerfectlyStructured:
+    case cish::StructureAnalysis::Structured:
+      cish::WalkStructured(be, f).walk(&analysis.getStructured());
       break;
     }
 
