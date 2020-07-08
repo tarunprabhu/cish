@@ -98,6 +98,12 @@ bool isOne(Expr* expr) {
   return isConstant(expr, 1);
 }
 
+bool isLiteral(const Expr* expr) {
+  return isa<CXXBoolLiteralExpr>(expr) or isa<IntegerLiteral>(expr)
+         or isa<FloatingLiteral>(expr) or isa<CXXNullPtrLiteralExpr>(expr)
+         or isa<CharacterLiteral>(expr) or isa<StringLiteral>(expr);
+}
+
 VarDecl* getVar(Expr* expr) {
   if(auto* ref = dyn_cast<DeclRefExpr>(expr))
     if(auto* var = dyn_cast<VarDecl>(ref->getDecl()))

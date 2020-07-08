@@ -32,6 +32,7 @@ set(SOURCES
   LLVMUtils.cpp
   Logging.cpp
   NameGenerator.cpp
+  Operators.cpp
   Options.cpp
   ParentMap.cpp
   StructureTree.cpp

@@ -98,7 +98,8 @@ void WalkStructured::handle(const Instruction& inst) {
       if(call->getType()->isVoidTy())
         be.add(*call);
       else
-        fatal(error() << "Deal with calls that return a value correctly");
+        fatal(error() << "Deal with calls that return a value correctly: "
+                      << *call);
     else if(const auto* invoke = dyn_cast<InvokeInst>(&inst))
       if(invoke->getType()->isVoidTy())
         be.add(*invoke);
@@ -108,8 +109,6 @@ void WalkStructured::handle(const Instruction& inst) {
       be.add(*store);
     else if(const auto* ret = dyn_cast<ReturnInst>(&inst))
       be.add(*ret);
-    else if(const auto* swtch = dyn_cast<SwitchInst>(&inst))
-      be.add(*swtch);
   }
 }
 

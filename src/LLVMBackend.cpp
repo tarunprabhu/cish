@@ -516,7 +516,7 @@ void LLVMBackend::add(const StoreInst& store) {
 }
 
 void LLVMBackend::add(const SwitchInst& swtch) {
-  addSwitchStmt(swtch);
+  beginBlock();
   for(const auto& i : swtch.cases()) {
     BackendBase::add(ast->createCompoundStmt(
         ast->createGotoStmt(blocks.at(i.getCaseSuccessor()))));
@@ -527,6 +527,8 @@ void LLVMBackend::add(const SwitchInst& swtch) {
         ast->createCompoundStmt(ast->createGotoStmt(blocks.at(deflt))));
     addSwitchDefault();
   }
+  endBlock();
+  addSwitchStmt(swtch);
 }
 
 void LLVMBackend::add(const Argument& arg, const std::string& name) {

@@ -40,6 +40,7 @@ bool isEqual(clang::Expr* lhs, clang::Expr* rhs);
 bool isConstant(clang::Expr*, uint64_t val);
 bool isZero(clang::Expr*);
 bool isOne(clang::Expr*);
+bool isLiteral(const clang::Expr*);
 
 clang::VarDecl* getVar(clang::Expr* expr);
 Vector<clang::VarDecl*> getVarsInStmtAsVector(clang::Stmt* stmt);

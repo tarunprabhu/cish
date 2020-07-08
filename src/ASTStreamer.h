@@ -43,7 +43,11 @@ protected:
   unsigned ilevel;
 
 protected:
-  ASTStreamer& parenthetize(const clang::Stmt*);
+  ASTStreamer& parenthetize(const clang::Expr* expr);
+  ASTStreamer& parenthetize(const clang::Expr* expr,
+                            clang::UnaryOperator::Opcode opc);
+  ASTStreamer& parenthetize(const clang::Expr* expr,
+                            clang::BinaryOperator::Opcode opc);
 
   bool isVoidTy(const clang::Type*) const;
   bool isBoolTy(const clang::Type*) const;

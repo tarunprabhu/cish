@@ -20,6 +20,7 @@
 #include "ASTStreamer.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
+#include "Operators.h"
 #include "Options.h"
 
 #include <sstream>
@@ -27,10 +28,6 @@
 using namespace clang;
 
 namespace cish {
-
-// static bool isFlagSet(unsigned flags, unsigned flag) {
-//   return (flags | flag) == flag;
-// }
 
 static void formatArrayDims(const ConstantArrayType* aty,
                             llvm::raw_ostream& ss) {
@@ -45,6 +42,13 @@ static std::string formatArrayDims(const ConstantArrayType* aty) {
   formatArrayDims(aty, ss);
 
   return ss.str();
+}
+
+static bool highestPrecedence(const Expr* expr) {
+  return Clang::isLiteral(expr) or isa<DeclRefExpr>(expr)
+         or isa<InitListExpr>(expr) or isa<ArraySubscriptExpr>(expr)
+         or isa<CallExpr>(expr) or isa<CStyleCastExpr>(expr)
+         or isa<MemberExpr>(expr);
 }
 
 ASTStreamer::ASTStreamer(const clang::ASTContext& astContext)
@@ -92,33 +96,50 @@ bool ASTStreamer::isLongDoubleTy(const Type* type) const {
   return type == astContext.LongDoubleTy.getTypePtr();
 }
 
-ASTStreamer& ASTStreamer::parenthetize(const Stmt* stmt) {
-  if(isa<CXXBoolLiteralExpr>(stmt) or isa<IntegerLiteral>(stmt)
-     or isa<FloatingLiteral>(stmt) or isa<CXXNullPtrLiteralExpr>(stmt)
-     or isa<CharacterLiteral>(stmt) or isa<StringLiteral>(stmt)
-     or isa<DeclRefExpr>(stmt) or isa<InitListExpr>(stmt)
-     or isa<ArraySubscriptExpr>(stmt)) {
-    *this << stmt;
-  } else if(opts().parens == Parens::Smart) {
-    if(const auto* op = dyn_cast<BinaryOperator>(stmt))
-      switch(op->getOpcode()) {
-      case BO_Assign:
-      case BO_PtrMemD:
-      case BO_PtrMemI:
-      case BO_Comma:
-        return *this << stmt;
-      default:
-        return *this << "(" << stmt << ")";
-      }
-    else if(isa<ConditionalOperator>(stmt))
-      *this << "(" << stmt << ")";
+ASTStreamer& ASTStreamer::parenthetize(const Expr* expr,
+                                       const BinaryOperator::Opcode opc) {
+  if(opts().parens == Parens::Always) {
+    *this << "(" << expr << ")";
+  } else if(highestPrecedence(expr)) {
+    *this << expr;
+  } else if(const auto* subOp = dyn_cast<BinaryOperator>(expr)) {
+    if(subOp->getOpcode() < opc)
+      *this << "(" << expr << ")";
     else
-      *this << stmt;
-  } else if(isa<UnaryOperator>(stmt)) {
-    *this << stmt;
+      *this << expr;
+  } else if(isa<ConditionalOperator>(expr)) {
+    *this << "(" << expr << ")";
+  } else if(isa<UnaryOperator>(expr)) {
+    *this << expr;
   } else {
-    *this << "(" << stmt << ")";
+    fatal(error() << "Unexpected expr to parenthetize: "
+                  << expr->getStmtClassName());
   }
+  return *this;
+}
+
+ASTStreamer& ASTStreamer::parenthetize(const Expr* expr,
+                                       const UnaryOperator::Opcode) {
+  if(opts().parens == Parens::Always) {
+    *this << "(" << expr << ")";
+  } else if(highestPrecedence(expr)) {
+    *this << expr;
+  } else if(isa<UnaryOperator>(expr) or isa<BinaryOperator>(expr)
+            or isa<ConditionalOperator>(expr)) {
+    *this << "(" << expr << ")";
+  } else {
+    fatal(error() << "Unexpected expr to parenthetize: "
+                  << expr->getStmtClassName());
+  }
+
+  return *this;
+}
+
+ASTStreamer& ASTStreamer::parenthetize(const Expr* expr) {
+  if(highestPrecedence(expr))
+    *this << expr;
+  else
+    *this << "(" << expr << ")";
   return *this;
 }
 
@@ -157,7 +178,7 @@ char ASTStreamer::back(unsigned skip) {
     return '\0';
   } else if(skip) {
     for(size_t i = buf.size(); i > 0; i--)
-      if(not[&]() {
+      if(not [&]() {
            switch(buf[i - 1]) {
            case ' ':
            case '\t':
@@ -547,7 +568,7 @@ ASTStreamer& ASTStreamer::operator<<(const BinaryOperator* binOp) {
     *this << lhs << binOp->getOpcodeStr() << rhs;
     break;
   default:
-    *this << parenthetize(lhs) << " ";
+    *this << parenthetize(lhs, binOp->getOpcode()) << " ";
     if(const auto* vty = dyn_cast<VectorType>(binOp->getType().getTypePtr())) {
       unsigned num = vty->getNumElements();
       for(unsigned i = 0; i < num / 2; i++)
@@ -558,7 +579,7 @@ ASTStreamer& ASTStreamer::operator<<(const BinaryOperator* binOp) {
     } else {
       *this << binOp->getOpcodeStr();
     }
-    *this << " " << parenthetize(rhs);
+    *this << " " << parenthetize(rhs, binOp->getOpcode());
   }
 
   return *this;
@@ -566,19 +587,18 @@ ASTStreamer& ASTStreamer::operator<<(const BinaryOperator* binOp) {
 
 ASTStreamer& ASTStreamer::operator<<(const UnaryOperator* unOp) {
   UnaryOperator::Opcode opc = unOp->getOpcode();
-  if(opc == UO_Deref)
-    *this << UnaryOperator::getOpcodeStr(opc) << unOp->getSubExpr();
-  else
-    *this << UnaryOperator::getOpcodeStr(opc)
-          << parenthetize(unOp->getSubExpr());
+  *this << UnaryOperator::getOpcodeStr(opc)
+        << parenthetize(unOp->getSubExpr(), opc);
 
   return *this;
 }
 
 ASTStreamer& ASTStreamer::operator<<(const ConditionalOperator* condOp) {
-  return *this << parenthetize(condOp->getCond()) << " ? "
-               << parenthetize(condOp->getTrueExpr()) << " : "
-               << parenthetize(condOp->getFalseExpr());
+  *this << parenthetize(condOp->getCond()) << " ? "
+        << parenthetize(condOp->getTrueExpr()) << " : "
+        << parenthetize(condOp->getFalseExpr());
+
+  return *this;
 }
 
 ASTStreamer& ASTStreamer::operator<<(const CallExpr* callExpr) {
@@ -594,7 +614,7 @@ ASTStreamer& ASTStreamer::operator<<(const CallExpr* callExpr) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const MemberExpr* memberExpr) {
-  *this << parenthetize(memberExpr->getBase())
+  *this << memberExpr->getBase()
         << (memberExpr->isArrow() ? "->" : ".")
         << memberExpr->getMemberDecl()->getName();
 
@@ -610,11 +630,7 @@ ASTStreamer& ASTStreamer::operator<<(const CStyleCastExpr* castExpr) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const ArraySubscriptExpr* arrExpr) {
-  if(not isa<DeclRefExpr>(arrExpr->getBase()))
-    *this << "(" << arrExpr->getBase() << ")";
-  else
-    *this << arrExpr->getLHS();
-  *this << "[" << arrExpr->getIdx() << "]";
+  *this << arrExpr->getBase() << "[" << arrExpr->getIdx() << "]";
 
   return *this;
 }

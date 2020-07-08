@@ -108,7 +108,8 @@ public:
         changed |= LLVM::addCishMetadataIgnore(*inst);
       else if(auto* g = dyn_cast<GlobalVariable>(v))
         changed |= LLVM::addCishMetadataIgnore(*g);
-      else if(isa<MetadataAsValue>(v))
+      else if(isa<MetadataAsValue>(v) or isa<ConstantInt>(v)
+              or isa<ConstantFP>(v) or isa<UndefValue>(v))
         ;
       else
         cish::fatal(cish::error() << "Unknown LLVM value to ignore: " << *v);
