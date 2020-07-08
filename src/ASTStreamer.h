@@ -95,7 +95,6 @@ protected:
   ASTStreamer& operator<<(const clang::FunctionProtoType*);
   ASTStreamer& operator<<(const clang::RecordType*);
   ASTStreamer& operator<<(const clang::VectorType*);
-  ASTStreamer& operator<<(clang::QualType);
 
   ASTStreamer& operator<<(const clang::NullStmt*);
   ASTStreamer& operator<<(const clang::DeclStmt*);
@@ -142,6 +141,7 @@ public:
 
   ASTStreamer& endl();
 
+  ASTStreamer& operator<<(clang::QualType);
   ASTStreamer& operator<<(const clang::VarDecl*);
   ASTStreamer& operator<<(const clang::FunctionDecl*);
   ASTStreamer& operator<<(const clang::RecordDecl*);

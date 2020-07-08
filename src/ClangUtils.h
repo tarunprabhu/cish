@@ -50,8 +50,11 @@ Vector<clang::BinaryOperator*> getCommaExprs(clang::BinaryOperator* binOp);
 Vector<clang::BinaryOperator*> getForInits(clang::ForStmt* forStmt);
 Vector<clang::BinaryOperator*> getForIncs(clang::ForStmt* forStmt);
 
+std::string toString(clang::QualType type, clang::ASTContext& astContext);
 std::string toString(clang::Stmt* stmt, clang::ASTContext& astContext);
 std::string toString(clang::FunctionDecl* f, clang::ASTContext& astContext);
+std::string toString(clang::VarDecl* var, clang::ASTContext& astContext);
+std::string toString(clang::RecordDecl* record, clang::ASTContext& astContext);
 
 } // namespace Clang
 

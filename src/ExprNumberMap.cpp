@@ -35,6 +35,10 @@ ExprNumberMap::ExprNumberMap(CishContext& cishContext)
   ;
 }
 
+ExprNum ExprNumberMap::getNewExprNum() {
+  return nextExprNum++;
+}
+
 ExprNum ExprNumberMap::add(Expr* expr, ExprNum exprNum) {
   if(VarDecl* var = Clang::getVar(expr))
     varNums[var] = exprNum;
@@ -64,6 +68,11 @@ void ExprNumberMap::remove(Expr* expr) {
   exprNums.erase(expr);
 }
 
+void ExprNumberMap::refresh(Expr* expr) {
+  remove(expr);
+  add(expr);
+}
+
 const Set<Expr*>& ExprNumberMap::getEqv(Expr* expr) const {
   if(not eqvExprs.contains(exprNums.at(expr)))
     return emptyEqvExprs;
@@ -80,7 +89,7 @@ ExprNum ExprNumberMap::add(CXXBoolLiteralExpr* blit) {
   if(not has(blit)) {
     ExprNum v = blit->getValue();
     if(not blits.contains(v))
-      blits[v] = add(blit, nextExprNum++);
+      blits[v] = add(blit, getNewExprNum());
     return add(blit, blits[v]);
   }
 
@@ -91,7 +100,7 @@ ExprNum ExprNumberMap::add(CharacterLiteral* clit) {
   if(not has(clit)) {
     unsigned c = clit->getValue();
     if(not clits.contains(c))
-      clits[c] = add(clit, nextExprNum++);
+      clits[c] = add(clit, getNewExprNum());
     return add(clit, clits[c]);
   }
 
@@ -144,7 +153,7 @@ ExprNum ExprNumberMap::add(StringLiteral* slit) {
   if(not has(slit)) {
     std::string s = slit->getString();
     if(not slits.contains(s))
-      slits[s] = add(slit, nextExprNum++);
+      slits[s] = add(slit, getNewExprNum());
     return add(slit, slits[s]);
   }
 
@@ -154,7 +163,7 @@ ExprNum ExprNumberMap::add(StringLiteral* slit) {
 ExprNum ExprNumberMap::add(CXXNullPtrLiteralExpr* nlit) {
   // Don't make nullptr literals equivalent because they aren't actually
   // equivalent
-  return add(nlit, nextExprNum++);
+  return add(nlit, getNewExprNum());
 }
 
 ExprNum ExprNumberMap::add(UnaryOperator* unOp) {
@@ -162,7 +171,7 @@ ExprNum ExprNumberMap::add(UnaryOperator* unOp) {
     UnaryOperator::Opcode op = unOp->getOpcode();
     auto k = get(unOp->getSubExpr());
     if(not unOps[op].contains(k))
-      unOps[op][k] = add(unOp, nextExprNum++);
+      unOps[op][k] = add(unOp, getNewExprNum());
     return add(unOp, unOps[op][k]);
   }
 
@@ -174,7 +183,7 @@ ExprNum ExprNumberMap::add(BinaryOperator* binOp) {
     BinaryOperator::Opcode op = binOp->getOpcode();
     auto p = std::make_pair(get(binOp->getLHS()), get(binOp->getRHS()));
     if(not binOps[op].contains(p))
-      binOps[op][p] = add(binOp, nextExprNum++);
+      binOps[op][p] = add(binOp, getNewExprNum());
     return add(binOp, binOps[op][p]);
   }
 
@@ -187,7 +196,7 @@ ExprNum ExprNumberMap::add(ConditionalOperator* condOp) {
                          get(condOp->getTrueExpr()),
                          get(condOp->getFalseExpr())};
     if(not condOps.contains(v))
-      condOps[v] = add(condOp, nextExprNum++);
+      condOps[v] = add(condOp, getNewExprNum());
     return add(condOp, condOps[v]);
   }
 
@@ -198,7 +207,7 @@ ExprNum ExprNumberMap::add(ArraySubscriptExpr* arrExpr) {
   if(not has(arrExpr)) {
     auto p = std::make_pair(get(arrExpr->getBase()), get(arrExpr->getIdx()));
     if(not arrExprs.contains(p))
-      arrExprs[p] = add(arrExpr, nextExprNum++);
+      arrExprs[p] = add(arrExpr, getNewExprNum());
     return add(arrExpr, arrExprs[p]);
   }
 
@@ -211,18 +220,18 @@ ExprNum ExprNumberMap::add(CallExpr* callExpr) {
     for(Expr* arg : callExpr->arguments())
       v.push_back(get(arg));
     if(not callExprs.contains(v))
-      callExprs[v] = add(callExpr, nextExprNum++);
+      callExprs[v] = add(callExpr, getNewExprNum());
     return add(callExpr, callExprs[v]);
   }
 
   return get(callExpr);
 }
 
-ExprNum ExprNumberMap::add(CastExpr* castExpr) {
+ExprNum ExprNumberMap::add(CStyleCastExpr* castExpr) {
   if(not has(castExpr)) {
     ExprNum k = get(castExpr->getSubExpr());
     if(not castExprs.contains(k))
-      castExprs[k] = add(castExpr, nextExprNum++);
+      castExprs[k] = add(castExpr, getNewExprNum());
     return add(castExpr, castExprs[k]);
   }
 
@@ -234,7 +243,7 @@ ExprNum ExprNumberMap::add(MemberExpr* memberExpr) {
     auto p = std::make_pair(get(memberExpr->getBase()),
                             memberExpr->getMemberDecl());
     if(not memberExprs.contains(p))
-      memberExprs[p] = add(memberExpr, nextExprNum++);
+      memberExprs[p] = add(memberExpr, getNewExprNum());
     return add(memberExpr, memberExprs[p]);
   }
 
@@ -245,14 +254,14 @@ ExprNum ExprNumberMap::add(InitListExpr* initList) {
   // Not sure if there is anything to be gained by uniquing an initializer
   // list so don't bother. But it needs to be added because it may appear
   // in a BinaryOperator
-  return add(initList, nextExprNum++);
+  return add(initList, getNewExprNum());
 }
 
 ExprNum ExprNumberMap::add(DeclRefExpr* declRefExpr) {
   if(not has(declRefExpr)) {
     ValueDecl* decl = declRefExpr->getDecl();
     if(not declRefs.contains(decl))
-      declRefs[decl] = add(declRefExpr, nextExprNum++);
+      declRefs[decl] = add(declRefExpr, getNewExprNum());
     return add(declRefExpr, declRefs[decl]);
   }
 
@@ -296,21 +305,19 @@ ExprNum ExprNumberMap::add(Expr* expr) {
 }
 
 void ExprNumberMap::dump(llvm::raw_ostream& os) const {
-  os << "varNums: {\n";
+  os << "varNums:\n";
   for(const auto& i : varNums) {
     VarDecl* var = i.first;
     ExprNum n = i.second;
     os << "    " << var->getName() << " => " << n << "\n";
   }
-  os << "}\n";
-  os << "exprs: {\n";
+  os << "exprs:\n";
   for(const auto& i : exprNums) {
     Expr* expr = i.first;
     ExprNum n = i.second;
     os << "    " << Clang::toString(expr, cishContext.getASTContext()) << " => "
        << n << "\n";
   }
-  os << "}\n";
 }
 
 } // namespace cish

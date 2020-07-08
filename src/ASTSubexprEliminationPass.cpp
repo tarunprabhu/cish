@@ -65,9 +65,6 @@ public:
     for(auto& i : repl) {
       Expr* expr = i.first;
       Expr* repl = ast->createDeclRefExpr(i.second);
-      llvm::errs() << Clang::toString(expr, astContext) << " => "
-                   << Clang::toString(repl, astContext) << " |"
-                   << ast->getEqvExprs(expr).size() << "|\n";
       changed |= ast->replaceEqvUsesWith(expr, repl);
     }
 

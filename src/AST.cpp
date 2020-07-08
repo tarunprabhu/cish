@@ -58,6 +58,14 @@ FunctionDecl* AST::getFunction() const {
   return decl;
 }
 
+const ParentMap& AST::getParentMap() const {
+  return pm;
+}
+
+const ExprNumberMap& AST::getExprNumberMap() const {
+  return en;
+}
+
 const DominatorTree& AST::getDominatorTree() const {
   return *dt;
 }
@@ -78,6 +86,7 @@ bool AST::replace(UnaryOperator* unOp, Expr* repl) {
   remove(unOp->getSubExpr());
   unOp->setSubExpr(repl);
   add(repl, unOp);
+  en.refresh(unOp);
 
   return true;
 }
@@ -98,6 +107,7 @@ bool AST::replace(BinaryOperator* binOp, Expr* repl, bool replaceLHS) {
     add(repl, binOp);
     binOp->setRHS(repl);
   }
+  en.refresh(binOp);
 
   return true;
 }
@@ -111,6 +121,7 @@ bool AST::replace(ArraySubscriptExpr* arrExpr, Expr* repl, bool replaceBase) {
     arrExpr->setRHS(repl);
   }
   add(repl, arrExpr);
+  en.refresh(arrExpr);
 
   return true;
 }
@@ -124,6 +135,7 @@ bool AST::replace(CallExpr* callExpr, Expr* repl, long i) {
     callExpr->setArg(i, repl);
   }
   add(repl, callExpr);
+  en.refresh(callExpr);
 
   return true;
 }
@@ -132,6 +144,7 @@ bool AST::replace(CStyleCastExpr* castExpr, Expr* repl) {
   remove(castExpr->getSubExpr());
   castExpr->setSubExpr(repl);
   add(repl, castExpr);
+  en.refresh(castExpr);
 
   return true;
 }
@@ -140,6 +153,7 @@ bool AST::replace(MemberExpr* memberExpr, Expr* repl) {
   remove(memberExpr->getBase());
   memberExpr->setBase(repl);
   add(repl, memberExpr);
+  en.refresh(memberExpr);
 
   return true;
 }
@@ -249,6 +263,8 @@ bool AST::replace(Stmt* parent, Expr* expr, Expr* repl) {
       changed |= replace(static_cast<Stmt*>(binOp), expr, repl);
   } else if(auto* whileStmt = dyn_cast<WhileStmt>(parent)) {
     changed |= replace(whileStmt, cloneExpr(repl));
+  } else if(auto* compoundStmt = dyn_cast<CompoundStmt>(parent)) {
+    fatal(error() << "Not implemented. Replacing top-level statement");
   } else if(isa<DeclRefExpr>(expr)) {
     ;
   } else {
@@ -269,11 +285,8 @@ bool AST::replaceEqvUsesWith(Expr* expr, Expr* repl) {
   Set<VarDecl*> vars = Clang::getVarsInStmt(expr);
   for(Expr* e : en.getEqv(expr).clone())
     if(e != expr)
-      if(pm.hasParent(e)) {
-        llvm::outs() << "Replacing eqv: " << Clang::toString(e, astContext)
-                     << "\n";
+      if(pm.hasParent(e))
         changed |= replace(pm.getParent(e), e, repl);
-      }
 
   return changed;
 }
@@ -586,6 +599,10 @@ bool AST::isContainedIn(Stmt* needle, Stmt* haystack) const {
 
 const Set<Expr*>& AST::getEqvExprs(Expr* expr) const {
   return en.getEqv(expr);
+}
+
+ExprNum AST::getExprNum(Expr* expr) const {
+  return en.get(expr);
 }
 
 bool AST::hasAddressTaken(VarDecl* var) const {

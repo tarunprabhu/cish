@@ -75,11 +75,13 @@ protected:
   ExprNum add(clang::Expr* expr, ExprNum exprNum);
   ExprNum add(clang::VarDecl* var);
 
+  ExprNum getNewExprNum();
+
   template <typename IntKind>
   ExprNum add(clang::IntegerLiteral* ilit, Map<IntKind, ExprNum>& m) {
     IntKind i = (IntKind)ilit->getValue().getLimitedValue();
     if(not m.contains(i))
-      return m[i] = add(ilit, nextExprNum++);
+      return m[i] = add(ilit, getNewExprNum());
     return add(ilit, m[i]);
   }
 
@@ -87,7 +89,7 @@ protected:
   ExprNum
   add(clang::FloatingLiteral* flit, FloatKind val, Map<FloatKind, ExprNum>& m) {
     if(not m.contains(val))
-      return m[val] = add(flit, nextExprNum++);
+      return m[val] = add(flit, getNewExprNum());
     return add(flit, m[val]);
   }
 
@@ -107,12 +109,13 @@ public:
   ExprNum add(clang::ConditionalOperator* condOp);
   ExprNum add(clang::ArraySubscriptExpr* arrExpr);
   ExprNum add(clang::CallExpr* callExpr);
-  ExprNum add(clang::CastExpr* castExpr);
+  ExprNum add(clang::CStyleCastExpr* castExpr);
   ExprNum add(clang::MemberExpr* memberExpr);
   ExprNum add(clang::InitListExpr* initList);
   ExprNum add(clang::DeclRefExpr* declRefExpr);
   ExprNum add(clang::Expr* expr);
   void remove(clang::Expr* expr);
+  void refresh(clang::Expr* expr);
 
   ExprNum get(clang::VarDecl* var) const;
   ExprNum get(clang::Expr* expr) const;
@@ -122,7 +125,7 @@ public:
   const Set<clang::Expr*>& getEqv(clang::Expr* expr) const;
   const Set<clang::Expr*>& getEqv(ExprNum exprNum) const;
 
-  void dump(llvm::raw_ostream& os) const;
+  void dump(llvm::raw_ostream& os = llvm::errs()) const;
 };
 
 } // namespace cish

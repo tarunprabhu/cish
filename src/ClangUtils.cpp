@@ -182,6 +182,14 @@ Vector<BinaryOperator*> getForIncs(ForStmt* forStmt) {
   return incs;
 }
 
+std::string toString(QualType type, ASTContext& astContext) {
+  ASTStreamer ss(astContext);
+
+  ss << type;
+
+  return ss.str();
+}
+
 std::string toString(Stmt* stmt, ASTContext& astContext) {
   ASTStreamer ss(astContext);
 
@@ -194,6 +202,22 @@ std::string toString(FunctionDecl* f, ASTContext& astContext) {
   ASTStreamer ss(astContext);
 
   ss << f;
+
+  return ss.str();
+}
+
+std::string toString(VarDecl* var, ASTContext& astContext) {
+  ASTStreamer ss(astContext);
+
+  ss << var;
+
+  return ss.str();
+}
+
+std::string toString(RecordDecl* record, ASTContext& astContext) {
+  ASTStreamer ss(astContext);
+
+  ss << record;
 
   return ss.str();
 }

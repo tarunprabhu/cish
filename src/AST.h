@@ -49,11 +49,6 @@ protected:
   clang::FunctionDecl* decl;
   ParentMap pm;
   ExprNumberMap en;
-
-private:
-  clang::FullSourceLoc invLoc;
-
-protected:
   clang::CFG::BuildOptions cfgBuildOpts;
   std::unique_ptr<clang::ParentMap> stmtParents;
   std::unique_ptr<clang::CFG> cfg;
@@ -75,6 +70,9 @@ protected:
 
   Set<clang::VarDecl*> locals;
   Set<clang::VarDecl*> globals;
+
+private:
+  clang::FullSourceLoc invLoc;
 
 protected:
   void add(clang::Expr* expr, clang::Stmt* user);
@@ -182,6 +180,8 @@ public:
   bool erase(clang::Stmt* stmt);
   bool erase(clang::VarDecl* var);
 
+  const ParentMap& getParentMap() const;
+  const ExprNumberMap& getExprNumberMap() const;
   const clang::DominatorTree& getDominatorTree() const;
   clang::CFG* getCFG() const;
   clang::CFGBlock* getCFGBlock(clang::Stmt* stmt) const;
@@ -212,6 +212,7 @@ public:
   bool isContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
   bool isDirectlyContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
   bool isTopLevel(clang::Stmt* stmt) const;
+  ExprNum getExprNum(clang::Expr* expr) const;
   const Set<clang::Expr*>& getEqvExprs(clang::Expr* expr) const;
 
   // AST construction functions
