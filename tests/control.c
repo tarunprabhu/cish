@@ -1,36 +1,38 @@
-#include <stdlib.h>
+int f();
+void g(int);
+void h(void*);
 
 void br_if(int a, int b, int c) {
   unsigned int d = a;
   if(b < 0)
-    rand_r(&d);
+    h(&d);
 }
 
 void br_if_else(int a) {
   if(a)
-    srand(34);
+    g(34);
   else
-    srand(36);
+    g(36);
 }
 
 void br_if_else_if(int a, int b) {
   if(a)
-    srand(34);
+    g(34);
   else if(b)
-    srand(324);
+    g(324);
   else
-    srand(93);
+    g(93);
 }
 
 void brs(int a, int b, int c, int d) {
   if(a)
-    srand(1);
+    g(1);
   if(b)
-    srand(2);
+    g(2);
   if(c)
-    srand(3);
+    g(3);
   if(d)
-    srand(4);
+    g(4);
 }
 
 int return_br_if(int a, int b, int c) {
@@ -42,7 +44,7 @@ int return_br_if(int a, int b, int c) {
 
 void switch_wtf(int a) {
   switch(a) {
-    srand(a);
+    g(a);
   }
 }
 
@@ -64,17 +66,17 @@ void switch_empty_cases(int a) {
 void switch_some_empty_cases(int a) {
   switch(a) {
   case 7:
-    srand(1);
+    g(1);
     break;
   case 6:
     break;
   case 5:
     break;
   case 4:
-    srand(2);
+    g(2);
     break;
   default:
-    srand(4);
+    g(4);
     break;
   }
 }
@@ -83,18 +85,18 @@ int switch_no_fallthrough(int a, int b, int c) {
   int d;
   switch(a) {
   case 1:
-    d = b + rand();
+    d = b + f();
     break;
   case 10:
     break;
   case 2:
-    d = c + rand();
+    d = c + f();
     break;
   case 3:
-    d = a + rand();
+    d = a + f();
     break;
   default:
-    d = rand();
+    d = f();
     break;
   }
   return d;
@@ -104,14 +106,14 @@ void switch_loops_fallthrough(int a, int b, int c) {
   switch(a) {
   case 1:
     for(int i = 0; i < b; i++)
-      srand(i);
+      g(i);
   case 2:
     for(int i = 0; i < b; i += c)
-      srand(i + a);
+      g(i + a);
     break;
   case 3:
-    while(rand())
-      srand(rand());
+    while(f())
+      g(f());
     break;
   }
 }
@@ -122,7 +124,7 @@ void switch_endless(int a, int b) {
     while(1);
   case 2:
     for(int i = 0; i < b; i++)
-      srand(i + b);
+      g(i + b);
     break;
   }
 }
@@ -131,15 +133,15 @@ int switch_fallthrough(int a, int b, int c) {
   int d = a + b + c;
   switch(a) {
   case 1:
-    d += rand();
+    d += f();
   case 2:
-    d = c + rand();
+    d = c + f();
     break;
   case 3:
-    d = a + rand();
+    d = a + f();
     break;
   default:
-    d = rand();
+    d = f();
     break;
   }
   return d;
@@ -149,21 +151,21 @@ int switch_fallthrough(int a, int b, int c) {
 int muchnick_book(int a, int b) {
   if(a) {
     if(b) {
-      srand(1);
+      g(1);
     }
-    srand(2);
+    g(2);
   } else {
     do {
-      if(rand()) {
-        srand(3);
+      if(f()) {
+        g(3);
       } else {
-        srand(4);
+        g(4);
       }
-      srand(5);
-    } while((rand()));
-    srand(6);
+      g(5);
+    } while((f()));
+    g(6);
   }
-  return rand();
+  return f();
 }
 
 // From "No More Gotos: Decompilation Using Pattern-Independent Control-Flow
@@ -171,24 +173,24 @@ int muchnick_book(int a, int b) {
 void no_more_gotos(int a, int b1, int b2) {
   if(a) {
     do {
-      while(rand())
-        srand(0xA1);
-      if(rand()) {
-        srand(0xA2);
+      while(f())
+        g(0xA1);
+      if(f()) {
+        g(0xA2);
         break;
       }
-      srand(0xA3);
-    } while(rand());
+      g(0xA3);
+    } while(f());
   } else {
     if(!b1)
-      srand(0xA4);
+      g(0xA4);
     if(b1 && b2)
-      srand(0xA6);
+      g(0xA6);
     else
-      srand(0xA5);
-    srand(0xA7);
-    while(rand())
-      srand(0xA8);
+      g(0xA5);
+    g(0xA7);
+    while(f())
+      g(0xA8);
   }
-  srand(0xA9);
+  g(0xA9);
 }
