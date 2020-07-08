@@ -84,17 +84,21 @@ static cl::opt<unsigned>
               cl::init(4),
               cl::cat(cishOptionCategory));
 
-static cl::opt<cish::Parens>
-    optParens("parens",
-              cl::desc("How to use parentheses in expressions"),
-              cl::values(clEnumValN(cish::Parens::Always,
-                                    "always",
-                                    "Always use parentheses"),
-                         clEnumValN(cish::Parens::Smart,
-                                    "smart",
-                                    "Be smart about using parentheses")),
-              cl::init(Parens::Smart),
-              cl::cat(cishOptionCategory));
+static cl::opt<cish::Parens> optParens(
+    "parens",
+    cl::desc("How to use parentheses in expressions"),
+    cl::values(
+        clEnumValN(cish::Parens::Always, "always", "Always use parentheses"),
+        clEnumValN(
+            cish::Parens::Fuzzy,
+            "fuzzy",
+            "Respects operator precedence but tries adds some parentheses for "
+            "clarity when combining arithmetic and relational operators"),
+        clEnumValN(cish::Parens::Strict,
+                   "strict",
+                   "Adds parentheses strictly based on operator precedence.")),
+    cl::init(Parens::Fuzzy),
+    cl::cat(cishOptionCategory));
 
 static cl::opt<bool> optVerbose("verbose",
                                 cl::desc("Print messages during conversion"),

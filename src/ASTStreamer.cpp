@@ -103,10 +103,19 @@ ASTStreamer& ASTStreamer::parenthetize(const Expr* expr,
     *this << "(" << expr << ")";
   } else if(const auto* subOp = dyn_cast<BinaryOperator>(expr)) {
     BinaryOperator::Opcode op = subOp->getOpcode();
-    if((op < opc) or Operator::isBitwise(op) or Operator::isBitwise(opc))
-      *this << "(" << expr << ")";
-    else
-      *this << expr;
+    if(opts().parens == Parens::Fuzzy) {
+      if((op < opc) or Operator::isBitwise(op) or Operator::isBitwise(opc))
+        *this << "(" << expr << ")";
+      else
+        *this << expr;
+    } else if(opts().parens == Parens::Strict) {
+      if(op < opc)
+        *this << "(" << expr << ")";
+      else
+        *this << expr;
+    } else {
+      fatal(error() << "Unknown parenthetization mode");
+    }
   } else if(isa<ConditionalOperator>(expr)) {
     *this << "(" << expr << ")";
   } else if(isa<UnaryOperator>(expr)) {

@@ -53,7 +53,8 @@ enum class IndentStyle {
 
 enum class Parens {
   Always, // Always add parentheses to operands of oeprators
-  Smart,  // Be "smart" about adding parentheses to operands of operators
+  Fuzzy,  // Adds parenthese based on operator precedence and readability
+  Strict, // Adds parentheses strictly based on operator precedence
 };
 
 enum class LogCategory {
