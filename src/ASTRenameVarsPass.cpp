@@ -18,6 +18,7 @@
 //  ---------------------------------------------------------------------------
 
 #include "ASTFunctionPass.h"
+#include "ClangUtils.h"
 #include "Map.h"
 #include "NameGenerator.h"
 #include "Options.h"
@@ -55,7 +56,7 @@ protected:
       parse(next, pieces);
   }
 
-  std::string getNameFor(MemberExpr* memberExpr) {
+  std::string getNameFor(MemberExpr* memberExpr, const NameGenerator&) {
     Vector<std::string> pieces;
     parse(memberExpr, pieces);
     if(pieces.size()) {
