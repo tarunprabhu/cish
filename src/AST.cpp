@@ -30,8 +30,6 @@
 
 using namespace clang;
 
-bool g_bt = false;
-
 namespace cish {
 
 AST::AST(CishContext& cishContext)
@@ -306,7 +304,7 @@ bool AST::replaceStmtWith(Stmt* stmt, Stmt* repl) {
   for(unsigned i = 0; i < body->size(); i++) {
     if(stmts[i] == stmt) {
       if(repl)
-        stmts[i] = clone(repl);
+        stmts[i] = repl;
       else
         stmts[i] = createNullStmt();
       pm.add(stmts[i], body);
@@ -563,27 +561,14 @@ void AST::addDef(VarDecl* var, Stmt* user) {
 }
 
 void AST::addUse(VarDecl* var, Stmt* user) {
-  if(g_bt) {
-    llvm::outs() << "add[" << user << "]: " << var->getName() << " => "
-                 << Clang::toString(user, astContext) << "\n"
-                 << getBacktrace() << "\n";
-  }
   useMap.at(var).insert(user);
 }
 
 void AST::removeUse(VarDecl* var, Stmt* stmt) {
-  if(g_bt)
-    llvm::outs() << "use[" << stmt << "]: " << var->getName() << " => "
-                 << Clang::toString(stmt, astContext) << "\n";
-                 // << getBacktrace() << "\n";
   useMap.at(var).erase(stmt);
 }
 
 void AST::removeDef(VarDecl* var, Stmt* stmt) {
-  if(g_bt)
-    llvm::outs() << "def[" << stmt << "]: " << var->getName() << " => "
-                 << Clang::toString(stmt, astContext) << "\n";
-                 // << getBacktrace() << "\n";
   defMap.at(var).erase(stmt);
 }
 
@@ -709,40 +694,6 @@ void AST::recalculateCFG() {
   // along the way. At some point this should be fixed
   //
   // dt->getBase().recalculate(*cfg);
-
-  llvm::outs() << "Removing orphans\n";
-  // This is a hack to workaround a deeper problem
-  // Because of all the cloned expressions floating around everwhere, there
-  // seems to occur a situation where "orphaned" uses show up in the use-def
-  // maps. These are expressions that are not reachable from the function body
-  // This is probably occuring because the construction/replace/remove/clone
-  // operations are probably not working as expected. But tracking it down
-  // doesn't seem to be straigtforward. So for the moment, take a sledge
-  // hammer to it
-  for(auto& i : useMap) {
-    Set<Stmt*>& uses = i.second;
-    for(Stmt* use : uses.clone()) {
-      if(pm.isOrphan(use)) {
-        llvm::outs() << "    use[" << use << "]: " << i.first->getName()
-                     << " => " << Clang::toString(use, astContext) << "\n";
-        uses.erase(use);
-        if(auto* expr = dyn_cast<Expr>(use))
-          en.remove(expr);
-      }
-    }
-  }
-  for(auto& i : defMap) {
-    Set<Stmt*>& defs = i.second;
-    for(Stmt* def : defs.clone()) {
-      if(pm.isOrphan(def)) {
-        llvm::outs() << "    def[" << def << "]: " << i.first->getName()
-                     << " => " << Clang::toString(def, astContext) << "\n";
-        defs.erase(def);
-        if(auto* expr = dyn_cast<Expr>(def))
-          en.remove(expr);
-      }
-    }
-  }
 }
 
 void AST::recalculate() {

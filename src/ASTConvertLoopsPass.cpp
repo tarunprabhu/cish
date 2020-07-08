@@ -25,8 +25,6 @@
 
 #include <algorithm>
 
-extern bool g_bt;
-
 using namespace clang;
 
 namespace cish {
@@ -325,8 +323,6 @@ public:
   bool process(FunctionDecl*) {
     bool changed = false;
 
-    g_bt = true;
-
     // // The loops must be processed from the inside out. The innermost loops
     // // will have the greatest depth
     // std::sort(loops.begin(), loops.end(), [&](Stmt* a, Stmt* b) {
@@ -347,8 +343,6 @@ public:
       if(LoopInfo li = getLoopInfo(loop))
         changed |= replaceWithForLoop(loop, li);
 
-    g_bt = false;
-    llvm::errs() << "changed: " << changed << "\n";
     return changed;
   }
 
