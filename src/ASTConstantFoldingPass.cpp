@@ -246,8 +246,9 @@ protected:
       if(isZero(binOp->getRHS()))
         return binOp->getLHS();
       else if(isZero(binOp->getLHS()))
-        return ast->createUnaryOperator(
-            binOp->getRHS(), UO_Minus, binOp->getRHS()->getType());
+        return ast->createUnaryOperator(ast->cloneExpr(binOp->getRHS()),
+                                        UO_Minus,
+                                        binOp->getRHS()->getType());
       break;
     case BO_Mul:
       if(isOne(binOp->getLHS()))
