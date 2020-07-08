@@ -70,7 +70,7 @@ def main() -> int:
                     help='How to parenthetize')
     ap.add_argument('-annotate', type=str,
                     help='Which annotations to use in the output')
-    ap.add_argument('-log', action='store_true',
+    ap.add_argument('-log', type=str,
                     help='Create logs of the conversion '
                     '(WARNING - Creates many files in the current directory)')
     ap.add_argument('-log-dir',
