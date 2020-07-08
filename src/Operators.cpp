@@ -147,3 +147,46 @@ bool operator==(clang::BinaryOperator::Opcode, clang::UnaryOperator::Opcode) {
 bool operator!=(clang::BinaryOperator::Opcode, clang::UnaryOperator::Opcode) {
   return false;
 }
+
+namespace cish {
+
+namespace Operator {
+
+bool isArithmetic(BinaryOperator::Opcode op) {
+  switch(op) {
+  case BO_Add:
+  case BO_Sub:
+  case BO_Mul:
+  case BO_Div:
+  case BO_Rem:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool isRelational(BinaryOperator::Opcode op) {
+  switch(op) {
+  case BO_EQ:
+  case BO_NE:
+  case BO_LT:
+  case BO_LE:
+  case BO_GT:
+  case BO_GE:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool isBitwise(BinaryOperator::Opcode op) {
+  return (op == BO_And) or (op == BO_Or) or (op == BO_Xor);
+}
+
+bool isLogical(BinaryOperator::Opcode op) {
+  return (op == BO_LAnd) or (op == BO_LOr);
+}
+
+} // namespace Operator
+
+} // namespace cish

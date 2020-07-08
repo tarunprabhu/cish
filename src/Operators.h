@@ -77,4 +77,17 @@ bool operator==(clang::BinaryOperator::Opcode op1,
 bool operator!=(clang::BinaryOperator::Opcode op1,
                 clang::UnaryOperator::Opcode op2);
 
+namespace cish {
+
+namespace Operator {
+
+bool isArithmetic(clang::BinaryOperator::Opcode op);
+bool isBitwise(clang::BinaryOperator::Opcode op);
+bool isLogical(clang::BinaryOperator::Opcode op);
+bool isRelational(clang::BinaryOperator::Opcode op);
+
+} // namespace Operator
+
+} // namespace cish
+
 #endif // CISH_OPERATORS_H

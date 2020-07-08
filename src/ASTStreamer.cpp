@@ -45,10 +45,9 @@ static std::string formatArrayDims(const ConstantArrayType* aty) {
 }
 
 static bool highestPrecedence(const Expr* expr) {
-  return Clang::isLiteral(expr) or isa<DeclRefExpr>(expr)
-         or isa<InitListExpr>(expr) or isa<ArraySubscriptExpr>(expr)
-         or isa<CallExpr>(expr) or isa<CStyleCastExpr>(expr)
-         or isa<MemberExpr>(expr);
+  return isa<DeclRefExpr>(expr) or isa<InitListExpr>(expr)
+         or isa<ArraySubscriptExpr>(expr) or isa<CallExpr>(expr)
+         or isa<CStyleCastExpr>(expr) or isa<MemberExpr>(expr);
 }
 
 ASTStreamer::ASTStreamer(const clang::ASTContext& astContext)
@@ -98,12 +97,13 @@ bool ASTStreamer::isLongDoubleTy(const Type* type) const {
 
 ASTStreamer& ASTStreamer::parenthetize(const Expr* expr,
                                        const BinaryOperator::Opcode opc) {
-  if(opts().parens == Parens::Always) {
-    *this << "(" << expr << ")";
-  } else if(highestPrecedence(expr)) {
+  if(Clang::isLiteral(expr) or highestPrecedence(expr)) {
     *this << expr;
+  } else if(opts().parens == Parens::Always) {
+    *this << "(" << expr << ")";
   } else if(const auto* subOp = dyn_cast<BinaryOperator>(expr)) {
-    if(subOp->getOpcode() < opc)
+    BinaryOperator::Opcode op = subOp->getOpcode();
+    if((op < opc) or Operator::isBitwise(op) or Operator::isBitwise(opc))
       *this << "(" << expr << ")";
     else
       *this << expr;
@@ -120,10 +120,10 @@ ASTStreamer& ASTStreamer::parenthetize(const Expr* expr,
 
 ASTStreamer& ASTStreamer::parenthetize(const Expr* expr,
                                        const UnaryOperator::Opcode) {
-  if(opts().parens == Parens::Always) {
-    *this << "(" << expr << ")";
-  } else if(highestPrecedence(expr)) {
+  if(Clang::isLiteral(expr) or highestPrecedence(expr)) {
     *this << expr;
+  } else if(opts().parens == Parens::Always) {
+    *this << "(" << expr << ")";
   } else if(isa<UnaryOperator>(expr) or isa<BinaryOperator>(expr)
             or isa<ConditionalOperator>(expr)) {
     *this << "(" << expr << ")";
@@ -136,7 +136,7 @@ ASTStreamer& ASTStreamer::parenthetize(const Expr* expr,
 }
 
 ASTStreamer& ASTStreamer::parenthetize(const Expr* expr) {
-  if(highestPrecedence(expr))
+  if(Clang::isLiteral(expr) or highestPrecedence(expr))
     *this << expr;
   else
     *this << "(" << expr << ")";
