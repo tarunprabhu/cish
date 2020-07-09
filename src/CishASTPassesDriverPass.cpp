@@ -88,6 +88,8 @@ public:
         createASTSubexprEliminationPass(cishContext),
         createASTDeadCodeEliminationPass(cishContext),
         createASTRenameVarsPass(cishContext),
+        createASTPrivatizeVarsPass(cishContext),
+        createASTDeadCodeEliminationPass(cishContext),
     };
 
     for(clang::FunctionDecl* f : cishContext.funcs()) {

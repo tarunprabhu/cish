@@ -75,6 +75,8 @@ protected:
                                  CFGBlock* rootBlock,
                                  Stmt* def,
                                  Set<Stmt*>& lhsUses) {
+    // rootBlock->dump(ast->getCFG(), cishContext.getLangOptions(), true);
+
     bool sawLhsDef = false;
     for(CFGElement& cfgElem : *rootBlock) {
       if(CFGStmt* cfgStmt = cfgElem.getAs<CFGStmt>().getPointer()) {
@@ -111,6 +113,8 @@ protected:
       return false;
     else if(uses.size() == 0)
       return false;
+
+    // block->dump(ast->getCFG(), cishContext.getLangOptions(), true);
 
     for(CFGElement& cfgElem : *block) {
       if(CFGStmt* cfgStmt = cfgElem.getAs<CFGStmt>().getPointer()) {
@@ -208,8 +212,8 @@ protected:
   }
 
   bool canPropagateCopy(VarDecl* lhs, VarDecl* rhs, Stmt* def) {
-    Set<Stmt*> defs = ast->getTopLevelDefs(rhs);
-    Set<Stmt*> uses = ast->getTopLevelUses(lhs);
+    Set<Stmt*> defs = um.getTopLevelDefs(rhs);
+    Set<Stmt*> uses = um.getTopLevelUses(lhs);
     if(uses.size() == 0)
       return true;
 
@@ -227,142 +231,146 @@ protected:
       if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
         return false;
 
-      // There should be no uses left
-      if(uses.size())
-        fatal(error() << "Did not encounter all uses: " << lhs->getName());
+    // There should be no uses left
+    if(uses.size())
+      fatal(error() << "Did not encounter all uses: " << lhs->getName());
 
-      return true;
-    }
+    return true;
+  }
 
-    bool isRecursiveExpr(VarDecl * lhs, Stmt * lhsDef) {
-      for(VarDecl* var : Clang::getVarsInStmt(lhsDef)) {
-        for(Stmt* def : ast->getTopLevelDefs(var)) {
-          Expr* rhs = cast<BinaryOperator>(def)->getRHS();
-          if(Clang::getVarsInStmt(rhs).contains(lhs))
-            return true;
-        }
+  bool isRecursiveExpr(VarDecl* lhs, Stmt* lhsDef) {
+    for(VarDecl* var : Clang::getVarsInStmt(lhsDef)) {
+      for(Stmt* def : um.getTopLevelDefs(var)) {
+        Expr* rhs = cast<BinaryOperator>(def)->getRHS();
+        if(Clang::getVarsInStmt(rhs).contains(lhs))
+          return true;
       }
-      return false;
     }
+    return false;
+  }
 
-    bool isLHSDefConstantForAllUses(VarDecl * lhs, BinaryOperator * def) {
-      Set<Stmt*> uses = ast->getTopLevelUses(lhs);
-      CFGBlock* rootBlock = ast->getCFGBlock(def);
+  bool isLHSDefConstantForAllUses(VarDecl* lhs, BinaryOperator* def) {
+    Set<Stmt*> uses = um.getTopLevelUses(lhs);
+    CFGBlock* rootBlock = ast->getCFGBlock(def);
 
-      for(VarDecl* var : Clang::getVarsInStmt(def->getRHS())) {
-        Set<Stmt*> defs = ast->getTopLevelDefs(var);
+    for(VarDecl* var : Clang::getVarsInStmt(def->getRHS())) {
+      Set<Stmt*> defs = um.getTopLevelDefs(var);
 
-        if(isDefBeforeUseInRootBlock(defs, rootBlock, def, uses))
-          return false;
+      if(isDefBeforeUseInRootBlock(defs, rootBlock, def, uses))
+        return false;
 
-        // If all the uses have already been seen, nothing more to be done
-        if(uses.size()) {
-          // Look at the rest of the graph
-          Set<CFGBlock*> seen = {rootBlock};
-          for(CFGBlock* succ : getSuccessors(rootBlock))
-            if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
-              return false;
+      // If all the uses have already been seen, nothing more to be done
+      if(uses.size()) {
+        // Look at the rest of the graph
+        Set<CFGBlock*> seen = {rootBlock};
+        for(CFGBlock* succ : getSuccessors(rootBlock))
+          if(succ and isDefBeforeUseInBlock(defs, succ, false, seen, uses))
+            return false;
 
-          // There should be no uses left
-          if(uses.size())
-            fatal(error() << "Did not encounter all uses: " << lhs->getName());
-        }
+        // There should be no uses left
+        if(uses.size())
+          fatal(error() << "Did not encounter all uses: " << lhs->getName());
       }
+    }
 
+    return true;
+  }
+
+  bool canPropagateExpr(VarDecl* lhs, BinaryOperator* def) {
+    if(isRecursiveExpr(lhs, def->getRHS())
+       or isLHSDefConstantForAllUses(lhs, def))
       return true;
+    return false;
+  }
+
+public:
+  bool process(FunctionDecl*, Stmt*) {
+    bool changed = false;
+
+    // The CFG is not kept up to date because most of the AST transformation
+    // passes don't need it
+    ast->updateCFG();
+
+    // Finding vars to be propagated that have more than one definition is
+    // possible, but is more difficult because a more complicated
+    // flow-sensitive analysis will need to be done to determine whether or
+    // not the RHS is constant before uses of the LHS.
+    // But since this comes from the output of a compiler that has probably
+    // already converted everything to SSA form and then had reg2mem done to
+    // it, it is likely that there are few variables that have more than one
+    // definition.
+    // Also, because the input is from a compiler, there is no need to check
+    // if the definition dominates all the uses
+    Map<VarDecl*, DeclRefExpr*> replVars;
+    for(VarDecl* lhs : ast->getVars())
+      if(um.hasSingleDef(lhs) and (not um.hasZeroUses(lhs))
+         and (not addrTaken.contains(lhs)))
+        if(auto* def = dyn_cast<DeclRefExpr>(um.getSingleDefRHS(lhs)))
+          if(auto* rhs = dyn_cast<VarDecl>(def->getDecl()))
+            if(canPropagateCopy(lhs, rhs, um.getSingleDef(lhs)))
+              replVars[lhs] = def;
+
+    for(auto& i : replVars) {
+      VarDecl* var = i.first;
+      DeclRefExpr* def = i.second;
+      llvm::errs() << var->getName() << " => "
+                   << Clang::toString(def, astContext) << "\n";
+      for(Expr* expr : em.getEqv(em.get(var)).clone())
+        for(Stmt* use : um.getUses(var).clone())
+          changed |= ast->replaceExprWith(expr, def, use);
     }
 
-    bool canPropagateExpr(VarDecl* lhs, BinaryOperator* def) {
-      if(isRecursiveExpr(lhs, def->getRHS())
-         or isLHSDefConstantForAllUses(lhs, def))
-        return true;
-      return false;
+    // Now that any variables are propagated, check if there are any
+    // "simple" expressions that can be propagated. The expressions are
+    // intended to be "short" in length and have not more than one operator.
+    // This is to strike a balance between having plenty of complicated
+    // expressions all over the place which are hard to read and having
+    // everything assigned to a variable first which is also hard to read
+    // Because the input is from a compiler, there is no need to check if the
+    // definition dominates all the uses
+    Map<VarDecl*, Expr*> replExprs;
+    replExprs.clear();
+    for(VarDecl* lhs : ast->getVars())
+      if(um.hasSingleDef(lhs) and (not um.hasZeroUses(lhs))
+         and (not addrTaken.contains(lhs)))
+        if(Expr* def = um.getSingleDefRHS(lhs))
+          if(isReplaceable(def)
+             and canPropagateExpr(lhs,
+                                  cast<BinaryOperator>(um.getSingleDef(lhs))))
+            replExprs[lhs] = def;
+
+    for(auto& i : replExprs) {
+      VarDecl* var = i.first;
+      Expr* repl = i.second;
+      for(Expr* expr : em.getEqv(em.get(var)).clone())
+        for(Stmt* use : um.getUses(var))
+          changed |= ast->replaceExprWith(expr, repl, use);
     }
 
-  public:
-    bool process(FunctionDecl*) {
-      bool changed = false;
+    return changed;
+  }
 
-      // Finding vars to be propagated that have more than one definition is
-      // possible, but is more difficult because a more complicated
-      // flow-sensitive analysis will need to be done to determine whether or
-      // not the RHS is constant before uses of the LHS.
-      // But since this comes from the output of a compiler that has probably
-      // already converted everything to SSA form and then had reg2mem done to
-      // it, it is likely that there are few variables that have more than one
-      // definition.
-      // Also, because the input is from a compiler, there is no need to check
-      // if the definition dominates all the uses
-      Map<VarDecl*, DeclRefExpr*> replVars;
-      do {
-        replVars.clear();
-        for(VarDecl* lhs : ast->getVars())
-          if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
-             and (not ast->hasAddressTaken(lhs)))
-            if(auto* def = dyn_cast<DeclRefExpr>(ast->getSingleDefRHS(lhs)))
-              if(auto* rhs = dyn_cast<VarDecl>(def->getDecl()))
-                if(canPropagateCopy(lhs, rhs, ast->getSingleDef(lhs)))
-                  replVars[lhs] = def;
+public:
+  ASTPropagateExprsPass(CishContext& cishContext)
+      : ASTFunctionPass(cishContext, RequireExprNums | RequireUses) {
+    ;
+  }
 
-        for(auto& i : replVars) {
-          VarDecl* var = i.first;
-          DeclRefExpr* def = i.second;
-          changed |= ast->replaceAllUsesWith(var, def);
-        }
-      } while(replVars.size());
+  ASTPropagateExprsPass(const ASTPropagateExprsPass&) = delete;
+  ASTPropagateExprsPass(ASTPropagateExprsPass&&) = delete;
+  virtual ~ASTPropagateExprsPass() = default;
 
-      // Now that any variables are propagated, check if there are any
-      // "simple" expressions that can be propagated. The expressions are
-      // intended to be "short" in length and have not more than one operator.
-      // This is to strike a balance between having plenty of complicated
-      // expressions all over the place which are hard to read and having
-      // everything assigned to a variable first which is also hard to read
-      // Because the input is from a compiler, there is no need to check if the
-      // definition dominates all the uses
-      Map<VarDecl*, Expr*> replExprs;
-      do {
-        replExprs.clear();
-        for(VarDecl* lhs : ast->getVars())
-          if(ast->hasSingleDef(lhs) and (not ast->hasZeroUses(lhs))
-             and (not ast->hasAddressTaken(lhs)))
-            if(Expr* def = ast->getSingleDefRHS(lhs))
-              if(isReplaceable(def)
-                 and canPropagateExpr(
-                     lhs, cast<BinaryOperator>(ast->getSingleDef(lhs))))
-                replExprs[lhs] = def;
+  virtual llvm::StringRef getPassName() const override {
+    return "cish-eprop";
+  }
 
-        for(auto& i : replExprs) {
-          VarDecl* var = i.first;
-          Expr* repl = i.second;
-          changed |= ast->replaceAllUsesWith(var, repl);
-        }
-      } while(replExprs.size());
-
-      return changed;
-    }
-
-  public:
-    ASTPropagateExprsPass(CishContext & cishContext)
-        : ASTFunctionPass(cishContext) {
-      ;
-    }
-
-    ASTPropagateExprsPass(const ASTPropagateExprsPass&) = delete;
-    ASTPropagateExprsPass(ASTPropagateExprsPass &&) = delete;
-    virtual ~ASTPropagateExprsPass() = default;
-
-    virtual llvm::StringRef getPassName() const override {
-      return "cish-eprop";
-    }
-
-    virtual llvm::StringRef getPassLongName() const override {
-      return "Cish AST Expression Propagation";
-    }
-  };
+  virtual llvm::StringRef getPassLongName() const override {
+    return "Cish AST Expression Propagation";
+  }
+};
 
 } // namespace cish
 
-cish::ASTPass*
-createASTPropagateExprsPass(cish::CishContext& cishContext) {
+cish::ASTPass* createASTPropagateExprsPass(cish::CishContext& cishContext) {
   return new cish::ASTPropagateExprsPass(cishContext);
 }

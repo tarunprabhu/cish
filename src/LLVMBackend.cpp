@@ -326,7 +326,13 @@ clang::Expr* LLVMBackend::handleIndexOperand(StructType* sty,
 clang::Expr* LLVMBackend::get(const GetElementPtrInst& gep) {
   const Value* ptr = gep.getPointerOperand();
   Type* type = ptr->getType();
-  clang::Expr* expr = get(ptr);
+  clang::Expr* expr = nullptr;
+  unsigned i = 0;
+  if(auto* alloca = dyn_cast<AllocaInst>(ptr)) {
+    expr = ast->createDeclRefExpr(locals.at(alloca));
+  } else {
+    expr = get(ptr);
+  }
   Vector<const Value*> indices(gep.idx_begin(), gep.idx_end());
   for(unsigned i = 0; i < indices.size(); i++) {
     if(auto* pty = dyn_cast<PointerType>(type)) {
@@ -352,9 +358,14 @@ clang::Expr* LLVMBackend::get(const GetElementPtrInst& gep) {
     }
   }
 
-  // If the operand to the GEP is itself a GEP, then the AddrOf operator
-  // will already be present
-  if(isa<GetElementPtrInst>(LLVM::stripCasts(gep.getPointerOperand())))
+  // If the operand to the GEP is itself a GEP or an Alloca,
+  // then the AddrOf operator will already be present or an Alloca,
+  // then the AddrOf operator will already be present.
+  // FIXME: Can't we just check if an AddrOf operator is present in the Clang
+  // expression directly?
+
+  const Value* ptrBase = LLVM::stripCasts(gep.getPointerOperand());
+  if(isa<GetElementPtrInst>(ptrBase))
     return expr;
   else
     return ast->createUnaryOperator(expr, clang::UO_AddrOf, get(gep.getType()));
@@ -665,9 +676,11 @@ clang::Expr* LLVMBackend::get(const ConstantArray& carray) {
 }
 
 clang::Expr* LLVMBackend::get(const UndefValue& cundef) {
-  return ast->createVariable("__undefined__",
-                             get(cundef.getType()),
-                             astContext.getTranslationUnitDecl());
+  clang::VarDecl* var
+      = ast->createVariable("__undefined__",
+                            get(cundef.getType()),
+                            astContext.getTranslationUnitDecl());
+  return ast->createDeclRefExpr(var);
 }
 
 clang::Expr* LLVMBackend::get(const ConstantExpr& cexpr) {
@@ -766,12 +779,13 @@ clang::QualType LLVMBackend::get(Type* type) {
 }
 
 void LLVMBackend::addTemp(const Instruction& inst, const std::string& name) {
-  clang::QualType type = get(inst.getType());
-  clang::DeclRefExpr* var
-      = ast->createVariable(name, type, funcs.at(&LLVM::getFunction(inst)));
-  clang::BinaryOperator* temp = ast->createBinaryOperator(
-      var, get(&inst), clang::BO_Assign, type);
-  BackendBase::add(temp);
+  fatal(error() << "Not implemented: addTemp");
+  // clang::QualType type = get(inst.getType());
+  // clang::DeclRefExpr* var
+  //     = ast->createVariable(name, type, funcs.at(&LLVM::getFunction(inst)));
+  // clang::BinaryOperator* temp = ast->createBinaryOperator(
+  //     var, get(&inst), clang::BO_Assign, type);
+  // BackendBase::add(temp);
 }
 
 void LLVMBackend::addIfThen(const BranchInst& br, bool invert) {

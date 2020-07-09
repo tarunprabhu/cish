@@ -24,6 +24,8 @@
 
 #include <clang/AST/ExprCXX.h>
 
+#include <llvm/Support/raw_ostream.h>
+
 namespace cish {
 
 class CishContext;
@@ -34,15 +36,13 @@ class CishContext;
 class ParentMap {
 private:
   CishContext& cishContext;
-  clang::FunctionDecl* decl;
   Map<clang::Stmt*, clang::Stmt*> parents;
 
 protected:
-  unsigned getDepth(clang::Stmt* stmt) const;
   bool isContainedInImpl(clang::Stmt* needle, clang::Stmt* haystack) const;
 
 public:
-  ParentMap(CishContext& cishContext, clang::FunctionDecl* decl);
+  ParentMap(CishContext& cishContext);
   ParentMap(const ParentMap&) = delete;
   ParentMap(ParentMap&&) = delete;
 
@@ -52,7 +52,7 @@ public:
   void replace(clang::Stmt* stmt, clang::Stmt* parent);
   void remove(clang::Stmt* stmt);
 
-  bool isOrphan(clang::Stmt* stmt) const;
+  unsigned getDepth(clang::Stmt* stmt) const;
   bool isTopLevel(clang::Stmt* stmt) const;
   bool isDirectlyContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
   bool isContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
@@ -60,6 +60,8 @@ public:
   bool hasParent(clang::Stmt* stmt) const;
   clang::Stmt* getParent(clang::Stmt* stmt) const;
   clang::Stmt* getTopLevelAncestor(clang::Stmt* stmt) const;
+
+  void dump(llvm::raw_ostream& os = llvm::errs()) const;
 };
 
 } // namespace cish

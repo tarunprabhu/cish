@@ -31,8 +31,37 @@ namespace cish {
 static const Set<Expr*> emptyEqvExprs;
 
 ExprNumberMap::ExprNumberMap(CishContext& cishContext)
-    : cishContext(cishContext), nextExprNum(1) {
-  ;
+    : cishContext(cishContext) {
+  clear();
+}
+
+void ExprNumberMap::clear() {
+  nextExprNum = 1;
+
+  blits.clear();
+  clits.clear();
+  ilits16.clear();
+  ilits32.clear();
+  ilits64.clear();
+  ulits16.clear();
+  ulits32.clear();
+  ulits64.clear();
+  flits.clear();
+  dlits.clear();
+  glits.clear();
+  slits.clear();
+  unOps.clear();
+  binOps.clear();
+  condOps.clear();
+  arrExprs.clear();
+  callExprs.clear();
+  castExprs.clear();
+  memberExprs.clear();
+  declRefs.clear();
+
+  varNums.clear();
+  exprNums.clear();
+  eqvExprs.clear();
 }
 
 ExprNum ExprNumberMap::getNewExprNum() {

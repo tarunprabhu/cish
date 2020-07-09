@@ -30,28 +30,22 @@
 
 using namespace clang;
 
+bool g_dbg = false;
+
 namespace cish {
 
 AST::AST(CishContext& cishContext)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      decl(nullptr), pm(cishContext, decl), en(cishContext),
+      decl(nullptr), pm(cishContext), en(cishContext),
       dt(new DominatorTree()) {
   ;
 }
 
 AST::AST(CishContext& cishContext, FunctionDecl* decl, const AST& topLevel)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      decl(decl), pm(cishContext, decl), en(cishContext),
+      decl(decl), pm(cishContext), en(cishContext),
       dt(new DominatorTree()) {
   globals = topLevel.globals;
-  for(VarDecl* g : globals) {
-    useMap[g].clear();
-    defMap[g].clear();
-  }
-  for(ParmVarDecl* param : decl->parameters()) {
-    useMap[param].clear();
-    defMap[param].clear();
-  }
 }
 
 FunctionDecl* AST::getFunction() const {
@@ -85,7 +79,6 @@ const CFG::BuildOptions& AST::getCFGBuildOpts() const {
 bool AST::replace(UnaryOperator* unOp, Expr* repl) {
   remove(unOp->getSubExpr());
   unOp->setSubExpr(repl);
-  add(repl, unOp);
   en.refresh(unOp);
 
   return true;
@@ -94,17 +87,9 @@ bool AST::replace(UnaryOperator* unOp, Expr* repl) {
 bool AST::replace(BinaryOperator* binOp, Expr* repl, bool replaceLHS) {
   if(replaceLHS) {
     remove(binOp->getLHS());
-    if(binOp->getOpcode() == BO_Assign) {
-      if(VarDecl* var = Clang::getVar(repl))
-        addDef(var, binOp);
-      pm.addOrReplace(repl, binOp);
-    } else {
-      add(repl, binOp);
-    }
     binOp->setLHS(repl);
   } else {
     remove(binOp->getRHS());
-    add(repl, binOp);
     binOp->setRHS(repl);
   }
   en.refresh(binOp);
@@ -120,7 +105,6 @@ bool AST::replace(ArraySubscriptExpr* arrExpr, Expr* repl, bool replaceBase) {
     remove(arrExpr->getIdx());
     arrExpr->setRHS(repl);
   }
-  add(repl, arrExpr);
   en.refresh(arrExpr);
 
   return true;
@@ -134,7 +118,6 @@ bool AST::replace(CallExpr* callExpr, Expr* repl, long i) {
     remove(callExpr->getArg(i));
     callExpr->setArg(i, repl);
   }
-  add(repl, callExpr);
   en.refresh(callExpr);
 
   return true;
@@ -143,7 +126,6 @@ bool AST::replace(CallExpr* callExpr, Expr* repl, long i) {
 bool AST::replace(CStyleCastExpr* castExpr, Expr* repl) {
   remove(castExpr->getSubExpr());
   castExpr->setSubExpr(repl);
-  add(repl, castExpr);
   en.refresh(castExpr);
 
   return true;
@@ -152,7 +134,6 @@ bool AST::replace(CStyleCastExpr* castExpr, Expr* repl) {
 bool AST::replace(MemberExpr* memberExpr, Expr* repl) {
   remove(memberExpr->getBase());
   memberExpr->setBase(repl);
-  add(repl, memberExpr);
   en.refresh(memberExpr);
 
   return true;
@@ -161,7 +142,6 @@ bool AST::replace(MemberExpr* memberExpr, Expr* repl) {
 bool AST::replace(ReturnStmt* retStmt, Expr* repl) {
   remove(retStmt->getRetValue());
   retStmt->setRetValue(repl);
-  add(repl, retStmt);
 
   return true;
 }
@@ -169,7 +149,6 @@ bool AST::replace(ReturnStmt* retStmt, Expr* repl) {
 bool AST::replace(IfStmt* ifStmt, Expr* repl) {
   remove(ifStmt->getCond());
   ifStmt->setCond(repl);
-  add(repl, ifStmt);
 
   return true;
 }
@@ -177,7 +156,6 @@ bool AST::replace(IfStmt* ifStmt, Expr* repl) {
 bool AST::replace(SwitchStmt* switchStmt, Expr* repl) {
   remove(switchStmt->getCond());
   switchStmt->setCond(repl);
-  add(repl, switchStmt);
 
   return true;
 }
@@ -185,7 +163,6 @@ bool AST::replace(SwitchStmt* switchStmt, Expr* repl) {
 bool AST::replace(DoStmt* doStmt, Expr* repl) {
   remove(doStmt->getCond());
   doStmt->setCond(repl);
-  add(repl, doStmt);
 
   return true;
 }
@@ -193,7 +170,6 @@ bool AST::replace(DoStmt* doStmt, Expr* repl) {
 bool AST::replace(ForStmt* forStmt, Expr* repl) {
   remove(forStmt->getCond());
   forStmt->setCond(repl);
-  add(repl, forStmt);
 
   return true;
 }
@@ -201,7 +177,6 @@ bool AST::replace(ForStmt* forStmt, Expr* repl) {
 bool AST::replace(WhileStmt* whileStmt, Expr* repl) {
   remove(whileStmt->getCond());
   whileStmt->setCond(repl);
-  add(repl, whileStmt);
 
   return true;
 }
@@ -256,17 +231,15 @@ bool AST::replace(Stmt* parent, Expr* expr, Expr* repl) {
     changed |= replace(doStmt, cloneExpr(repl));
   } else if(auto* forStmt = dyn_cast<ForStmt>(parent)) {
     for(BinaryOperator* binOp : Clang::getForInits(forStmt))
-      changed |= replace(static_cast<Stmt*>(binOp), expr, repl);
+      changed |= replace(cast<Stmt>(binOp), expr, repl);
     if(forStmt->getCond() == expr)
       changed |= replace(forStmt, cloneExpr(repl));
     for(BinaryOperator* binOp : Clang::getForIncs(forStmt))
-      changed |= replace(static_cast<Stmt*>(binOp), expr, repl);
+      changed |= replace(cast<Stmt>(binOp), expr, repl);
   } else if(auto* whileStmt = dyn_cast<WhileStmt>(parent)) {
     changed |= replace(whileStmt, cloneExpr(repl));
   } else if(auto* compoundStmt = dyn_cast<CompoundStmt>(parent)) {
     fatal(error() << "Not implemented. Replacing top-level statement");
-  } else if(isa<DeclRefExpr>(expr)) {
-    ;
   } else {
     fatal(error() << "Unexpected use for expression being replaced: "
                   << parent->getStmtClassName());
@@ -291,72 +264,128 @@ bool AST::replaceEqvUsesWith(Expr* expr, Expr* repl) {
   return changed;
 }
 
-bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
+// bool AST::replaceAllUsesWith(VarDecl* var, Expr* repl) {
+//   bool changed = false;
+
+//   for(Expr* expr : en.getEqv(en.get(var)).clone()) {
+//     for(Stmt* use : getUses(var).clone()) {
+//       changed |= replace(use, expr, repl);
+//       // removeUse(var, use);
+//     }
+//   }
+
+//   return changed;
+// }
+
+bool AST::replaceSomeUsesWith(VarDecl* var, Expr* repl, Stmt* stmt) {
   bool changed = false;
 
-  for(Expr* expr : en.getEqv(en.get(var)).clone())
-    for(Stmt* use : getUses(var).clone())
-      changed |= replace(use, expr, repl);
+  // if(var->getName() == "_t4")
+  //   llvm::outs() << "eqv: " << en.getEqv(en.get(var)).size() << " => "
+  //                << getUses(var).size() << "\n";
+  // for(Expr *expr : en.getEqv(en.get(var)).clone()) {
+  //   for(Stmt* use : getUses(var).clone()) {
+  //     if(var->getName() == "_t4")
+  //       llvm::outs() << "stmt; " << Clang::toString(stmt, astContext) <<
+  //       "\n";
+  //     if(isContainedIn(use, stmt)){
+  //       if(var->getName() == "_t4")
+  //         llvm::outs() << "  replacing some use: " << use << "\n";
+  //       changed |= replace(use, expr, repl);
+  //       removeUse(var, use);
+  //     }
+  //   }
+
+  //   for(Stmt* def : getDefs(var).clone()) {
+  //     if(isContainedIn(def, stmt)) {
+  //       if(var->getName() == "_t4")
+  //         llvm::outs() << "  replacing some def: " << def << "\n";
+  //       changed |= replace(def, expr, repl);
+  //       removeDef(var, def);
+  //     }
+  //   }
+  // }
 
   return changed;
 }
 
-bool AST::replaceExprWith(Expr* expr, Expr* repl) {
+bool AST::replaceExprWith(Expr* expr, Expr* repl, Stmt* parent) {
   bool changed = false;
 
-  changed |= replace(pm.getParent(expr), expr, repl);
+  changed |= replace(parent, expr, repl);
 
   return changed;
 }
 
-bool AST::replaceStmtWith(Stmt* stmt, Stmt* repl) {
+bool AST::replaceStmtWith(Stmt* stmt, Stmt* repl, Stmt* parent) {
   bool changed = false;
 
-  CompoundStmt* body = cast<CompoundStmt>(pm.getParent(stmt));
-  Stmt** stmts = body->body_begin();
-  for(unsigned i = 0; i < body->size(); i++) {
-    if(stmts[i] == stmt) {
-      if(repl)
-        stmts[i] = repl;
-      else
-        stmts[i] = createNullStmt();
-      pm.add(stmts[i], body);
-      remove(stmt);
-      changed |= true;
+  if(auto* body = dyn_cast<CompoundStmt>(parent)) {
+    Stmt** stmts = body->body_begin();
+    for(unsigned i = 0; i < body->size(); i++) {
+      if(stmts[i] == stmt) {
+        if(repl)
+          stmts[i] = repl;
+        else
+          stmts[i] = createNullStmt();
+        pm.add(stmts[i], body);
+        remove(stmt);
+        changed |= true;
+      }
     }
+  } else if(auto* forStmt = dyn_cast<ForStmt>(parent)) {
+    if(forStmt->getInit() == stmt)
+      if(repl)
+        forStmt->setInit(repl);
+      else
+        forStmt->setInit(nullptr);
+    else if(forStmt->getCond() == stmt)
+      if(repl)
+        forStmt->setCond(cast<Expr>(repl));
+      else
+        forStmt->setCond(nullptr);
+    else if(forStmt->getInc() == stmt)
+      if(repl)
+        forStmt->setInc(cast<Expr>(repl));
+      else
+        forStmt->setInc(nullptr);
+    else
+      fatal(error() << "Could not match repl with part of forStmt");
+    if(repl)
+      pm.add(repl, forStmt);
+    remove(stmt);
+    changed |= true;
+  } else {
+    fatal(error() << "Unsupported parent to replace statement: "
+                  << parent->getStmtClassName());
   }
 
   return changed;
 }
 
-bool AST::erase(Stmt* key) {
+bool AST::erase(Stmt* key, Stmt* parent) {
   bool changed = false;
 
-  changed |= replaceStmtWith(key, nullptr);
+  changed |= replaceStmtWith(key, nullptr, parent);
 
   return changed;
 }
 
-bool AST::erase(VarDecl* var) {
-  if(isDefined(var) or isUsed(var))
-    fatal(error() << "Cannot delete variable: " << var->getName() << "("
-                  << getNumDefs(var) << " defs, " << getNumUses(var)
-                  << " uses)");
+// bool AST::erase(VarDecl* var) {
+//   if(isDefined(var) or isUsed(var))
+//     fatal(error() << "Cannot delete variable: " << var->getName() << "("
+//                   << getNumDefs(var) << " defs, " << getNumUses(var)
+//                   << " uses)");
 
-  bool changed = false;
+//   bool changed = false;
 
-  // This has to be done in this order. locals.erase() will return the size of
-  // the container after potentially removing the variable
-  changed |= (locals.size() != locals.erase(var));
+//   // This has to be done in this order. locals.erase() will return the size
+//   of
+//   // the container after potentially removing the variable
+//   changed |= (locals.size() != locals.erase(var));
 
-  return changed;
-}
-
-void AST::add(Expr* expr, Stmt* user) {
-  pm.addOrReplace(expr, user);
-  if(VarDecl* var = Clang::getVar(expr))
-    addUse(var, user);
-}
+//   return changed;
+// }
 
 void AST::remove(CXXBoolLiteralExpr*) {
   ;
@@ -558,43 +587,8 @@ void AST::remove(Stmt* stmt) {
                   << stmt->getStmtClassName());
 
   if(Expr* expr = dyn_cast<Expr>(stmt)) {
-    if(VarDecl* var = Clang::getVar(expr)) {
-      removeUse(var, pm.getParent(expr));
-      removeDef(var, pm.getParent(expr));
-    }
     en.remove(expr);
   }
-  pm.remove(stmt);
-}
-
-void AST::addDef(VarDecl* var, Stmt* user) {
-  if(not var)
-    fatal(error() << "Cannot add nullptr");
-  defMap.at(var).insert(user);
-}
-
-void AST::addUse(VarDecl* var, Stmt* user) {
-  useMap.at(var).insert(user);
-}
-
-void AST::removeUse(VarDecl* var, Stmt* stmt) {
-  useMap.at(var).erase(stmt);
-}
-
-void AST::removeDef(VarDecl* var, Stmt* stmt) {
-  defMap.at(var).erase(stmt);
-}
-
-bool AST::isTopLevel(Stmt* stmt) const {
-  return pm.isTopLevel(stmt);
-}
-
-bool AST::isDirectlyContainedIn(Stmt* needle, Stmt* haystack) const {
-  return pm.isDirectlyContainedIn(needle, haystack);
-}
-
-bool AST::isContainedIn(Stmt* needle, Stmt* haystack) const {
-  return pm.isContainedIn(needle, haystack);
 }
 
 const Set<Expr*>& AST::getEqvExprs(Expr* expr) const {
@@ -617,85 +611,7 @@ const Set<VarDecl*>& AST::getVars() const {
   return locals;
 }
 
-Set<Stmt*> AST::getTopLevelDefs(VarDecl* var) const {
-  Set<Stmt*> defs;
-  for(Stmt* def : getDefs(var))
-    if(pm.isTopLevel(def))
-      defs.insert(def);
-    else
-      defs.insert(pm.getTopLevelAncestor(def));
-  return defs;
-}
-
-const Set<Stmt*>& AST::getDefs(VarDecl* var) const {
-  return defMap.at(var);
-}
-
-unsigned AST::getNumDefs(VarDecl* var) const {
-  return getDefs(var).size();
-}
-
-bool AST::isDefined(VarDecl* var) const {
-  return getNumDefs(var);
-}
-
-bool AST::hasZeroDefs(VarDecl* var) const {
-  return getNumDefs(var) == 0;
-}
-
-bool AST::hasSingleDef(VarDecl* var) const {
-  return getNumDefs(var) == 1;
-}
-
-Stmt* AST::getSingleDef(VarDecl* var) const {
-  if(hasSingleDef(var))
-    return *getDefs(var).begin();
-  return nullptr;
-}
-
-Expr* AST::getSingleDefRHS(VarDecl* var) const {
-  if(hasSingleDef(var))
-    return cast<BinaryOperator>(getSingleDef(var))->getRHS();
-  return nullptr;
-}
-
-Set<Stmt*> AST::getTopLevelUses(VarDecl* var) const {
-  Set<Stmt*> uses;
-  for(Stmt* use : getUses(var))
-    if(pm.isTopLevel(use))
-      uses.insert(use);
-    else
-      uses.insert(pm.getTopLevelAncestor(use));
-  return uses;
-}
-
-const Set<Stmt*>& AST::getUses(VarDecl* var) const {
-  return useMap.at(var);
-}
-
-unsigned AST::getNumUses(VarDecl* var) const {
-  return useMap.at(var).size();
-}
-
-bool AST::isUsed(VarDecl* var) const {
-  return getNumUses(var);
-}
-
-bool AST::hasZeroUses(VarDecl* var) const {
-  return getNumUses(var) == 0;
-}
-
-bool AST::hasSingleUse(VarDecl* var) const {
-  return getNumUses(var) == 1;
-}
-
-Stmt* AST::getSingleUse(VarDecl* var) const {
-  if(hasSingleUse(var))
-    return *useMap.at(var).begin();
-  return nullptr;
-}
-
-void AST::recalculateCFG() {
+void AST::updateCFG() {
   stmtParents.reset(nullptr);
   cfg.reset(nullptr);
   cfgStmtMap.reset(nullptr);
@@ -711,10 +627,6 @@ void AST::recalculateCFG() {
   // along the way. At some point this should be fixed
   //
   // dt->getBase().recalculate(*cfg);
-}
-
-void AST::recalculate() {
-  recalculateCFG();
 }
 
 void AST::setFunctionBody(Stmt* body) {
@@ -754,8 +666,6 @@ AST::createParam(const std::string& name, QualType type, FunctionDecl* func) {
                                            nullptr,
                                            SC_None,
                                            nullptr);
-  useMap[param].clear();
-  defMap[param].clear();
   return param;
 }
 
@@ -812,8 +722,6 @@ VarDecl* AST::createGlobalVariable(const std::string& name, QualType type) {
                                SC_None);
   tu->addDecl(g);
   globals.insert(g);
-  useMap[g].clear();
-  defMap[g].clear();
 
   return g;
 }
@@ -831,17 +739,15 @@ VarDecl* AST::createLocalVariable(const std::string& name,
                                    SC_None);
   func->addDecl(local);
   locals.insert(local);
-  useMap[local].clear();
-  defMap[local].clear();
 
   return local;
 }
 
-DeclRefExpr* AST::createVariable(const std::string& name,
-                                 QualType type,
-                                 DeclContext* parent) {
+VarDecl* AST::createVariable(const std::string& name,
+                             QualType type,
+                             DeclContext* declContext) {
   VarDecl* var = VarDecl::Create(astContext,
-                                 parent,
+                                 declContext,
                                  invLoc,
                                  invLoc,
                                  &getIdentifierInfo(name),
@@ -849,7 +755,7 @@ DeclRefExpr* AST::createVariable(const std::string& name,
                                  nullptr,
                                  SC_None);
 
-  return createDeclRefExpr(var);
+  return var;
 }
 
 CXXBoolLiteralExpr* AST::createBoolLiteral(bool b) {
@@ -953,8 +859,6 @@ CXXNullPtrLiteralExpr* AST::createNullptr(QualType type) {
 InitListExpr* AST::createInitListExpr(const Vector<Expr*>& exprs) {
   InitListExpr* initList = new(astContext)
       InitListExpr(astContext, invLoc, LLVM::makeArrayRef(exprs), invLoc);
-  for(Expr* expr : exprs)
-    pm.add(expr, initList);
   en.add(initList);
 
   return initList;
@@ -964,10 +868,8 @@ UnaryOperator*
 AST::createUnaryOperator(Expr* expr, UnaryOperator::Opcode opc, QualType type) {
   UnaryOperator* unOp = new(astContext)
       UnaryOperator(expr, opc, type, VK_RValue, OK_Ordinary, invLoc, false);
-  pm.add(expr, unOp);
   en.add(unOp);
   if(VarDecl* var = Clang::getVar(expr)) {
-    addUse(var, unOp);
     if(opc == UO_AddrOf)
       addrTaken.insert(var);
   }
@@ -981,18 +883,7 @@ BinaryOperator* AST::createBinaryOperator(Expr* lhs,
                                           QualType type) {
   BinaryOperator* binOp = new(astContext) BinaryOperator(
       lhs, rhs, opc, type, VK_RValue, OK_Ordinary, invLoc, FPOptions());
-  pm.add(lhs, binOp);
-  pm.add(rhs, binOp);
   en.add(binOp);
-  if(binOp->getOpcode() == BO_Assign) {
-    if(VarDecl* var = Clang::getVar(lhs))
-      addDef(var, binOp);
-  } else {
-    if(VarDecl* var = Clang::getVar(lhs))
-      addUse(var, binOp);
-  }
-  if(VarDecl* var = Clang::getVar(rhs))
-    addUse(var, binOp);
 
   return binOp;
 }
@@ -1001,16 +892,7 @@ ConditionalOperator*
 AST::createConditionalOperator(Expr* cond, Expr* t, Expr* f, QualType type) {
   ConditionalOperator* condOp = new(astContext) ConditionalOperator(
       cond, invLoc, t, invLoc, f, type, VK_LValue, OK_Ordinary);
-  pm.add(cond, condOp);
-  pm.add(t, condOp);
-  pm.add(f, condOp);
   en.add(condOp);
-  if(VarDecl* var = Clang::getVar(cond))
-    addUse(var, condOp);
-  if(VarDecl* var = Clang::getVar(t))
-    addUse(var, condOp);
-  if(VarDecl* var = Clang::getVar(f))
-    addUse(var, condOp);
 
   return condOp;
 }
@@ -1019,13 +901,7 @@ ArraySubscriptExpr*
 AST::createArraySubscriptExpr(Expr* base, Expr* idx, QualType type) {
   ArraySubscriptExpr* arrExpr = new(astContext)
       ArraySubscriptExpr(base, idx, type, VK_RValue, OK_Ordinary, invLoc);
-  pm.add(base, arrExpr);
-  pm.add(idx, arrExpr);
   en.add(arrExpr);
-  if(VarDecl* var = Clang::getVar(base))
-    addUse(var, arrExpr);
-  if(VarDecl* var = Clang::getVar(idx))
-    addUse(var, arrExpr);
 
   return arrExpr;
 }
@@ -1034,15 +910,7 @@ CallExpr*
 AST::createCallExpr(Expr* callee, const Vector<Expr*>& args, QualType type) {
   CallExpr* callExpr = CallExpr::Create(
       astContext, callee, LLVM::makeArrayRef(args), type, VK_RValue, invLoc);
-  pm.add(callee, callExpr);
-  for(Expr* arg : callExpr->arguments())
-    pm.add(arg, callExpr);
   en.add(callExpr);
-  if(VarDecl* var = Clang::getVar(callee))
-    addUse(var, callExpr);
-  for(Expr* arg : args)
-    if(VarDecl* var = Clang::getVar(arg))
-      addUse(var, callExpr);
 
   return callExpr;
 }
@@ -1058,10 +926,7 @@ CStyleCastExpr* AST::createCastExpr(Expr* expr, QualType qty) {
                                astContext.CreateTypeSourceInfo(qty),
                                invLoc,
                                invLoc);
-  pm.add(expr, castExpr);
   en.add(castExpr);
-  if(VarDecl* var = Clang::getVar(expr))
-    addUse(var, castExpr);
 
   return castExpr;
 }
@@ -1082,10 +947,7 @@ AST::createMemberExpr(Expr* base, ValueDecl* member, QualType type) {
                            type,
                            VK_RValue,
                            OK_Ordinary);
-  pm.add(base, memberExpr);
   en.add(memberExpr);
-  if(VarDecl* var = Clang::getVar(base))
-    addUse(var, memberExpr);
 
   return memberExpr;
 }
@@ -1112,15 +974,6 @@ NullStmt* AST::createNullStmt() {
 CompoundStmt* AST::createCompoundStmt(const Vector<Stmt*>& stmts) {
   CompoundStmt* compoundStmt = CompoundStmt::Create(
       astContext, LLVM::makeArrayRef(stmts), invLoc, invLoc);
-  for(Stmt* stmt : stmts) {
-    pm.add(stmt, compoundStmt);
-    if(auto* binOp = dyn_cast<BinaryOperator>(stmt)) {
-      if(binOp->getOpcode() == BO_Assign) {
-
-      } else {
-      }
-    }
-  }
 
   return compoundStmt;
 }
@@ -1128,7 +981,6 @@ CompoundStmt* AST::createCompoundStmt(const Vector<Stmt*>& stmts) {
 CompoundStmt* AST::createCompoundStmt(Stmt* stmt) {
   CompoundStmt* compoundStmt = CompoundStmt::Create(
       astContext, llvm::ArrayRef<Stmt*>(stmt), invLoc, invLoc);
-  pm.add(stmt, compoundStmt);
 
   return compoundStmt;
 }
@@ -1136,12 +988,6 @@ CompoundStmt* AST::createCompoundStmt(Stmt* stmt) {
 IfStmt* AST::createIfStmt(Expr* cond, Stmt* thn, Stmt* els) {
   IfStmt* ifStmt = IfStmt::Create(
       astContext, invLoc, false, nullptr, nullptr, cond, thn, invLoc, els);
-  pm.add(cond, ifStmt);
-  pm.add(thn, ifStmt);
-  if(els)
-    pm.add(els, ifStmt);
-  if(VarDecl* var = Clang::getVar(cond))
-    addUse(var, ifStmt);
 
   return ifStmt;
 }
@@ -1150,10 +996,6 @@ SwitchStmt* AST::createSwitchStmt(Expr* cond, Stmt* body) {
   SwitchStmt* switchStmt
       = SwitchStmt::Create(astContext, nullptr, nullptr, cond);
   switchStmt->setBody(body);
-  pm.add(cond, switchStmt);
-  pm.add(body, switchStmt);
-  if(VarDecl* var = Clang::getVar(cond))
-    addUse(var, switchStmt);
 
   return switchStmt;
 }
@@ -1162,24 +1004,18 @@ CaseStmt* AST::createCaseStmt(Expr* value, Stmt* body) {
   CaseStmt* caseStmt
       = CaseStmt::Create(astContext, value, nullptr, invLoc, invLoc, invLoc);
   caseStmt->setSubStmt(body);
-  pm.add(body, caseStmt);
 
   return caseStmt;
 }
 
 DefaultStmt* AST::createDefaultStmt(Stmt* body) {
   DefaultStmt* defaultStmt = new(astContext) DefaultStmt(invLoc, invLoc, body);
-  pm.add(body, defaultStmt);
 
   return defaultStmt;
 }
 
 DoStmt* AST::createDoStmt(Stmt* body, Expr* cond) {
   DoStmt* doStmt = new(astContext) DoStmt(body, cond, invLoc, invLoc, invLoc);
-  pm.add(cond, doStmt);
-  pm.add(body, doStmt);
-  if(VarDecl* var = Clang::getVar(cond))
-    addUse(var, doStmt);
 
   return doStmt;
 }
@@ -1187,16 +1023,6 @@ DoStmt* AST::createDoStmt(Stmt* body, Expr* cond) {
 ForStmt* AST::createForStmt(Stmt* init, Expr* cond, Expr* inc, Stmt* body) {
   ForStmt* forStmt = new(astContext) ForStmt(
       astContext, init, cond, nullptr, inc, body, invLoc, invLoc, invLoc);
-  if(init)
-    pm.add(init, forStmt);
-
-  pm.add(cond, forStmt);
-  if(VarDecl* var = Clang::getVar(cond))
-    addUse(var, forStmt);
-
-  if(inc)
-    pm.add(inc, forStmt);
-  pm.add(body, forStmt);
 
   return forStmt;
 }
@@ -1204,21 +1030,12 @@ ForStmt* AST::createForStmt(Stmt* init, Expr* cond, Expr* inc, Stmt* body) {
 WhileStmt* AST::createWhileStmt(Expr* cond, Stmt* body) {
   WhileStmt* whileStmt
       = WhileStmt::Create(astContext, nullptr, cond, body, invLoc);
-  pm.add(cond, whileStmt);
-  pm.add(body, whileStmt);
-  if(VarDecl* var = Clang::getVar(cond))
-    addUse(var, whileStmt);
 
   return whileStmt;
 }
 
 ReturnStmt* AST::createReturnStmt(Expr* expr) {
   ReturnStmt* retStmt = ReturnStmt::Create(astContext, invLoc, expr, nullptr);
-  if(expr) {
-    pm.add(expr, retStmt);
-    if(VarDecl* var = Clang::getVar(expr))
-      addUse(var, retStmt);
-  }
 
   return retStmt;
 }
@@ -1244,9 +1061,15 @@ LabelStmt* AST::createLabelStmt(LabelDecl* label) {
 }
 
 DeclStmt* AST::createDeclStmt(Decl* decl) {
-  auto* group = new(astContext) DeclGroupRef(decl);
+  return new(astContext)
+      DeclStmt(DeclGroupRef::Create(astContext, &decl, 1), invLoc, invLoc);
+}
 
-  return new(astContext) DeclStmt(*group, invLoc, invLoc);
+DeclStmt* AST::createDeclStmt(Vector<Decl*>& decls) {
+  return new(astContext)
+      DeclStmt(DeclGroupRef::Create(astContext, decls.data(), decls.size()),
+               invLoc,
+               invLoc);
 }
 
 Stmt* AST::clone(CXXNullPtrLiteralExpr* nlit) {

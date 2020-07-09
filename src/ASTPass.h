@@ -20,6 +20,11 @@
 #ifndef CISH_AST_PASS_H
 #define CISH_AST_PASS_H
 
+#include "ExprNumberMap.h"
+#include "ParentMap.h"
+#include "Set.h"
+#include "UsesMap.h"
+
 #include <clang/AST/ASTContext.h>
 
 namespace cish {
@@ -29,15 +34,21 @@ class AST;
 
 class ASTPass {
 protected:
-  static constexpr unsigned ModifiesAST = 0x1;
-  static constexpr unsigned PostOrder = 0x2;
-  static constexpr unsigned IterateUntilConvergence = 0x4;
+  static constexpr unsigned PreOrder = 1 << 0;
+  static constexpr unsigned RequireExprNums = 1 << 1;
+  static constexpr unsigned RequireUses = 1 << 2;
+  static constexpr unsigned RequireCFG = 1 << 3;
+  static constexpr unsigned OnePass = 1 << 4;
 
 protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
   unsigned flags;
   AST* ast;
+  ExprNumberMap em;
+  ParentMap pm;
+  UsesMap um;
+  Set<clang::VarDecl*> addrTaken;
 
 private:
   bool hasFlag(unsigned flag) const;
@@ -47,9 +58,11 @@ protected:
   ASTPass(const ASTPass&) = delete;
   ASTPass(ASTPass&&) = delete;
 
-  bool hasModifiesAST() const;
-  bool hasPostorder() const;
-  bool hasIterateUntilConvergence() const;
+  bool hasPreOrder() const;
+  bool hasRequireExprNums() const;
+  bool hasRequireUses() const;
+  bool hasRequireCFG() const;
+  bool hasOnePass() const;
 
 public:
   virtual ~ASTPass() = default;

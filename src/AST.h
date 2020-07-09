@@ -55,15 +55,6 @@ protected:
   std::unique_ptr<clang::CFGStmtMap> cfgStmtMap;
   std::unique_ptr<clang::DominatorTree> dt;
 
-  // For now, every def of a variable is an assignment statement.
-  // In clang-speak, this would be a BinaryOperator where the operand is
-  // BO_Assign. When returning the def, it will return the entire statement
-  Map<clang::VarDecl*, Set<clang::Stmt*>> defMap;
-
-  // The uses are the nearest Expr containing the variable directly.
-  // The Expr in the use will be a DeclRefExpr but since those are not uniqued,
-  // they can't be used to keep the map
-  Map<clang::VarDecl*, Set<clang::Stmt*>> useMap;
 
   // Variables that have their address taken
   Set<clang::VarDecl*> addrTaken;
@@ -77,8 +68,6 @@ private:
 protected:
   void add(clang::Expr* expr, clang::Stmt* user);
   void remove(clang::Expr* expr, clang::Stmt* user);
-  void addDef(clang::VarDecl* var, clang::Stmt* user);
-  void addUse(clang::VarDecl* var, clang::Stmt* user);
 
   bool replace(clang::UnaryOperator* unOp, clang::Expr* repl);
   bool
@@ -96,9 +85,6 @@ protected:
   bool replace(clang::ForStmt* forStmt, clang::Expr* repl);
   bool replace(clang::WhileStmt* whileStmt, clang::Expr* repl);
   bool replace(clang::Stmt* parent, clang::Expr* expr, clang::Expr* repl);
-
-  void recalculateCFG();
-  void recalculateDefUse();
 
   clang::Stmt* clone(clang::CXXBoolLiteralExpr*);
   clang::Stmt* clone(clang::CharacterLiteral*);
@@ -159,9 +145,8 @@ protected:
   void remove(clang::ReturnStmt*);
   void remove(clang::NullStmt*);
   void remove(clang::LabelStmt*);
-  void remove(clang::Stmt*);
 
-  clang::LabelStmt* createLabelStmt(clang::LabelDecl*);
+  clang::LabelStmt* createLabelStmt(clang::LabelDecl* label);
 
 public:
   AST(CishContext& cishContext);
@@ -171,13 +156,17 @@ public:
 
   clang::FunctionDecl* getFunction() const;
 
-  void removeUse(clang::VarDecl* var, clang::Stmt* stmt);
-  void removeDef(clang::VarDecl* var, clang::Stmt* stmt);
+  void remove(clang::Stmt*);
   bool replaceAllUsesWith(clang::VarDecl* var, clang::Expr* expr);
+  bool replaceSomeUsesWith(clang::VarDecl* var,
+                           clang::Expr* repl,
+                           clang::Stmt* stmt);
   bool replaceEqvUsesWith(clang::Expr* expr, clang::Expr* repl);
-  bool replaceExprWith(clang::Expr* expr, clang::Expr* repl);
-  bool replaceStmtWith(clang::Stmt* old, clang::Stmt* repl);
-  bool erase(clang::Stmt* stmt);
+  bool
+  replaceExprWith(clang::Expr* expr, clang::Expr* repl, clang::Stmt* parent);
+  bool
+  replaceStmtWith(clang::Stmt* stmt, clang::Stmt* repl, clang::Stmt* parent);
+  bool erase(clang::Stmt* stmt, clang::Stmt* parent);
   bool erase(clang::VarDecl* var);
 
   const ParentMap& getParentMap() const;
@@ -190,28 +179,8 @@ public:
   bool hasAddressTaken(clang::VarDecl* var) const;
   void resetAddressTaken(clang::VarDecl* var);
 
-  Set<clang::Stmt*> getTopLevelDefs(clang::VarDecl* var) const;
-  const Set<clang::Stmt*>& getDefs(clang::VarDecl* var) const;
-  unsigned getNumDefs(clang::VarDecl* var) const;
-  bool isDefined(clang::VarDecl* var) const;
-  bool hasZeroDefs(clang::VarDecl* var) const;
-  bool hasSingleDef(clang::VarDecl* var) const;
-  clang::Stmt* getSingleDef(clang::VarDecl* var) const;
-  clang::Expr* getSingleDefRHS(clang::VarDecl* var) const;
-
-  Set<clang::Stmt*> getTopLevelUses(clang::VarDecl* var) const;
-  const Set<clang::Stmt*>& getUses(clang::VarDecl* var) const;
-  unsigned getNumUses(clang::VarDecl* var) const;
-  bool isUsed(clang::VarDecl* var) const;
-  bool hasZeroUses(clang::VarDecl* var) const;
-  bool hasSingleUse(clang::VarDecl* var) const;
-  clang::Stmt* getSingleUse(clang::VarDecl* var) const;
-
   const Set<clang::VarDecl*>& getVars() const;
 
-  bool isContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
-  bool isDirectlyContainedIn(clang::Stmt* needle, clang::Stmt* haystack) const;
-  bool isTopLevel(clang::Stmt* stmt) const;
   ExprNum getExprNum(clang::Expr* expr) const;
   const Set<clang::Expr*>& getEqvExprs(clang::Expr* expr) const;
 
@@ -318,14 +287,16 @@ public:
   clang::ReturnStmt* createReturnStmt(clang::Expr* retExpr);
 
   clang::DeclStmt* createDeclStmt(clang::Decl* decl);
+  clang::DeclStmt* createDeclStmt(Vector<clang::Decl*>& decls);
 
-  // FIXME: This should probably go away. Right now it is used for "temporary"
-  // variables which themselves should probably go away
-  clang::DeclRefExpr* createVariable(const std::string& name,
-                                     clang::QualType type,
-                                     clang::DeclContext* parent);
+  // This is used to create a variable but it is not added to the decl list of
+  // the function. This is useful when declaring variables for private use
+  // inside an inner scope of the function
+  clang::VarDecl* createVariable(const std::string& name,
+                                 clang::QualType type,
+                                 clang::DeclContext* declContext);
 
-  void recalculate();
+  void updateCFG();
 };
 
 } // namespace cish

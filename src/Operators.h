@@ -86,6 +86,8 @@ bool isBitwise(clang::BinaryOperator::Opcode op);
 bool isLogical(clang::BinaryOperator::Opcode op);
 bool isRelational(clang::BinaryOperator::Opcode op);
 
+clang::BinaryOperator::Opcode getInverse(clang::BinaryOperator::Opcode);
+
 } // namespace Operator
 
 } // namespace cish

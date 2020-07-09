@@ -422,7 +422,6 @@ ASTStreamer& ASTStreamer::operator<<(const VarDecl* var) {
   *this << cast<DeclaratorDecl>(var);
   if(const Expr* init = var->getInit())
     *this << " = " << init;
-  *this << endst(false);
 
   return *this;
 }
@@ -464,13 +463,30 @@ ASTStreamer& ASTStreamer::operator<<(const FunctionDecl* f) {
     beginBlock();
     for(const Decl* d : f->decls())
       if(const auto* var = dyn_cast<VarDecl>(d))
-        *this << tab() << var << endl();
+        *this << tab() << var << endst();
     *this << endl();
     process(cast<CompoundStmt>(f->getBody()), false);
     endBlock(false);
   } else {
     endst(false);
   }
+
+  return *this;
+}
+
+ASTStreamer& ASTStreamer::operator<<(const Decl* decl) {
+  if(const auto* func = dyn_cast<FunctionDecl>(decl))
+    return *this << func;
+  else if(const auto* param = dyn_cast<ParmVarDecl>(decl))
+    return *this << param;
+  else if(const auto* record = dyn_cast<RecordDecl>(decl))
+    return *this << record;
+  else if(const auto* field = dyn_cast<FieldDecl>(decl))
+    return *this << field;
+  else if(const auto* var = dyn_cast<VarDecl>(decl))
+    return *this << var;
+  else
+    fatal(error() << "Unsupported Decl: " << decl->getDeclKindName());
 
   return *this;
 }
@@ -755,14 +771,12 @@ ASTStreamer& ASTStreamer::operator<<(const ReturnStmt* retStmt) {
 }
 
 ASTStreamer& ASTStreamer::operator<<(const DeclStmt* declStmt) {
-  if(const Decl* decl = declStmt->getSingleDecl()) {
-    if(const auto* var = dyn_cast<VarDecl>(decl))
-      *this << var;
-    else
-      fatal(error() << "Unsupported decl in DeclStmt: "
-                    << decl->getDeclKindName());
-  } else {
-    fatal(error() << "Multiple decls in DeclStmt not supported");
+  bool comma = false;
+  for(Decl* decl : declStmt->getDeclGroup()) {
+    if(comma)
+      *this << ", ";
+    *this << decl;
+    comma = true;
   }
 
   return *this;
@@ -828,8 +842,17 @@ ASTStreamer& ASTStreamer::operator<<(const ForStmt* forStmt) {
   if(back(SkipIndent | SkipNewline) == ';')
     *this << endl() << tab();
 
-  *this << "for(" << forStmt->getInit() << "; " << forStmt->getCond() << "; "
-        << forStmt->getInc() << ")" << forStmt->getBody();
+  *this << "for(";
+  if(const Stmt* init = forStmt->getInit())
+    *this << init;
+  *this << "; ";
+  if(const Expr* cond = forStmt->getCond())
+    *this << cond;
+  *this << "; ";
+  if(const Expr* inc = forStmt->getInc())
+    *this << inc;
+  *this << ")";
+  *this << forStmt->getBody();
 
   return *this;
 }

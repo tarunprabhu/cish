@@ -131,6 +131,7 @@ protected:
   ASTStreamer& operator<<(const clang::DeclaratorDecl*);
   ASTStreamer& operator<<(const clang::FieldDecl*);
   ASTStreamer& operator<<(const clang::ParmVarDecl*);
+  ASTStreamer& operator<<(const clang::Decl*);
 
 public:
   ASTStreamer(const clang::ASTContext& astContext);

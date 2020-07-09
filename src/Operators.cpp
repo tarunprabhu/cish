@@ -19,6 +19,7 @@
 
 #include "Operators.h"
 #include "Map.h"
+#include "Map2.h"
 
 using namespace clang;
 
@@ -185,6 +186,24 @@ bool isBitwise(BinaryOperator::Opcode op) {
 
 bool isLogical(BinaryOperator::Opcode op) {
   return (op == BO_LAnd) or (op == BO_LOr);
+}
+
+BinaryOperator::Opcode getInverse(BinaryOperator::Opcode opc) {
+  static const Map2S<BinaryOperator::Opcode> ops = {
+      {BO_Add, BO_Sub},
+      // {BO_Sub, BO_Add},
+      {BO_Mul, BO_Div},
+      // {BO_Div, BO_Mul},
+
+      {BO_EQ, BO_NE},
+      // {BO_NE, BO_EQ},
+      {BO_GT, BO_LE},
+      // {BO_LE, BO_GT},
+      // {BO_LT, BO_GE},
+      {BO_GE, BO_LT},
+  };
+
+  return ops.at(opc);
 }
 
 } // namespace Operator

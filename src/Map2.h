@@ -14,7 +14,7 @@ template <typename LeftT,
           typename RightT,
           typename CompareLeft = std::less<LeftT>,
           typename CompareRight = std::less<RightT>,
-          typename = std::enable_if_t<!std::is_same<LeftT, RightT>::value>>
+          std::enable_if_t<!std::is_same<LeftT, RightT>::value, int> = 0>
 class Map2 {
 protected:
   Map<LeftT, RightT, CompareLeft> _ltr;
@@ -81,7 +81,7 @@ public:
     ;
   }
 
-  Map2(Map<LeftT, RightT>&& other) : _ltr(other._ltr), _rtl(other._rtl) {
+  Map2(Map2<LeftT, RightT>&& other) : _ltr(other._ltr), _rtl(other._rtl) {
     ;
   }
 
@@ -95,81 +95,64 @@ public:
       insert(p.first, p.second);
   }
 
-  Map<LeftT, RightT>& operator=(const Map<LeftT, RightT>& other) {
+  // template <typename L = LeftT,
+  //           typename R = RightT,
+  //           std::enable_if_t<std::is_same<L, LeftT>::value
+  //                                && std::is_same<R, RightT>::value
+  //                                && std::is_same<L, R>::value,
+  //                            int> = 0>
+  // Map2(std::initializer_list<std::pair<RightT, LeftT>> init) {
+  //   for(const std::pair<RightT, LeftT>& p : init)
+  //     insert(p.first, p.second);
+  // }
+
+  Map2<LeftT, RightT>& operator=(const Map2<LeftT, RightT>& other) {
     this->_ltr = other._ltr;
     this->_rtl = other._rtl;
     return *this;
   }
 
-  Map<LeftT, RightT>& operator=(Map<LeftT, RightT>&& other) {
+  Map2<LeftT, RightT>& operator=(const Map2<RightT, LeftT>&& other) {
     this->_ltr = other._ltr;
     this->_rtl = other._rtl;
     return *this;
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<L, R>::value,
-                             int> = 0>
   Map<LeftT, RightT>&
-  operator=(std::initializer_list<std::pair<L, R>> init) {
-    for(const std::pair<L, R>& p : init)
+  operator=(std::initializer_list<std::pair<LeftT, RightT>> init) {
+    for(const std::pair<LeftT, RightT>& p : init)
       insert(p.first, p.second);
     return *this;
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<L, R>::value,
-                             int> = 0>
   Map<LeftT, RightT>&
-  operator=(std::initializer_list<std::pair<R, L>> init) {
-    for(const std::pair<R, L>& p : init)
+  operator=(std::initializer_list<std::pair<RightT, LeftT>> init) {
+    for(const std::pair<RightT, LeftT>& p : init)
       insert(p.first, p.second);
     return *this;
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<L, R>::value,
-                             int> = 0>
-  R& at(const L& left) {
+  RightT& at(const LeftT& left) {
     return _ltr.at(left);
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<L, R>::value,
-                             int> = 0>
-  L& at(const R& right) {
+  LeftT& at(const RightT& right) {
     return _rtl.at(right);
   }
 
-  template <typename T = LeftT,
-            std::enable_if_t<std::is_same<T, LeftT>::value
-                                 && std::is_same<T, RightT>::value,
-                             int> = 0>
-  T& at(const T& key) {
-    if(contains(key))
-      return _ltr.at(key);
-    return _rtl.at(key);
-  }
+  // template <typename L = LeftT,
+  //           typename R = RightT,
+  //           std::enable_if_t<std::is_same<L, LeftT>::value
+  //                                && std::is_same<R, RightT>::value
+  //                                && std::is_same<L, R>::value,
+  //                            int> = 0>
+  // R& at(const L& key) {
+  //   if(contains(key))
+  //     return _ltr.at(key);
+  //   return _rtl.at(key);
+  // }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<L, R>::value,
-                             int> = 0>
-  const R& at(const L& left) const {
+  const RightT& at(const LeftT& left) const {
     return _ltr.at(left);
   }
 
@@ -183,11 +166,13 @@ public:
     return _rtl.at(right);
   }
 
-  template <typename T = LeftT,
-            std::enable_if_t<std::is_same<T, LeftT>::value
-                                 && std::is_same<T, RightT>::value,
+  template <typename L = LeftT,
+            typename R = RightT,
+            std::enable_if_t<std::is_same<L, LeftT>::value
+                                 && std::is_same<R, RightT>::value
+                                 && std::is_same<L, R>::value,
                              int> = 0>
-  const T& at(const T& key) const {
+  const R& at(const L& key) const {
     if(contains(key))
       return _ltr.at(key);
     return _rtl.at(key);
@@ -206,47 +191,19 @@ public:
     _rtl.clear();
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<LeftT, RightT>::value,
-                             int> = 0>
-  bool insert(const L& left, const R& right) {
+  bool insert(const LeftT& left, const RightT& right) {
     bool l = _ltr.emplace(left, right);
     bool r = _rtl.emplace(right, left);
     return l or r;
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<LeftT, RightT>::value,
-                             int> = 0>
-  bool insert(const R& right, const L& left) {
+  bool insert(const RightT& right, const LeftT& left) {
     bool l = _ltr.insert(std::make_pair(left, right));
     bool r = _rtl.insert(std::make_pair(right, left));
     return l or r;
   }
 
-  template <typename T = LeftT,
-            std::enable_if_t<std::is_same<T, LeftT>::value
-                                 && std::is_same<T, RightT>::value,
-                             int> = 0>
-  bool insert(const T& left, const T& right) {
-    bool l = _ltr.insert(std::make_pair(left, right));
-    bool r = _rtl.insert(std::make_pair(right, left));
-    return l or r;
-  }
-
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<L, R>::value,
-                             int> = 0>
-  bool insert(const Map2<L, R>& other) {
+  bool insert(const Map2<LeftT, RightT>& other) {
     bool changed = false;
 
     for(const auto& lr : other.ltr())
@@ -255,13 +212,7 @@ public:
     return changed;
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<std::is_same<L, LeftT>::value
-                                 && std::is_same<R, RightT>::value
-                                 && !std::is_same<L, R>::value,
-                             int> = 0>
-  bool insert(const Map2<R, L>& other) {
+  bool insert(const Map2<RightT, LeftT>& other) {
     bool changed = false;
 
     for(const auto& lr : other.ltr())
@@ -270,87 +221,48 @@ public:
     return changed;
   }
 
-  template <typename T = LeftT,
-            std::enable_if_t<std::is_same<T, LeftT>::value
-                                 && std::is_same<LeftT, RightT>::value,
-                             int> = 0>
   left_iterator erase(const_left_iterator pos) {
     if(contains(*pos))
       _rtl.erase(*pos);
     return _ltr.erase(pos);
   }
 
-  template <typename T = LeftT,
-            std::enable_if_t<std::is_same<T, LeftT>::value
-                                 && !std::is_same<LeftT, RightT>::value,
-                             int> = 0>
-  left_iterator erase(const_left_iterator pos) {
-    if(contains(*pos))
-      _rtl.erase(*pos);
-    return _ltr.erase(pos);
-  }
-
-  template <typename T = RightT,
-            std::enable_if_t<std::is_same<T, RightT>::value
-                                 && !std::is_same<LeftT, RightT>::value,
-                             int> = 0>
   right_iterator erase(const_right_iterator pos) {
     if(contains(*pos))
       _ltr.erase(*pos);
     return _rtl.erase(pos);
   }
 
-  // iterator erase(const_iterator first, const_iterator last) {
-  //   return _impl.erase(first, last);
+  // template <typename T = LeftT,
+  //           std::enable_if_t<std::is_same<T, LeftT>::value
+  //                                && std::is_same<LeftT, RightT>::value,
+  //                            int> = 0>
+  // size_type erase(const T& key) {
+  //   static_assert(std::is_same<T, LeftT>::value
+  //                     && std::is_same<LeftT, RightT>::value,
+  //                 "Boom!");
+  //   if(contains(key))
+  //     _rtl.erase(key);
+  //   return _ltr.erase(key);
   // }
 
-  template <typename T = LeftT,
-            std::enable_if_t<std::is_same<T, LeftT>::value
-                                 && std::is_same<LeftT, RightT>::value,
-                             int> = 0>
-  size_type erase(const T& key) {
-    static_assert(std::is_same<T, LeftT>::value
-                      && std::is_same<LeftT, RightT>::value,
-                  "Boom!");
-    if(contains(key))
-      _rtl.erase(key);
-    return _ltr.erase(key);
-  }
-
-  template <typename T = LeftT,
-            std::enable_if_t<std::is_same<T, LeftT>::value
-                                 && !std::is_same<LeftT, RightT>::value,
-                             int> = 0>
-  size_type erase(const T& key) {
-    static_assert(std::is_same<T, LeftT>::value
-                      && !std::is_same<LeftT, RightT>::value,
-                  "Boom");
+  size_type erase(const LeftT& key) {
     if(contains(key))
       _rtl.erase(at(key));
     return _ltr.erase(key);
   }
 
-  template <typename T = RightT,
-            std::enable_if_t<std::is_same<T, RightT>::value
-                                 && !std::is_same<LeftT, RightT>::value,
-                             int> = 0>
-  size_type erase(const T& key) {
+  size_type erase(const RightT& key) {
     if(contains(key))
       _ltr.erase(at(key));
     return _rtl.erase(key);
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<!std::is_same<L, R>::value, int> = 0>
-  bool contains(const L& left) const {
+  bool contains(const LeftT& left) const {
     return _ltr.contains(left);
   }
 
-  template <typename L = LeftT,
-            typename R = RightT,
-            std::enable_if_t<!std::is_same<L, R>::value, int> = 0>
-  bool contains(const R& right) const {
+  bool contains(const RightT& right) const {
     return _rtl.contains(right);
   }
 
@@ -416,6 +328,113 @@ public:
 
   bool operator>=(const Map2<LeftT, RightT>& other) const {
     return (_ltr >= other._ltr);
+  }
+};
+
+// FIXME: This implementation is incomplete
+template <typename T, typename Compare = std::less<T>>
+class Map2S {
+protected:
+  Map<T, T, Compare> _ltr;
+  Map<T, T, Compare> _rtl;
+
+public:
+  using value_type = typename Map<T, T>::key_type;
+  using size_type = typename Map<T, T>::size_type;
+  using iterator = typename Map<T, T>::iterator;
+  using const_iterator = typename Map<T, T>::const_iterator;
+
+protected:
+  template <typename IteratorT, typename KeyT>
+  class key_iterator_t : public IteratorT {
+  public:
+    key_iterator_t() : IteratorT() {}
+    key_iterator_t(IteratorT i) : IteratorT(i) {}
+    KeyT& operator->() {
+      return IteratorT::operator->()->first;
+    }
+    KeyT& operator*() {
+      return IteratorT::operator*().first;
+    }
+  };
+
+public:
+  template <typename IteratorT>
+  class iterator_range {
+  protected:
+    IteratorT b, e;
+
+  public:
+    iterator_range(IteratorT begin, IteratorT end)
+        : b(std::move(begin)), e(std::move(end)) {}
+
+    IteratorT begin() const {
+      return b;
+    }
+    IteratorT end() const {
+      return e;
+    }
+  };
+
+public:
+  Map2S() {
+    ;
+  }
+
+  explicit Map2S(const Compare& cmp) : _ltr(cmp), _rtl(cmp) {
+    ;
+  }
+
+  Map2S(const Map2S<T, T>& other) : _ltr(other._ltr), _rtl(other._rtl) {
+    ;
+  }
+
+  Map2S(Map2S<T, T>&& other) : _ltr(other._ltr), _rtl(other._rtl) {
+    ;
+  }
+
+  Map2S(std::initializer_list<std::pair<T, T>> init) {
+    for(const std::pair<T, T>& p : init)
+      insert(p.first, p.second);
+  }
+
+  Map2S<T, T>& operator=(const Map2S<T, T>& other) {
+    this->_ltr = other._ltr;
+    this->_rtl = other._rtl;
+    return *this;
+  }
+
+  Map2S<T, T>& operator=(std::initializer_list<std::pair<T, T>> init) {
+    for(const std::pair<T, T>& p : init)
+      insert(p.first, p.second);
+    return *this;
+  }
+
+  bool insert(const T& left, const T& right) {
+    bool l = _ltr.insert(std::make_pair(left, right));
+    bool r = _rtl.insert(std::make_pair(right, left));
+    return l or r;
+  }
+
+  bool insert(const Map2S<T, T>& other) {
+    bool changed = false;
+
+    for(const auto& i : other)
+      changed |= this->insert(i.first, i.second);
+
+    return changed;
+  }
+
+  T& at(const T& v) {
+    if(_ltr.contains(v))
+      return _ltr.at(v);
+    return _rtl.at(v);
+  }
+
+  const T& at(const T& v) const {
+    if(_ltr.contains(v))
+      return _ltr.at(v);
+    return _rtl.at(v);
   }
 };
 

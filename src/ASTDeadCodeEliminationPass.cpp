@@ -30,36 +30,27 @@ namespace cish {
 
 class ASTDCEPass : public ASTFunctionPass<ASTDCEPass> {
 public:
-  bool process(FunctionDecl* f) {
-    Set<Stmt*> removeStmts;
-    Set<VarDecl*> removeVars;
+  bool process(FunctionDecl* f, Stmt*) {
     bool changed = false;
-    bool iterChanged = false;
-    do {
-      iterChanged = false;
 
-      for(VarDecl* var : ast->getVars()) {
-        if(not ast->isUsed(var))
-          for(Stmt* def : ast->getDefs(var).clone())
-            if(ast->isTopLevel(def))
-              iterChanged |= ast->erase(def);
+    for(VarDecl* var : Clang::getLocalVars(f))
+      if(not um.isUsed(var))
+        for(Stmt* def : um.getDefs(var).clone())
+          if(pm.isTopLevel(def))
+            changed |= ast->erase(def, pm.getParent(def));
+
+    for(VarDecl* var : Clang::getLocalVars(f)) {
+      if(um.hasZeroDefs(var) and um.hasZeroUses(var)) {
+        f->removeDecl(var);
+        changed |= true;
       }
-
-      for(VarDecl* var : ast->getVars().clone()) {
-        if(ast->hasZeroDefs(var) and ast->hasZeroUses(var)) {
-          iterChanged |= ast->erase(var);
-          f->removeDecl(var);
-        }
-      }
-
-      changed |= iterChanged;
-    } while(iterChanged);
+    }
 
     return changed;
   }
 
 public:
-  ASTDCEPass(CishContext& context) : ASTFunctionPass(context, ModifiesAST) {
+  ASTDCEPass(CishContext& context) : ASTFunctionPass(context, RequireUses) {
     ;
   }
 

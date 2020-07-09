@@ -60,25 +60,25 @@ private:
         cish::error() << "Unexpected decl found: " << decl->getDeclKindName()
                       << "\n";
 
-    // TODO: Could consider creating a definition order for structs so that
-    // structs are defined or forward declared before use because that would be
-    // nice to have in a C-ish output
-    for(const clang::RecordDecl* record : structs)
-      stream << record << stream.endl();
-    if(structs.size())
-      stream.endl();
+    // // TODO: Could consider creating a definition order for structs so that
+    // // structs are defined or forward declared before use because that would be
+    // // nice to have in a C-ish output
+    // for(const clang::RecordDecl* record : structs)
+    //   stream << record << stream.endl();
+    // if(structs.size())
+    //   stream.endl();
 
-    // Function declarations
-    for(const clang::FunctionDecl* f : decls)
-      stream << f << stream.endl();
-    if(decls.size())
-      stream.endl();
+    // // Function declarations
+    // for(const clang::FunctionDecl* f : decls)
+    //   stream << f << stream.endl();
+    // if(decls.size())
+    //   stream.endl();
 
-    // Global variables
-    for(const clang::VarDecl* g : globals)
-      stream << g << stream.endl();
-    if(globals.size())
-      stream.endl();
+    // // Global variables
+    // for(const clang::VarDecl* g : globals)
+    //   stream << g << stream.endl();
+    // if(globals.size())
+    //   stream.endl();
 
     // Function definitions
     for(const clang::FunctionDecl* f : funcs)

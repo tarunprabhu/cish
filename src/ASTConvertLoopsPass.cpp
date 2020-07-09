@@ -121,16 +121,16 @@ protected:
   // loop.
   // FIXME: Relax the conditions to be able to simplify more loops
   bool isLoopVariable(VarDecl* var, Stmt* loop) {
-    for(Stmt* use : ast->getUses(var))
-      if(not ast->isContainedIn(use, loop))
+    for(Stmt* use : um.getUses(var))
+      if(not pm.isContainedIn(use, loop))
         return false;
 
     unsigned init = 0;
     unsigned incr = 0;
-    for(Stmt* def : ast->getDefs(var))
-      if((not ast->isContainedIn(def, loop)) and dominates(def, loop))
+    for(Stmt* def : um.getDefs(var))
+      if((not pm.isContainedIn(def, loop)) and dominates(def, loop))
         init += 1;
-      else if(ast->isContainedIn(def, loop))
+      else if(pm.isContainedIn(def, loop))
         incr += 1;
 
     return (init <= 1) and (incr == 1);
@@ -166,8 +166,8 @@ protected:
     // initialization value and a single latch
     BinaryOperator* init = nullptr;
     Vector<BinaryOperator*> latches;
-    for(Stmt* def : ast->getDefs(var)) {
-      if(not ast->isContainedIn(def, loop))
+    for(Stmt* def : um.getDefs(var)) {
+      if(not pm.isContainedIn(def, loop))
         init = cast<BinaryOperator>(def);
       else
         latches.push_back(cast<BinaryOperator>(def));
@@ -220,13 +220,15 @@ protected:
           case BO_Mul:
           case BO_Div:
             ast->replaceExprWith(cond->getLHS(),
-                                 ast->cloneExpr(subOp->getLHS()));
+                                 ast->cloneExpr(subOp->getLHS()),
+                                 cond);
             ast->replaceExprWith(
                 cond->getRHS(),
                 ast->createBinaryOperator(ast->cloneExpr(rhs),
                                           ast->cloneExpr(step),
                                           invOps.at(subOp->getOpcode()),
-                                          step->getType()));
+                                          step->getType()),
+                cond);
             break;
           default:
             break;
@@ -279,13 +281,13 @@ protected:
                                       BO_Assign,
                                       latchLhs->getType());
 
-      ast->erase(initStmt);
-      ast->erase(exit);
-      ast->erase(latch);
+      ast->erase(initStmt, pm.getParent(initStmt));
+      ast->erase(exit, pm.getParent(exit));
+      ast->erase(latch, pm.getParent(latch));
       Stmt* body = ast->clone(loop->getBody());
       ForStmt* forStmt = ast->createForStmt(newInit, newCond, newLatch, body);
 
-      changed |= ast->replaceStmtWith(loop, forStmt);
+      changed |= ast->replaceStmtWith(loop, forStmt, pm.getParent(loop));
     }
 
     return changed;
@@ -308,19 +310,19 @@ protected:
   }
 
 public:
-  bool process(DoStmt* doStmt) {
+  bool process(DoStmt* doStmt, Stmt*) {
     doLoops.push_back(doStmt);
 
     return false;
   }
 
-  bool process(WhileStmt* whileStmt) {
+  bool process(WhileStmt* whileStmt, Stmt*) {
     whileLoops.push_back(whileStmt);
 
     return false;
   }
 
-  bool process(FunctionDecl*) {
+  bool process(FunctionDecl*, Stmt*) {
     bool changed = false;
 
     // // The loops must be processed from the inside out. The innermost loops
@@ -348,7 +350,7 @@ public:
 
 public:
   ASTConvertLoopsPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext, ModifiesAST | PostOrder),
+      : ASTFunctionPass(cishContext, RequireUses | RequireCFG),
         invOps({
             {BO_Add, BO_Sub},
             {BO_Sub, BO_Add},

@@ -98,6 +98,7 @@ public:
   ExprNumberMap(const ExprNumberMap&) = delete;
   ExprNumberMap(ExprNumberMap&&) = delete;
 
+  void clear();
   ExprNum add(clang::CXXBoolLiteralExpr* blit);
   ExprNum add(clang::CharacterLiteral* clit);
   ExprNum add(clang::IntegerLiteral* ilit);

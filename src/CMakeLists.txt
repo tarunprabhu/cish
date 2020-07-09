@@ -6,6 +6,7 @@ set(SOURCES
   ASTDeadCodeEliminationPass.cpp
   ASTExprPropagationPass.cpp
   ASTPass.cpp
+  ASTPrivatizeVarsPass.cpp
   ASTRenameVarsPass.cpp
   ASTSimplifyOperatorsPass.cpp
   ASTStreamer.cpp
@@ -36,7 +37,8 @@ set(SOURCES
   Options.cpp
   ParentMap.cpp
   StructureTree.cpp
-  StructureAnalysis.cpp)
+  StructureAnalysis.cpp
+  UsesMap.cpp)
 
 set(CISH cish)
 add_executable(${CISH} ${SOURCES})

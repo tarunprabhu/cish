@@ -292,7 +292,7 @@ protected:
   }
 
 public:
-  bool process(BinaryOperator* binOp) {
+  bool process(BinaryOperator* binOp, Stmt* parent) {
     bool changed = false;
 
     Expr* lhs = binOp->getLHS();
@@ -310,17 +310,18 @@ public:
     case BO_Shl:
     case BO_Shr:
       if(Expr* eval = evaluateIdentity(binOp)) {
-        changed |= ast->replaceExprWith(binOp, eval);
+        changed |= ast->replaceExprWith(binOp, eval, parent);
       } else if(isConstant(lhs) and isConstant(rhs)) {
         if(Expr* eval = evaluate(binOp->getOpcode(), lhs, rhs))
-          changed |= ast->replaceExprWith(binOp, eval);
+          changed |= ast->replaceExprWith(binOp, eval, parent);
       } else if(isConstant(rhs)) {
         if(auto* lhsOp = dyn_cast<BinaryOperator>(lhs)) {
           if(isConstant(lhsOp->getRHS())
              and canAssociate(lhsOp->getOpcode(), op)) {
             if(Expr* eval = evaluate(op, lhsOp->getRHS(), rhs)) {
-              changed |= ast->replaceExprWith(binOp->getLHS(), lhsOp->getLHS());
-              changed |= ast->replaceExprWith(binOp->getRHS(), eval);
+              changed |= ast->replaceExprWith(
+                  binOp->getLHS(), lhsOp->getLHS(), binOp);
+              changed |= ast->replaceExprWith(binOp->getRHS(), eval, binOp);
             }
           }
         }
@@ -329,8 +330,9 @@ public:
           if(isConstant(rhsOp->getLHS())
              and canAssociate(op, rhsOp->getOpcode())) {
             if(Expr* eval = evaluate(op, lhs, rhsOp->getLHS())) {
-              changed |= ast->replaceExprWith(binOp->getLHS(), eval);
-              changed |= ast->replaceExprWith(binOp->getRHS(), rhsOp->getRHS());
+              changed |= ast->replaceExprWith(binOp->getLHS(), eval, binOp);
+              changed |= ast->replaceExprWith(
+                  binOp->getRHS(), rhsOp->getRHS(), binOp);
             }
           }
         }
@@ -344,8 +346,7 @@ public:
   }
 
 public:
-  ASTConstantFoldingPass(CishContext& context)
-      : ASTFunctionPass(context, IterateUntilConvergence | PostOrder) {
+  ASTConstantFoldingPass(CishContext& context) : ASTFunctionPass(context) {
     ;
   }
 

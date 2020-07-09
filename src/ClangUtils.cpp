@@ -182,6 +182,14 @@ Vector<BinaryOperator*> getForIncs(ForStmt* forStmt) {
   return incs;
 }
 
+Vector<VarDecl*> getLocalVars(FunctionDecl* f) {
+  Vector<VarDecl*> vars;
+  for(Decl* decl : f->decls())
+    if(auto* var = dyn_cast<VarDecl>(decl))
+      vars.push_back(var);
+  return vars;
+}
+
 std::string toString(QualType type, ASTContext& astContext) {
   ASTStreamer ss(astContext);
 

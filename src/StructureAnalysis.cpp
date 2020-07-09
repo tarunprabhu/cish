@@ -74,7 +74,10 @@ void StructureAnalysis::log(const std::string& tag) {
                 << "]\n";
           if(not seen.contains(&child)) {
             log() << "  " << childId << " [label=\"" << child.getKindName()
-                  << "(" << childId << ")\"]\n";
+                  << "(" << childId << ")";
+            if(const auto* block = dyn_cast<Block>(&child))
+              log() << " |" << block->getLLVM().size() << "|";
+            log() << "\"]\n";
             seen.insert(&child);
             next.push_back(&child);
           }

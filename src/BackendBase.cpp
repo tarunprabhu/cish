@@ -47,7 +47,6 @@ void BackendBase::endFunction(FunctionDecl* f) {
   f->setBody(ast->createCompoundStmt(stmts.pop()));
   if(not stmts.empty())
     fatal(error() << "Unexpected statements after function has been converted");
-  ast->recalculate();
 }
 
 Stmt* BackendBase::add(Stmt* stmt) {

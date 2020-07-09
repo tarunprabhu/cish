@@ -29,18 +29,21 @@ namespace cish {
 class ASTSimplifyOperatorsPass
     : public ASTFunctionPass<ASTSimplifyOperatorsPass> {
 public:
-  bool process(MemberExpr* memberExpr) {
+  bool process(MemberExpr* memberExpr, Stmt*) {
     bool changed = false;
 
-    bool arrow
-        = isa<PointerType>(memberExpr->getBase()->getType().getTypePtr());
+    Expr* base = memberExpr->getBase();
+
+    // The backend always adds a . operator even when a -> is the correct one
+    // Fix that
+    bool arrow = isa<PointerType>(base->getType().getTypePtr());
     changed |= (arrow != memberExpr->isArrow());
     memberExpr->setArrow(arrow);
 
     return changed;
   }
 
-  bool process(BinaryOperator* binOp) {
+  bool process(BinaryOperator* binOp, Stmt*) {
     bool changed = false;
 
     BinaryOperator::Opcode opc = binOp->getOpcode();
@@ -55,7 +58,8 @@ public:
       if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
         if(unOp->getOpcode() == UO_Minus) {
           binOp->setOpcode(BO_Sub);
-          changed |= ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
+          changed |= ast->replaceExprWith(
+              binOp->getRHS(), unOp->getSubExpr(), binOp);
         }
       } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
         llvm::APInt ival = intLit->getValue();
@@ -63,7 +67,9 @@ public:
           ival.negate();
           binOp->setOpcode(BO_Sub);
           changed |= ast->replaceExprWith(
-              binOp->getRHS(), ast->createIntLiteral(ival, intLit->getType()));
+              binOp->getRHS(),
+              ast->createIntLiteral(ival, intLit->getType()),
+              binOp);
         }
       }
       break;
@@ -75,7 +81,8 @@ public:
       if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
         if(unOp->getOpcode() == UO_Minus) {
           binOp->setOpcode(BO_Add);
-          changed |= ast->replaceExprWith(binOp->getRHS(), unOp->getSubExpr());
+          changed |= ast->replaceExprWith(
+              binOp->getRHS(), unOp->getSubExpr(), binOp);
         }
       } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
         llvm::APInt ival = intLit->getValue();
@@ -83,7 +90,9 @@ public:
           ival.negate();
           binOp->setOpcode(BO_Add);
           changed |= ast->replaceExprWith(
-              binOp->getRHS(), ast->createIntLiteral(ival, intLit->getType()));
+              binOp->getRHS(),
+              ast->createIntLiteral(ival, intLit->getType()),
+              binOp);
         }
       }
       break;
@@ -95,7 +104,8 @@ public:
       if(auto* subOp = dyn_cast<BinaryOperator>(lhs)) {
         if((subOp->getOpcode() == BO_Sub) and Clang::isOne(subOp->getRHS())) {
           binOp->setOpcode(BO_LE);
-          changed |= ast->replaceExprWith(binOp->getLHS(), subOp->getLHS());
+          changed
+              |= ast->replaceExprWith(binOp->getLHS(), subOp->getLHS(), binOp);
         }
       }
       break;
@@ -106,12 +116,12 @@ public:
     return changed;
   }
 
-  bool process(UnaryOperator* unOp) {
+  bool process(UnaryOperator* unOp, Stmt* parent) {
     bool changed = false;
 
     switch(unOp->getOpcode()) {
     case UO_Deref:
-      if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr()))
+      if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr())) {
         //
         // Match:   *&op
         // Replace: op
@@ -119,8 +129,9 @@ public:
         if(subOp->getOpcode() == UO_AddrOf) {
           if(VarDecl* var = Clang::getVar(subOp->getSubExpr()))
             ast->resetAddressTaken(var);
-          changed |= ast->replaceExprWith(unOp, subOp->getSubExpr());
+           changed |= ast->replaceExprWith(unOp, subOp->getSubExpr(), parent);
         }
+      }
       break;
     case UO_LNot:
       if(auto* subOp = dyn_cast<UnaryOperator>(unOp->getSubExpr())) {
@@ -129,7 +140,7 @@ public:
         // Replace: op
         //
         if(subOp->getOpcode() == UO_LNot)
-          changed |= ast->replaceExprWith(unOp, subOp->getSubExpr());
+          changed |= ast->replaceExprWith(unOp, subOp->getSubExpr(), parent);
       } else if(auto* binOp = dyn_cast<BinaryOperator>(unOp->getSubExpr())) {
         //
         // Match:   !(a <rel> b)
@@ -138,27 +149,27 @@ public:
         switch(binOp->getOpcode()) {
         case BO_EQ:
           binOp->setOpcode(BO_NE);
-          changed |= ast->replaceExprWith(unOp, binOp);
+          changed |= ast->replaceExprWith(unOp, binOp, parent);
           break;
         case BO_NE:
           binOp->setOpcode(BO_EQ);
-          changed |= ast->replaceExprWith(unOp, binOp);
+          changed |= ast->replaceExprWith(unOp, binOp, parent);
           break;
         case BO_GT:
           binOp->setOpcode(BO_LE);
-          changed |= ast->replaceExprWith(unOp, binOp);
+          changed |= ast->replaceExprWith(unOp, binOp, parent);
           break;
         case BO_GE:
           binOp->setOpcode(BO_LT);
-          changed |= ast->replaceExprWith(unOp, binOp);
+          changed |= ast->replaceExprWith(unOp, binOp, parent);
           break;
         case BO_LT:
           binOp->setOpcode(BO_GE);
-          changed |= ast->replaceExprWith(unOp, binOp);
+          changed |= ast->replaceExprWith(unOp, binOp, parent);
           break;
         case BO_LE:
           binOp->setOpcode(BO_GT);
-          changed |= ast->replaceExprWith(unOp, binOp);
+          changed |= ast->replaceExprWith(unOp, binOp, parent);
           break;
         default:
           break;
@@ -173,8 +184,7 @@ public:
   }
 
 public:
-  ASTSimplifyOperatorsPass(CishContext& context)
-      : ASTFunctionPass(context, PostOrder | IterateUntilConvergence) {
+  ASTSimplifyOperatorsPass(CishContext& context) : ASTFunctionPass(context) {
     ;
   }
 

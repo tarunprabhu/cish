@@ -24,7 +24,8 @@ namespace cish {
 
 ASTPass::ASTPass(CishContext& cishContext, unsigned flags)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      flags(flags), ast(nullptr) {
+      flags(flags), ast(nullptr), em(cishContext), pm(cishContext),
+      um(cishContext, pm) {
   ;
 }
 
@@ -36,16 +37,24 @@ bool ASTPass::hasFlag(unsigned flag) const {
   return (flags & flag) == flag;
 }
 
-bool ASTPass::hasModifiesAST() const {
-  return hasFlag(ModifiesAST);
+bool ASTPass::hasPreOrder() const {
+  return hasFlag(PreOrder);
 }
 
-bool ASTPass::hasPostorder() const {
-  return hasFlag(PostOrder);
+bool ASTPass::hasRequireExprNums() const {
+  return hasFlag(RequireExprNums);
 }
 
-bool ASTPass::hasIterateUntilConvergence() const {
-  return hasFlag(IterateUntilConvergence);
+bool ASTPass::hasRequireUses() const {
+  return hasFlag(RequireUses);
 }
 
-} // namespace cish
+bool ASTPass::hasRequireCFG() const {
+  return hasFlag(RequireCFG);
+}
+
+bool ASTPass::hasOnePass() const {
+  return hasFlag(OnePass);
+}
+
+  } // namespace cish

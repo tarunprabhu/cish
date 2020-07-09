@@ -28,14 +28,14 @@ using namespace clang;
 
 namespace cish {
 
-ParentMap::ParentMap(CishContext& cishContext, FunctionDecl* decl)
-    : cishContext(cishContext), decl(decl) {
+ParentMap::ParentMap(CishContext& cishContext) : cishContext(cishContext) {
   ;
 }
 
 void ParentMap::add(Stmt* stmt, Stmt* parent) {
   if(parents.contains(stmt))
-    fatal(error() << "Statement already in map with parent");
+    fatal(error() << "Statement already in map with parent: "
+                  << stmt->getStmtClassName());
   if(not stmt)
     fatal(error() << "Cannot add nullptr in parent or child");
 
@@ -137,14 +137,6 @@ bool ParentMap::isDirectlyContainedIn(Stmt* needle, Stmt* haystack) const {
   return false;
 }
 
-bool ParentMap::isOrphan(Stmt* stmt) const {
-  if(stmt == decl->getBody())
-    return false;
-  else if(not hasParent(stmt))
-    return true;
-  return isOrphan(getParent(stmt));
-}
-
 bool ParentMap::isTopLevel(Stmt* stmt) const {
   if(hasParent(stmt) and isa<CompoundStmt>(getParent(stmt)))
     return true;
@@ -164,6 +156,16 @@ Stmt* ParentMap::getTopLevelAncestor(Stmt* stmt) const {
   if(isTopLevel(parent))
     return parent;
   return getTopLevelAncestor(parent);
+}
+
+void ParentMap::dump(llvm::raw_ostream& os) const {
+  os << "pm:\n";
+  for(auto& i : parents) {
+    Stmt* stmt = i.first;
+    Stmt* parent = i.second;
+    os << stmt << ": " << Clang::toString(stmt, cishContext.getASTContext())
+       << " => " << parent << "\n";
+  }
 }
 
 } // namespace cish

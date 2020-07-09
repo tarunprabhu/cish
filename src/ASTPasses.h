@@ -37,5 +37,6 @@ cish::ASTPass* createASTConvertLoopsPass(cish::CishContext&);
 cish::ASTPass* createASTConstantFoldingPass(cish::CishContext&);
 cish::ASTPass* createASTSubexprEliminationPass(cish::CishContext&);
 cish::ASTPass* createASTExprNumberingPass(cish::CishContext&);
+cish::ASTPass* createASTPrivatizeVarsPass(cish::CishContext&);
 
 #endif // CISH_AST_PASSES_H

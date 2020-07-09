@@ -46,26 +46,28 @@ protected:
       return false;
 
     for(VarDecl* var : Clang::getVarsInStmt(def))
-      if(not ast->hasSingleDef(var))
+      if(not um.hasSingleDef(var))
         return false;
     return true;
   }
 
 public:
-  bool process(FunctionDecl* f) {
+  bool process(FunctionDecl* f, Stmt*) {
     bool changed = false;
 
     Map<Expr*, VarDecl*> repl;
     for(VarDecl* lhs : ast->getVars())
-      if(Expr* def = ast->getSingleDefRHS(lhs))
-        if(ast->getEqvExprs(def).size() > 1)
+      if(Expr* def = um.getSingleDefRHS(lhs))
+        if(em.getEqv(def).size() > 1)
           if(canPropagateSubexpr(f, lhs, def))
             repl[def] = lhs;
 
     for(auto& i : repl) {
       Expr* expr = i.first;
       Expr* repl = ast->createDeclRefExpr(i.second);
-      changed |= ast->replaceEqvUsesWith(expr, repl);
+      for(Expr* e : em.getEqv(expr).clone())
+        if(e != expr)
+          changed |= ast->replaceExprWith(e, repl, pm.getParent(e));
     }
 
     return changed;
@@ -73,7 +75,7 @@ public:
 
 public:
   ASTSubexprEliminationPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext) {
+      : ASTFunctionPass(cishContext, RequireExprNums | RequireUses) {
     ;
   }
 
