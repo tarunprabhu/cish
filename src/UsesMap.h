@@ -50,7 +50,7 @@ public:
   UsesMap(const UsesMap&) = delete;
   UsesMap(UsesMap&&) = delete;
 
-  void clear(clang::FunctionDecl* f);
+  UsesMap& reset(clang::FunctionDecl* f = nullptr);
   void addDecl(clang::VarDecl* var);
   void addDef(clang::VarDecl* var, clang::Stmt* user);
   void addUse(clang::VarDecl* var, clang::Stmt* user);

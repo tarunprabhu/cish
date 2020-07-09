@@ -59,8 +59,10 @@ void ParentMap::remove(Stmt* stmt) {
   parents.erase(stmt);
 }
 
-void ParentMap::clear() {
+ParentMap& ParentMap::reset(FunctionDecl*) {
   parents.clear();
+
+  return *this;
 }
 
 bool ParentMap::hasParent(Stmt* stmt) const {

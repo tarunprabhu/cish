@@ -37,7 +37,7 @@ public:
       if(not um.isUsed(var))
         for(Stmt* def : um.getDefs(var).clone())
           if(pm.isTopLevel(def))
-            changed |= ast->erase(def, pm.getParent(def));
+            changed |= ast.erase(def, pm.getParent(def));
 
     for(VarDecl* var : Clang::getLocalVars(f)) {
       if(um.hasZeroDefs(var) and um.hasZeroUses(var)) {

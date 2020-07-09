@@ -24,8 +24,8 @@ namespace cish {
 
 ASTPass::ASTPass(CishContext& cishContext, unsigned flags)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      flags(flags), ast(nullptr), em(cishContext), pm(cishContext),
-      um(cishContext, pm) {
+      flags(flags), cm(cishContext), em(cishContext), pm(cishContext),
+      um(cishContext, pm), ast(cishContext, pm) {
   ;
 }
 
@@ -57,4 +57,24 @@ bool ASTPass::hasOnePass() const {
   return hasFlag(OnePass);
 }
 
-  } // namespace cish
+const clang::CFG* ASTPass::getCFG() const {
+  return cm.getCFG();
+}
+
+const clang::DominatorTree* ASTPass::getDominatorTree() const {
+  return cm.getDominatorTree();
+}
+
+const ExprNumberMap& ASTPass::getExprNumberMap() const {
+  return em;
+}
+
+const ParentMap& ASTPass::getParentMap() const {
+  return pm;
+}
+
+const UsesMap& ASTPass::getUsesMap() const {
+  return um;
+}
+
+} // namespace cish

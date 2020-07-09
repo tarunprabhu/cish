@@ -20,54 +20,33 @@
 #include "CishContext.h"
 #include "Diagnostics.h"
 
-using namespace llvm;
+using namespace clang;
 
 namespace cish {
 
 CishContext::CishContext(const std::string& triple)
-    : fileMgr(fileOpts), diagIDs(new clang::DiagnosticIDs),
-      diagOpts(new clang::DiagnosticOptions), diagEngine(diagIDs, diagOpts),
-      srcMgr(diagEngine, fileMgr), targetOpts(new clang::TargetOptions),
-      targetInfo() {
+    : fileMgr(fileOpts), diagIDs(new DiagnosticIDs),
+      diagOpts(new DiagnosticOptions), diagEngine(diagIDs, diagOpts),
+      srcMgr(diagEngine, fileMgr), targetOpts(new TargetOptions), targetInfo() {
   langOpts.CPlusPlus11 = true;
   langOpts.Bool = true;
 
-  idents.reset(new clang::IdentifierTable(langOpts));
+  idents.reset(new IdentifierTable(langOpts));
 
   targetOpts->Triple = triple;
-  targetInfo.reset(clang::TargetInfo::CreateTargetInfo(diagEngine, targetOpts));
+  targetInfo.reset(TargetInfo::CreateTargetInfo(diagEngine, targetOpts));
 
-  astContext.reset(
-      new clang::ASTContext(langOpts, srcMgr, *idents, sels, builtins));
+  astContext.reset(new ASTContext(langOpts, srcMgr, *idents, sels, builtins));
   astContext->InitBuiltinTypes(*targetInfo);
 
-  // This must be done before the backends are created but after the ASTContext
-  // has been initialized
-  topLevelAST.reset(new AST(*this));
   topLevelNames.reset(new NameGenerator);
 }
 
-AST& CishContext::addAST(clang::FunctionDecl* f) {
-  asts.emplace(f, new AST(*this, f, *topLevelAST));
-
-  return getAST(f);
-}
-
-AST& CishContext::getAST(clang::FunctionDecl* f) {
-  if(not f)
-    return *topLevelAST;
-  return *asts.at(f);
-}
-
-const AST& CishContext::getAST(clang::FunctionDecl* f) const {
-  return *asts.at(f);
-}
-
-clang::ASTContext& CishContext::getASTContext() const {
+ASTContext& CishContext::getASTContext() const {
   return *astContext;
 }
 
-const clang::LangOptions& CishContext::getLangOptions() const {
+const LangOptions& CishContext::getLangOptions() const {
   return langOpts;
 }
 
@@ -81,15 +60,19 @@ NameGenerator& CishContext::getNameGenerator(const std::string& name) const {
   return *nameGens.at(name);
 }
 
-NameGenerator&
-CishContext::getNameGenerator(clang::FunctionDecl* f) const {
+NameGenerator& CishContext::getNameGenerator(FunctionDecl* f) const {
   if(not f)
     return *topLevelNames;
   return *nameGens.at(irClangMap->getUniqueName(f));
 }
 
-CishContext::func_range CishContext::funcs() {
-  return asts.keys();
+Vector<FunctionDecl*> CishContext::getFunctions() const {
+  Vector<FunctionDecl*> funcs;
+  for(Decl* decl : astContext->getTranslationUnitDecl()->decls())
+    if(auto* func = dyn_cast<FunctionDecl>(decl))
+      if(func->getBody())
+        funcs.push_back(func);
+  return funcs;
 }
 
 } // namespace cish

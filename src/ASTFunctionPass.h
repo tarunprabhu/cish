@@ -581,12 +581,12 @@ private:
   }
 
   void reset(clang::FunctionDecl* f) {
-    um.clear(f);
+    um.reset(f);
     addrTaken.clear();
-    em.clear();
-    pm.clear();
+    em.reset();
+    pm.reset();
     if(hasRequireCFG())
-      ast->updateCFG();
+      cm.reset(f);
   }
 
 public:
@@ -602,7 +602,6 @@ public:
   virtual bool runOnFunction(clang::FunctionDecl* f) override {
     bool changed = false;
 
-    ast = &cishContext.getAST(f);
     message() << getPassLongName() << "\n";
 
     changed |= doInitialize(f);

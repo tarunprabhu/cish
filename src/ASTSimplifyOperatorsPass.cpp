@@ -58,7 +58,7 @@ public:
       if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
         if(unOp->getOpcode() == UO_Minus) {
           binOp->setOpcode(BO_Sub);
-          changed |= ast->replaceExprWith(
+          changed |= ast.replaceExprWith(
               binOp->getRHS(), unOp->getSubExpr(), binOp);
         }
       } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
@@ -66,9 +66,9 @@ public:
         if(ival.isNegative()) {
           ival.negate();
           binOp->setOpcode(BO_Sub);
-          changed |= ast->replaceExprWith(
+          changed |= ast.replaceExprWith(
               binOp->getRHS(),
-              ast->createIntLiteral(ival, intLit->getType()),
+              ast.createIntLiteral(ival, intLit->getType()),
               binOp);
         }
       }
@@ -81,7 +81,7 @@ public:
       if(auto* unOp = dyn_cast<UnaryOperator>(rhs)) {
         if(unOp->getOpcode() == UO_Minus) {
           binOp->setOpcode(BO_Add);
-          changed |= ast->replaceExprWith(
+          changed |= ast.replaceExprWith(
               binOp->getRHS(), unOp->getSubExpr(), binOp);
         }
       } else if(auto* intLit = dyn_cast<IntegerLiteral>(rhs)) {
@@ -89,9 +89,9 @@ public:
         if(ival.isNegative()) {
           ival.negate();
           binOp->setOpcode(BO_Add);
-          changed |= ast->replaceExprWith(
+          changed |= ast.replaceExprWith(
               binOp->getRHS(),
-              ast->createIntLiteral(ival, intLit->getType()),
+              ast.createIntLiteral(ival, intLit->getType()),
               binOp);
         }
       }
@@ -105,7 +105,7 @@ public:
         if((subOp->getOpcode() == BO_Sub) and Clang::isOne(subOp->getRHS())) {
           binOp->setOpcode(BO_LE);
           changed
-              |= ast->replaceExprWith(binOp->getLHS(), subOp->getLHS(), binOp);
+              |= ast.replaceExprWith(binOp->getLHS(), subOp->getLHS(), binOp);
         }
       }
       break;
@@ -128,8 +128,8 @@ public:
         //
         if(subOp->getOpcode() == UO_AddrOf) {
           if(VarDecl* var = Clang::getVar(subOp->getSubExpr()))
-            ast->resetAddressTaken(var);
-           changed |= ast->replaceExprWith(unOp, subOp->getSubExpr(), parent);
+            addrTaken.erase(var);
+           changed |= ast.replaceExprWith(unOp, subOp->getSubExpr(), parent);
         }
       }
       break;
@@ -140,7 +140,7 @@ public:
         // Replace: op
         //
         if(subOp->getOpcode() == UO_LNot)
-          changed |= ast->replaceExprWith(unOp, subOp->getSubExpr(), parent);
+          changed |= ast.replaceExprWith(unOp, subOp->getSubExpr(), parent);
       } else if(auto* binOp = dyn_cast<BinaryOperator>(unOp->getSubExpr())) {
         //
         // Match:   !(a <rel> b)
@@ -149,27 +149,27 @@ public:
         switch(binOp->getOpcode()) {
         case BO_EQ:
           binOp->setOpcode(BO_NE);
-          changed |= ast->replaceExprWith(unOp, binOp, parent);
+          changed |= ast.replaceExprWith(unOp, binOp, parent);
           break;
         case BO_NE:
           binOp->setOpcode(BO_EQ);
-          changed |= ast->replaceExprWith(unOp, binOp, parent);
+          changed |= ast.replaceExprWith(unOp, binOp, parent);
           break;
         case BO_GT:
           binOp->setOpcode(BO_LE);
-          changed |= ast->replaceExprWith(unOp, binOp, parent);
+          changed |= ast.replaceExprWith(unOp, binOp, parent);
           break;
         case BO_GE:
           binOp->setOpcode(BO_LT);
-          changed |= ast->replaceExprWith(unOp, binOp, parent);
+          changed |= ast.replaceExprWith(unOp, binOp, parent);
           break;
         case BO_LT:
           binOp->setOpcode(BO_GE);
-          changed |= ast->replaceExprWith(unOp, binOp, parent);
+          changed |= ast.replaceExprWith(unOp, binOp, parent);
           break;
         case BO_LE:
           binOp->setOpcode(BO_GT);
-          changed |= ast->replaceExprWith(unOp, binOp, parent);
+          changed |= ast.replaceExprWith(unOp, binOp, parent);
           break;
         default:
           break;

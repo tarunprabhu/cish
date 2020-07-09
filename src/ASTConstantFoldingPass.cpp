@@ -68,11 +68,11 @@ protected:
     QualType type = lhs->getType();
     switch(op) {
     case BO_And:
-      return ast->createBoolLiteral(l & r, type);
+      return ast.createBoolLiteral(l & r, type);
     case BO_Or:
-      return ast->createBoolLiteral(l | r, type);
+      return ast.createBoolLiteral(l | r, type);
     case BO_Xor:
-      return ast->createBoolLiteral(l ^ r, type);
+      return ast.createBoolLiteral(l ^ r, type);
     default:
       fatal(error() << "Unexpected operator for binary operands: "
                     << BinaryOperator::getOpcodeStr(op));
@@ -92,13 +92,13 @@ protected:
     switch(op) {
     case BO_Add:
       res += r;
-      return ast->createIntLiteral(res, type);
+      return ast.createIntLiteral(res, type);
     case BO_Sub:
       res -= r;
-      return ast->createIntLiteral(res, type);
+      return ast.createIntLiteral(res, type);
     case BO_Mul:
       res *= r;
-      return ast->createIntLiteral(res, type);
+      return ast.createIntLiteral(res, type);
     case BO_Div:
     case BO_Rem:
       fatal(error() << "Not implemented: Operation in constant propagation: "
@@ -106,44 +106,44 @@ protected:
       break;
     case BO_And:
       res &= r;
-      return ast->createIntLiteral(res, type);
+      return ast.createIntLiteral(res, type);
     case BO_Or:
       res |= r;
-      return ast->createIntLiteral(res, type);
+      return ast.createIntLiteral(res, type);
     case BO_Xor:
       res ^= r;
-      return ast->createIntLiteral(res, type);
+      return ast.createIntLiteral(res, type);
     case BO_Shl:
       res <<= r;
-      return ast->createIntLiteral(res, type);
+      return ast.createIntLiteral(res, type);
     case BO_Shr:
       fatal(error() << "Not implemented: >> in constant propagation");
       break;
-      // return ast->createIntLiteral(res, type);
+      // return ast.createIntLiteral(res, type);
     case BO_EQ:
-      return ast->createBoolLiteral(l == r);
+      return ast.createBoolLiteral(l == r);
     case BO_NE:
-      return ast->createBoolLiteral(l != r);
+      return ast.createBoolLiteral(l != r);
     case BO_LT:
       if(isSigned)
-        return ast->createBoolLiteral(l.slt(r));
+        return ast.createBoolLiteral(l.slt(r));
       else
-        return ast->createBoolLiteral(l.ult(r));
+        return ast.createBoolLiteral(l.ult(r));
     case BO_LE:
       if(isSigned)
-        return ast->createBoolLiteral(l.sle(r));
+        return ast.createBoolLiteral(l.sle(r));
       else
-        return ast->createBoolLiteral(l.ule(r));
+        return ast.createBoolLiteral(l.ule(r));
     case BO_GT:
       if(isSigned)
-        return ast->createBoolLiteral(l.sgt(r));
+        return ast.createBoolLiteral(l.sgt(r));
       else
-        return ast->createBoolLiteral(l.ugt(r));
+        return ast.createBoolLiteral(l.ugt(r));
     case BO_GE:
       if(isSigned)
-        return ast->createBoolLiteral(l.sge(r));
+        return ast.createBoolLiteral(l.sge(r));
       else
-        return ast->createBoolLiteral(l.uge(r));
+        return ast.createBoolLiteral(l.uge(r));
     default:
       fatal(error() << "Unknown binary operator: "
                     << BinaryOperator::getOpcodeStr(op));
@@ -161,58 +161,58 @@ protected:
     QualType type = lhs->getType();
     switch(op) {
     case BO_Add:
-      return ast->createFloatLiteral(l + r, type);
+      return ast.createFloatLiteral(l + r, type);
     case BO_Sub:
-      return ast->createFloatLiteral(l - r, type);
+      return ast.createFloatLiteral(l - r, type);
     case BO_Mul:
-      return ast->createFloatLiteral(l * r, type);
+      return ast.createFloatLiteral(l * r, type);
     case BO_Div:
-      return ast->createFloatLiteral(l / r, type);
+      return ast.createFloatLiteral(l / r, type);
     case BO_Rem:
       fatal(error() << "Operator % not implemneted for floats");
     case BO_EQ:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpEqual:
-        return ast->createBoolLiteral(true);
+        return ast.createBoolLiteral(true);
       default:
-        return ast->createBoolLiteral(false);
+        return ast.createBoolLiteral(false);
       }
     case BO_NE:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpUnordered:
-        return ast->createBoolLiteral(true);
+        return ast.createBoolLiteral(true);
       default:
-        return ast->createBoolLiteral(false);
+        return ast.createBoolLiteral(false);
       }
     case BO_LT:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpLessThan:
-        return ast->createBoolLiteral(true);
+        return ast.createBoolLiteral(true);
       default:
-        return ast->createBoolLiteral(false);
+        return ast.createBoolLiteral(false);
       }
     case BO_LE:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpLessThan:
       case llvm::APFloat::cmpResult::cmpEqual:
-        return ast->createBoolLiteral(true);
+        return ast.createBoolLiteral(true);
       default:
-        return ast->createBoolLiteral(false);
+        return ast.createBoolLiteral(false);
       }
     case BO_GT:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpGreaterThan:
-        return ast->createBoolLiteral(true);
+        return ast.createBoolLiteral(true);
       default:
-        return ast->createBoolLiteral(false);
+        return ast.createBoolLiteral(false);
       }
     case BO_GE:
       switch(l.compare(r)) {
       case llvm::APFloat::cmpResult::cmpGreaterThan:
       case llvm::APFloat::cmpResult::cmpEqual:
-        return ast->createBoolLiteral(true);
+        return ast.createBoolLiteral(true);
       default:
-        return ast->createBoolLiteral(false);
+        return ast.createBoolLiteral(false);
       }
     default:
       fatal(error() << "Unexpected binary operator for floating point: "
@@ -246,9 +246,9 @@ protected:
       if(isZero(binOp->getRHS()))
         return binOp->getLHS();
       else if(isZero(binOp->getLHS()))
-        return ast->createUnaryOperator(ast->cloneExpr(binOp->getRHS()),
-                                        UO_Minus,
-                                        binOp->getRHS()->getType());
+        return ast.createUnaryOperator(ast.cloneExpr(binOp->getRHS()),
+                                       UO_Minus,
+                                       binOp->getRHS()->getType());
       break;
     case BO_Mul:
       if(isOne(binOp->getLHS()))
@@ -310,18 +310,18 @@ public:
     case BO_Shl:
     case BO_Shr:
       if(Expr* eval = evaluateIdentity(binOp)) {
-        changed |= ast->replaceExprWith(binOp, eval, parent);
+        changed |= ast.replaceExprWith(binOp, eval, parent);
       } else if(isConstant(lhs) and isConstant(rhs)) {
         if(Expr* eval = evaluate(binOp->getOpcode(), lhs, rhs))
-          changed |= ast->replaceExprWith(binOp, eval, parent);
+          changed |= ast.replaceExprWith(binOp, eval, parent);
       } else if(isConstant(rhs)) {
         if(auto* lhsOp = dyn_cast<BinaryOperator>(lhs)) {
           if(isConstant(lhsOp->getRHS())
              and canAssociate(lhsOp->getOpcode(), op)) {
             if(Expr* eval = evaluate(op, lhsOp->getRHS(), rhs)) {
-              changed |= ast->replaceExprWith(
+              changed |= ast.replaceExprWith(
                   binOp->getLHS(), lhsOp->getLHS(), binOp);
-              changed |= ast->replaceExprWith(binOp->getRHS(), eval, binOp);
+              changed |= ast.replaceExprWith(binOp->getRHS(), eval, binOp);
             }
           }
         }
@@ -330,8 +330,8 @@ public:
           if(isConstant(rhsOp->getLHS())
              and canAssociate(op, rhsOp->getOpcode())) {
             if(Expr* eval = evaluate(op, lhs, rhsOp->getLHS())) {
-              changed |= ast->replaceExprWith(binOp->getLHS(), eval, binOp);
-              changed |= ast->replaceExprWith(
+              changed |= ast.replaceExprWith(binOp->getLHS(), eval, binOp);
+              changed |= ast.replaceExprWith(
                   binOp->getRHS(), rhsOp->getRHS(), binOp);
             }
           }

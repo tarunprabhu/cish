@@ -13,6 +13,7 @@ set(SOURCES
   ASTStripCastsPass.cpp
   ASTSubexprEliminationPass.cpp
   BackendBase.cpp
+  CFGMap.cpp
   CishContext.cpp
   CishASTPassesDriverPass.cpp
   CishASTWriterPass.cpp

@@ -20,55 +20,31 @@
 #ifndef CISH_AST_H
 #define CISH_AST_H
 
-#include "ExprNumberMap.h"
 #include "Map.h"
-#include "ParentMap.h"
 #include "Set.h"
 #include "Vector.h"
 
 #include <clang/AST/ExprCXX.h>
-#include <clang/AST/ParentMap.h>
-#include <clang/Analysis/Analyses/Dominators.h>
-#include <clang/Analysis/CFG.h>
-#include <clang/Analysis/CFGStmtMap.h>
-
-#include <llvm/ADT/iterator_range.h>
 
 namespace cish {
 
-class ASTPass;
 class CishContext;
+class ParentMap;
 
-// Single class that keeps track of the AST. Any modifications to the AST
-// must be done through this graph to keep the def-use information, flow
-// graph and parent-child relationships between statements consistent
+// AST construction and manipulation class. This is entirely stateless and
 class AST {
 protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
-  clang::FunctionDecl* decl;
-  ParentMap pm;
-  ExprNumberMap en;
-  clang::CFG::BuildOptions cfgBuildOpts;
-  std::unique_ptr<clang::ParentMap> stmtParents;
-  std::unique_ptr<clang::CFG> cfg;
-  std::unique_ptr<clang::CFGStmtMap> cfgStmtMap;
-  std::unique_ptr<clang::DominatorTree> dt;
 
-
-  // Variables that have their address taken
-  Set<clang::VarDecl*> addrTaken;
-
-  Set<clang::VarDecl*> locals;
-  Set<clang::VarDecl*> globals;
+  // ParentMap will be non-null when the object is used in a transformation
+  // pass. It is only used when performing replacements
+  ParentMap* pm;
 
 private:
   clang::FullSourceLoc invLoc;
 
 protected:
-  void add(clang::Expr* expr, clang::Stmt* user);
-  void remove(clang::Expr* expr, clang::Stmt* user);
-
   bool replace(clang::UnaryOperator* unOp, clang::Expr* repl);
   bool
   replace(clang::BinaryOperator* binOp, clang::Expr* repl, bool replaceLHS);
@@ -116,79 +92,24 @@ protected:
   clang::Stmt* clone(clang::NullStmt*);
   clang::Stmt* clone(clang::LabelStmt*);
 
-  void remove(clang::CXXBoolLiteralExpr*);
-  void remove(clang::CharacterLiteral*);
-  void remove(clang::IntegerLiteral*);
-  void remove(clang::FloatingLiteral*);
-  void remove(clang::StringLiteral*);
-  void remove(clang::CXXNullPtrLiteralExpr*);
-  void remove(clang::UnaryOperator*);
-  void remove(clang::BinaryOperator*);
-  void remove(clang::ConditionalOperator*);
-  void remove(clang::ArraySubscriptExpr*);
-  void remove(clang::CallExpr*);
-  void remove(clang::CStyleCastExpr*);
-  void remove(clang::MemberExpr*);
-  void remove(clang::InitListExpr*);
-  void remove(clang::DeclRefExpr*);
-  void remove(clang::CompoundStmt*);
-  void remove(clang::IfStmt*);
-  void remove(clang::SwitchStmt*);
-  void remove(clang::CaseStmt*);
-  void remove(clang::DefaultStmt*);
-  void remove(clang::DoStmt*);
-  void remove(clang::ForStmt*);
-  void remove(clang::WhileStmt*);
-  void remove(clang::GotoStmt*);
-  void remove(clang::BreakStmt*);
-  void remove(clang::ContinueStmt*);
-  void remove(clang::ReturnStmt*);
-  void remove(clang::NullStmt*);
-  void remove(clang::LabelStmt*);
-
   clang::LabelStmt* createLabelStmt(clang::LabelDecl* label);
 
 public:
   AST(CishContext& cishContext);
-  AST(CishContext& cishContext, clang::FunctionDecl* decl, const AST&);
+  AST(CishContext& cishContext, ParentMap& pm);
   AST(const AST&) = delete;
   AST(AST&&) = delete;
 
-  clang::FunctionDecl* getFunction() const;
-
-  void remove(clang::Stmt*);
-  bool replaceAllUsesWith(clang::VarDecl* var, clang::Expr* expr);
-  bool replaceSomeUsesWith(clang::VarDecl* var,
-                           clang::Expr* repl,
-                           clang::Stmt* stmt);
   bool replaceEqvUsesWith(clang::Expr* expr, clang::Expr* repl);
   bool
   replaceExprWith(clang::Expr* expr, clang::Expr* repl, clang::Stmt* parent);
   bool
   replaceStmtWith(clang::Stmt* stmt, clang::Stmt* repl, clang::Stmt* parent);
   bool erase(clang::Stmt* stmt, clang::Stmt* parent);
-  bool erase(clang::VarDecl* var);
-
-  const ParentMap& getParentMap() const;
-  const ExprNumberMap& getExprNumberMap() const;
-  const clang::DominatorTree& getDominatorTree() const;
-  clang::CFG* getCFG() const;
-  clang::CFGBlock* getCFGBlock(clang::Stmt* stmt) const;
-  const clang::CFG::BuildOptions& getCFGBuildOpts() const;
-
-  bool hasAddressTaken(clang::VarDecl* var) const;
-  void resetAddressTaken(clang::VarDecl* var);
-
-  const Set<clang::VarDecl*>& getVars() const;
-
-  ExprNum getExprNum(clang::Expr* expr) const;
-  const Set<clang::Expr*>& getEqvExprs(clang::Expr* expr) const;
 
   // AST construction functions
   clang::Stmt* clone(clang::Stmt* stmt);
   clang::Expr* cloneExpr(clang::Expr* expr);
-
-  void setFunctionBody(clang::Stmt* body);
 
   clang::DeclarationNameInfo getDeclarationNameInfo(const std::string& name);
   clang::IdentifierInfo& getIdentifierInfo(const std::string& name);
@@ -295,8 +216,6 @@ public:
   clang::VarDecl* createVariable(const std::string& name,
                                  clang::QualType type,
                                  clang::DeclContext* declContext);
-
-  void updateCFG();
 };
 
 } // namespace cish

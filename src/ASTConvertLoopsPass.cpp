@@ -20,6 +20,7 @@
 #include "AST.h"
 #include "ASTFunctionPass.h"
 #include "ClangUtils.h"
+#include "Operators.h"
 
 #include <clang/AST/RecursiveASTVisitor.h>
 
@@ -77,7 +78,6 @@ protected:
 protected:
   Vector<DoStmt*> doLoops;
   Vector<WhileStmt*> whileLoops;
-  const Map<BinaryOperator::Opcode, BinaryOperator::Opcode> invOps;
 
 protected:
   bool isExiting(Stmt* stmt) {
@@ -95,9 +95,9 @@ protected:
     // mistake in how the clang AST is being constructed
     return true;
 
-    // const DominatorTree& dt = ast->getDominatorTree();
-    // const CFGBlock* aBlock = ast->getCFGBlock(a);
-    // const CFGBlock* bBlock = ast->getCFGBlock(b);
+    // const DominatorTree& dt = ast.getDominatorTree();
+    // const CFGBlock* aBlock = ast.getCFGBlock(a);
+    // const CFGBlock* bBlock = ast.getCFGBlock(b);
 
     // if(aBlock == bBlock) {
     //   bool seenA = false;
@@ -219,16 +219,16 @@ protected:
           case BO_Sub:
           case BO_Mul:
           case BO_Div:
-            ast->replaceExprWith(cond->getLHS(),
-                                 ast->cloneExpr(subOp->getLHS()),
+            ast.replaceExprWith(cond->getLHS(),
+                                 ast.cloneExpr(subOp->getLHS()),
                                  cond);
-            ast->replaceExprWith(
-                cond->getRHS(),
-                ast->createBinaryOperator(ast->cloneExpr(rhs),
-                                          ast->cloneExpr(step),
-                                          invOps.at(subOp->getOpcode()),
-                                          step->getType()),
-                cond);
+            ast.replaceExprWith(cond->getRHS(),
+                                ast.createBinaryOperator(
+                                    ast.cloneExpr(rhs),
+                                    ast.cloneExpr(step),
+                                    Operator::getInverse(subOp->getOpcode()),
+                                    step->getType()),
+                                cond);
             break;
           default:
             break;
@@ -260,34 +260,34 @@ protected:
       BinaryOperator::Opcode condOp = cond->getOpcode();
 
       BinaryOperator* newInit
-          = ast->createBinaryOperator(ast->cloneExpr(latchLhs),
-                                      ast->cloneExpr(init),
+          = ast.createBinaryOperator(ast.cloneExpr(latchLhs),
+                                      ast.cloneExpr(init),
                                       BO_Assign,
                                       latchLhs->getType());
       BinaryOperator* newCondLhs
-          = ast->createBinaryOperator(ast->cloneExpr(cond->getLHS()),
-                                      ast->cloneExpr(step),
-                                      invOps.at(stepOp),
-                                      step->getType());
+          = ast.createBinaryOperator(ast.cloneExpr(cond->getLHS()),
+                                     ast.cloneExpr(step),
+                                     Operator::getInverse(stepOp),
+                                     step->getType());
       BinaryOperator* newCond
-          = ast->createBinaryOperator(newCondLhs,
-                                      ast->cloneExpr(cond->getRHS()),
-                                      invOps.at(condOp),
-                                      newCondLhs->getType());
+          = ast.createBinaryOperator(newCondLhs,
+                                     ast.cloneExpr(cond->getRHS()),
+                                     Operator::getInverse(condOp),
+                                     newCondLhs->getType());
       newCond = normalizeForLoopCondition(newCond, step);
       BinaryOperator* newLatch
-          = ast->createBinaryOperator(ast->cloneExpr(latchLhs),
-                                      ast->cloneExpr(latchRhs),
+          = ast.createBinaryOperator(ast.cloneExpr(latchLhs),
+                                      ast.cloneExpr(latchRhs),
                                       BO_Assign,
                                       latchLhs->getType());
 
-      ast->erase(initStmt, pm.getParent(initStmt));
-      ast->erase(exit, pm.getParent(exit));
-      ast->erase(latch, pm.getParent(latch));
-      Stmt* body = ast->clone(loop->getBody());
-      ForStmt* forStmt = ast->createForStmt(newInit, newCond, newLatch, body);
+      ast.erase(initStmt, pm.getParent(initStmt));
+      ast.erase(exit, pm.getParent(exit));
+      ast.erase(latch, pm.getParent(latch));
+      Stmt* body = ast.clone(loop->getBody());
+      ForStmt* forStmt = ast.createForStmt(newInit, newCond, newLatch, body);
 
-      changed |= ast->replaceStmtWith(loop, forStmt, pm.getParent(loop));
+      changed |= ast.replaceStmtWith(loop, forStmt, pm.getParent(loop));
     }
 
     return changed;
@@ -325,13 +325,6 @@ public:
   bool process(FunctionDecl*, Stmt*) {
     bool changed = false;
 
-    // // The loops must be processed from the inside out. The innermost loops
-    // // will have the greatest depth
-    // std::sort(loops.begin(), loops.end(), [&](Stmt* a, Stmt* b) {
-    //   return ast->getDepth(a) < ast->getDepth(b);
-    // });
-    // std::reverse(loops.begin(), loops.end());
-
     for(DoStmt* loop : doLoops) {
       if(LoopInfo li = getLoopInfo(loop)) {
         if(li.isForLoop())
@@ -350,20 +343,7 @@ public:
 
 public:
   ASTConvertLoopsPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext, RequireUses | RequireCFG),
-        invOps({
-            {BO_Add, BO_Sub},
-            {BO_Sub, BO_Add},
-            {BO_Mul, BO_Div},
-            {BO_Div, BO_Mul},
-
-            {BO_EQ, BO_NE},
-            {BO_NE, BO_EQ},
-            {BO_GT, BO_LE},
-            {BO_LE, BO_GT},
-            {BO_LT, BO_GE},
-            {BO_GE, BO_LT},
-        }) {
+      : ASTFunctionPass(cishContext, RequireUses | RequireCFG) {
     ;
   }
 

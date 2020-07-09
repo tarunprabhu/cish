@@ -126,10 +126,10 @@ protected:
     }
   }
 
-  Map<Stmt*, unsigned> getLoops() {
+  Map<Stmt*, unsigned> getLoops(FunctionDecl* f) {
     Map<Stmt*, unsigned> loops;
 
-    getLoops(cast<CompoundStmt>(ast->getFunction()->getBody()), 0, loops);
+    getLoops(cast<CompoundStmt>(f->getBody()), 0, loops);
 
     return loops;
   }
@@ -180,9 +180,9 @@ protected:
     return Vector<VarDecl*>();
   }
 
-  bool renameLoopVariables(NameGenerator& names) {
+  bool renameLoopVariables(FunctionDecl* f, NameGenerator& names) {
     Map<VarDecl*, std::string> newLoopVars;
-    for(auto& i : getLoops()) {
+    for(auto& i : getLoops(f)) {
       Stmt* loop = i.first;
       unsigned loopDepth = i.second;
       if(auto* forStmt = dyn_cast<ForStmt>(loop)) {
@@ -200,7 +200,7 @@ protected:
       const std::string& name = i.second;
       if(vars.contains(name)) {
         VarDecl* var = vars.at(name);
-        var->setDeclName(ast->createDeclName(names.getNewVarName()));
+        var->setDeclName(ast.createDeclName(names.getNewVarName()));
       }
     }
 
@@ -208,7 +208,7 @@ protected:
     for(auto& i : newLoopVars) {
       VarDecl* var = i.first;
       const std::string& name = i.second;
-      var->setDeclName(ast->createDeclName(name));
+      var->setDeclName(ast.createDeclName(name));
     }
 
     return newLoopVars.size();
@@ -223,7 +223,7 @@ public:
         vars[var->getName()] = var;
 
     NameGenerator& names = cishContext.getNameGenerator(f);
-    changed |= renameLoopVariables(names);
+    changed |= renameLoopVariables(f, names);
 
     for(VarDecl* var : vars.values()) {
       if(names.isGeneratedName(var->getName()) and um.hasSingleDef(var)) {
@@ -234,7 +234,7 @@ public:
             newName = param->getName().str() + "_p";
         if((var->getName() != newName) and newName.size()) {
           var->setDeclName(
-              ast->createDeclName(names.getNewName(newName, false)));
+              ast.createDeclName(names.getNewName(newName, false)));
           changed |= true;
         }
       }

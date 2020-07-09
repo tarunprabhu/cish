@@ -32,10 +32,10 @@ static const Set<Expr*> emptyEqvExprs;
 
 ExprNumberMap::ExprNumberMap(CishContext& cishContext)
     : cishContext(cishContext) {
-  clear();
+  reset();
 }
 
-void ExprNumberMap::clear() {
+ExprNumberMap& ExprNumberMap::reset(FunctionDecl*) {
   nextExprNum = 1;
 
   blits.clear();
@@ -62,6 +62,8 @@ void ExprNumberMap::clear() {
   varNums.clear();
   exprNums.clear();
   eqvExprs.clear();
+
+  return *this;
 }
 
 ExprNum ExprNumberMap::getNewExprNum() {

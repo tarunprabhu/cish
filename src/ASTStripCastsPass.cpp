@@ -37,24 +37,24 @@ public:
     if(opts().has(StripCasts::None)) {
       changed |= false;
     } else if(opts().has(StripCasts::All)) {
-      changed |= ast->replaceExprWith(castExpr, expr, parent);
+      changed |= ast.replaceExprWith(castExpr, expr, parent);
     } else if(const auto* pty = dyn_cast<PointerType>(type)) {
       if(isa<FunctionProtoType>(pty->getPointeeType())) {
         if(opts().has(StripCasts::Function))
-          changed |= ast->replaceExprWith(castExpr, expr, parent);
+          changed |= ast.replaceExprWith(castExpr, expr, parent);
       } else if(isa<VectorType>(pty->getPointeeType())) {
         if(opts().has(StripCasts::Vector))
-          changed |= ast->replaceExprWith(castExpr, expr, parent);
+          changed |= ast.replaceExprWith(castExpr, expr, parent);
       } else {
         if(opts().has(StripCasts::Pointer))
-          changed |= ast->replaceExprWith(castExpr, expr, parent);
+          changed |= ast.replaceExprWith(castExpr, expr, parent);
       }
     } else if(type->isScalarType()) {
       if(opts().has(StripCasts::Scalar))
-        changed |= ast->replaceExprWith(castExpr, expr, parent);
+        changed |= ast.replaceExprWith(castExpr, expr, parent);
     } else if(isa<VectorType>(type)) {
       if(opts().has(StripCasts::Vector))
-        changed |= ast->replaceExprWith(castExpr, expr, parent);
+        changed |= ast.replaceExprWith(castExpr, expr, parent);
     }
 
     return changed;

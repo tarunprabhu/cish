@@ -163,7 +163,7 @@ Vector<BinaryOperator*> getForInits(ForStmt* forStmt) {
   if(Stmt* init = forStmt->getInit()) {
     if(auto* binOp = dyn_cast<BinaryOperator>(forStmt->getInit()))
       collectForInits(binOp, inits);
-    else
+    else if(not isa<DeclStmt>(forStmt))
       fatal(error() << "Unexpected statement in for loop initializer: "
                     << init->getStmtClassName());
   }
@@ -198,7 +198,7 @@ std::string toString(QualType type, ASTContext& astContext) {
   return ss.str();
 }
 
-std::string toString(Stmt* stmt, ASTContext& astContext) {
+std::string toString(const Stmt* stmt, ASTContext& astContext) {
   ASTStreamer ss(astContext);
 
   ss << stmt;
@@ -206,7 +206,7 @@ std::string toString(Stmt* stmt, ASTContext& astContext) {
   return ss.str();
 }
 
-std::string toString(FunctionDecl* f, ASTContext& astContext) {
+std::string toString(const FunctionDecl* f, ASTContext& astContext) {
   ASTStreamer ss(astContext);
 
   ss << f;
@@ -214,7 +214,7 @@ std::string toString(FunctionDecl* f, ASTContext& astContext) {
   return ss.str();
 }
 
-std::string toString(VarDecl* var, ASTContext& astContext) {
+std::string toString(const VarDecl* var, ASTContext& astContext) {
   ASTStreamer ss(astContext);
 
   ss << var;
@@ -222,7 +222,7 @@ std::string toString(VarDecl* var, ASTContext& astContext) {
   return ss.str();
 }
 
-std::string toString(RecordDecl* record, ASTContext& astContext) {
+std::string toString(const RecordDecl* record, ASTContext& astContext) {
   ASTStreamer ss(astContext);
 
   ss << record;

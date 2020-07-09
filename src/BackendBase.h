@@ -20,6 +20,7 @@
 #ifndef CISH_BACKEND_BASE_H
 #define CISH_BACKEND_BASE_H
 
+#include "AST.h"
 #include "Map.h"
 #include "Stack.h"
 #include "Vector.h"
@@ -36,7 +37,8 @@ class BackendBase {
 protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
-  AST* ast;
+  clang::FunctionDecl* currDecl;
+  AST ast;
 
   // The statements comprising the body of the current function being
   // converted

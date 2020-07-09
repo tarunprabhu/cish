@@ -26,8 +26,6 @@
 
 using namespace clang;
 
-extern bool g_dbg;
-
 namespace cish {
 
 // Move variables declarations from the start of the program to somewhere
@@ -63,7 +61,8 @@ protected:
 
   bool isPrivatizable(VarDecl* var, Stmt* def) {
     unsigned depth = pm.getDepth(def);
-    if(depth <= 2)
+    llvm::errs() << var->getName() << " == " << depth << "\n";
+    if(depth <= 3)
       return false;
     for(Stmt* use : um.getUses(var))
       if(pm.getDepth(use) < depth)
@@ -122,26 +121,24 @@ public:
         for(BinaryOperator* binOp : Clang::getForInits(forStmt)) {
           VarDecl* var = Clang::getVar(binOp->getLHS());
           VarDecl* newVar
-              = ast->createVariable(var->getName(), var->getType(), f);
-          Expr* newDeclRef = ast->createDeclRefExpr(newVar);
+              = ast.createVariable(var->getName(), var->getType(), f);
+          Expr* newDeclRef = ast.createDeclRefExpr(newVar);
 
           for(Expr* expr : em.getEqv(em.get(var)).clone()) {
             for(Stmt* use : um.getUses(var))
               if(pm.isContainedIn(use, forStmt))
-                changed |= ast->replaceExprWith(expr, newDeclRef, use);
+                changed |= ast.replaceExprWith(expr, newDeclRef, use);
 
             for(Stmt* def : um.getDefs(var))
               if(pm.isContainedIn(def, forStmt))
-                changed |= ast->replaceExprWith(expr, newDeclRef, def);
+                changed |= ast.replaceExprWith(expr, newDeclRef, def);
           }
 
-          newVar->setInit(ast->cloneExpr(binOp->getRHS()));
+          newVar->setInit(ast.cloneExpr(binOp->getRHS()));
           newVars.push_back(newVar);
-
-          ast->erase(binOp, pm.getParent(binOp));
         }
 
-        DeclStmt* declStmt = ast->createDeclStmt(newVars);
+        DeclStmt* declStmt = ast.createDeclStmt(newVars);
         forStmt->setInit(declStmt);
         changed |= true;
       }
@@ -158,25 +155,22 @@ public:
       VarDecl* var = i.first;
       BinaryOperator* defStmt = i.second;
 
-      llvm::errs() << var->getName() << ": " << defs[var] << " |"
-                   << isPrivatizable(var, defStmt->getRHS()) << "|\n"
-                   << "       " << Clang::toString(defStmt, astContext) << "\n";
       if((defs[var] == 1) and isPrivatizable(var, defStmt->getRHS())) {
         VarDecl* newVar
-            = ast->createVariable(var->getName(), var->getType(), f);
-        DeclRefExpr* newDeclRef = ast->createDeclRefExpr(newVar);
+            = ast.createVariable(var->getName(), var->getType(), f);
+        DeclRefExpr* newDeclRef = ast.createDeclRefExpr(newVar);
         Stmt* parent = pm.getParent(defStmt);
 
         for(Expr* expr : em.getEqv(em.get(var)).clone())
           for(Stmt* use : um.getUses(var))
             if(pm.isContainedIn(use, parent))
-              changed |= ast->replaceExprWith(expr, newDeclRef, use);
+              changed |= ast.replaceExprWith(expr, newDeclRef, use);
 
-        DeclStmt* declStmt = ast->createDeclStmt(newVar);
-        changed |= ast->replaceStmtWith(defStmt, declStmt, parent);
-        ast->erase(defStmt, parent);
+        DeclStmt* declStmt = ast.createDeclStmt(newVar);
+        changed |= ast.replaceStmtWith(defStmt, declStmt, parent);
+        ast.erase(defStmt, parent);
 
-        newVar->setInit(ast->cloneExpr(defStmt->getRHS()));
+        newVar->setInit(ast.cloneExpr(defStmt->getRHS()));
       }
     }
 

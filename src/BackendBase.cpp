@@ -30,23 +30,24 @@ namespace cish {
 
 BackendBase::BackendBase(CishContext& cishContext)
     : cishContext(cishContext), astContext(cishContext.getASTContext()),
-      ast(&cishContext.getAST(nullptr)) {
+      currDecl(nullptr), ast(cishContext) {
   ;
 }
 
 std::string BackendBase::getNewVar(const std::string& prefix) {
-  return cishContext.getNameGenerator(ast->getFunction()).getNewName(prefix);
+  return cishContext.getNameGenerator(currDecl).getNewName(prefix);
 }
 
 void BackendBase::beginFunction(FunctionDecl* f) {
-  ast = &cishContext.addAST(f);
+  currDecl = f;
   stmts.emplace();
 }
 
 void BackendBase::endFunction(FunctionDecl* f) {
-  f->setBody(ast->createCompoundStmt(stmts.pop()));
+  f->setBody(ast.createCompoundStmt(stmts.pop()));
   if(not stmts.empty())
     fatal(error() << "Unexpected statements after function has been converted");
+  currDecl = nullptr;
 }
 
 Stmt* BackendBase::add(Stmt* stmt) {

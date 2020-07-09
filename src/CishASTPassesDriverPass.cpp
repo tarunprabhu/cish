@@ -49,18 +49,18 @@ protected:
   }
 
   void
-  logAST(clang::FunctionDecl* f, const std::string& tag) {
-
+  logAST(const clang::FunctionDecl* f, const std::string& tag) {
     if(cish::opts().has(cish::LogCategory::AST))
       if(cish::Logger log = cish::Logger::openFile(f->getName(), tag, "cish"))
         log() << Clang::toString(f, f->getASTContext()) << "\n";
   }
 
-  void logCFG(clang::FunctionDecl* f, const std::string& tag) {
-    if(cish::opts().has(cish::LogCategory::CFG))
+  void logCFG(const clang::FunctionDecl* f,
+              const clang::CFG* cfg,
+              const std::string& tag) {
+    if(cfg and cish::opts().has(cish::LogCategory::CFG))
       if(cish::Logger log = cish::Logger::openFile(f->getName(), tag, "cfg"))
-        cishContext.getAST(f).getCFG()->print(
-            log(), cishContext.getLangOptions(), true);
+        cfg->print(log(), cishContext.getLangOptions(), true);
   }
 
 public:
@@ -92,17 +92,18 @@ public:
         createASTDeadCodeEliminationPass(cishContext),
     };
 
-    for(clang::FunctionDecl* f : cishContext.funcs()) {
+    for(clang::FunctionDecl* f : cishContext.getFunctions()) {
       cish::message() << "Processing function " << f->getName() << "\n";
+
       passIdx = 0;
       logAST(f, "init");
-      logCFG(f, "init");
+      logCFG(f, cish::CFGMap(cishContext).reset(f).getCFG(), "init");
       for(cish::ASTPass* pass : passes) {
         pass->runOnFunction(f);
         passIdx += 1;
         // The Cish pass names will always be prefixed with "cish-"
         logAST(f, getTag(pass->getPassName().substr(5)));
-        logCFG(f, getTag(pass->getPassName().substr(5)));
+        logCFG(f, pass->getCFG(), getTag(pass->getPassName().substr(5)));
       }
     }
 

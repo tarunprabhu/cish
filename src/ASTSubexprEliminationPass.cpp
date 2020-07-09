@@ -56,7 +56,7 @@ public:
     bool changed = false;
 
     Map<Expr*, VarDecl*> repl;
-    for(VarDecl* lhs : ast->getVars())
+    for(VarDecl* lhs : Clang::getLocalVars(f))
       if(Expr* def = um.getSingleDefRHS(lhs))
         if(em.getEqv(def).size() > 1)
           if(canPropagateSubexpr(f, lhs, def))
@@ -64,10 +64,10 @@ public:
 
     for(auto& i : repl) {
       Expr* expr = i.first;
-      Expr* repl = ast->createDeclRefExpr(i.second);
+      Expr* repl = ast.createDeclRefExpr(i.second);
       for(Expr* e : em.getEqv(expr).clone())
         if(e != expr)
-          changed |= ast->replaceExprWith(e, repl, pm.getParent(e));
+          changed |= ast.replaceExprWith(e, repl, pm.getParent(e));
     }
 
     return changed;

@@ -191,15 +191,10 @@ bool isLogical(BinaryOperator::Opcode op) {
 BinaryOperator::Opcode getInverse(BinaryOperator::Opcode opc) {
   static const Map2S<BinaryOperator::Opcode> ops = {
       {BO_Add, BO_Sub},
-      // {BO_Sub, BO_Add},
       {BO_Mul, BO_Div},
-      // {BO_Div, BO_Mul},
 
       {BO_EQ, BO_NE},
-      // {BO_NE, BO_EQ},
       {BO_GT, BO_LE},
-      // {BO_LE, BO_GT},
-      // {BO_LT, BO_GE},
       {BO_GE, BO_LT},
   };
 

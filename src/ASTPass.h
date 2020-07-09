@@ -20,6 +20,8 @@
 #ifndef CISH_AST_PASS_H
 #define CISH_AST_PASS_H
 
+#include "AST.h"
+#include "CFGMap.h"
 #include "ExprNumberMap.h"
 #include "ParentMap.h"
 #include "Set.h"
@@ -44,10 +46,11 @@ protected:
   CishContext& cishContext;
   clang::ASTContext& astContext;
   unsigned flags;
-  AST* ast;
+  CFGMap cm;
   ExprNumberMap em;
   ParentMap pm;
   UsesMap um;
+  AST ast;
   Set<clang::VarDecl*> addrTaken;
 
 private:
@@ -66,6 +69,12 @@ protected:
 
 public:
   virtual ~ASTPass() = default;
+
+  const clang::CFG* getCFG() const;
+  const clang::DominatorTree* getDominatorTree() const;
+  const ExprNumberMap& getExprNumberMap() const;
+  const ParentMap& getParentMap() const;
+  const UsesMap& getUsesMap() const;
 
   virtual llvm::StringRef getPassName() const = 0;
   virtual llvm::StringRef getPassLongName() const;

@@ -21,6 +21,7 @@
 #include "CishContext.h"
 #include "ClangUtils.h"
 #include "Diagnostics.h"
+#include "ParentMap.h"
 
 using namespace clang;
 
@@ -31,23 +32,27 @@ UsesMap::UsesMap(CishContext& cishContext, ParentMap& pm)
   ;
 }
 
-void UsesMap::clear(FunctionDecl* f) {
+UsesMap& UsesMap::reset(FunctionDecl* f) {
   useMap.clear();
   defMap.clear();
 
-  // Globals
-  for(Decl* decl : astContext.getTranslationUnitDecl()->decls())
-    if(auto* g = dyn_cast<VarDecl>(decl))
-      addDecl(g);
+  if(f) {
+    // Globals
+    for(Decl* decl : astContext.getTranslationUnitDecl()->decls())
+      if(auto* g = dyn_cast<VarDecl>(decl))
+        addDecl(g);
 
-  // Parameters
-  for(ParmVarDecl* param : f->parameters())
-    addDecl(param);
+    // Parameters
+    for(ParmVarDecl* param : f->parameters())
+      addDecl(param);
 
-  // Locals
-  for(Decl* decl : f->decls())
-    if(VarDecl* var = dyn_cast<VarDecl>(decl))
-      addDecl(var);
+    // Locals
+    for(Decl* decl : f->decls())
+      if(VarDecl* var = dyn_cast<VarDecl>(decl))
+        addDecl(var);
+  }
+
+  return *this;
 }
 
 void UsesMap::addDecl(VarDecl* decl) {

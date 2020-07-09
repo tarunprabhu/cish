@@ -20,15 +20,9 @@
 #ifndef CISH_CISH_CONTEXT_H
 #define CISH_CISH_CONTEXT_H
 
-#include "AST.h"
 #include "IRClangMap.h"
 #include "Map.h"
 #include "NameGenerator.h"
-
-#include <llvm/ADT/iterator_range.h>
-#include <llvm/IR/Dominators.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Pass.h>
 
 #include <clang/AST/ASTContext.h>
 #include <clang/Basic/Builtins.h>
@@ -50,19 +44,10 @@ protected:
   std::shared_ptr<clang::TargetOptions> targetOpts;
   std::shared_ptr<clang::TargetInfo> targetInfo;
   std::unique_ptr<clang::ASTContext> astContext;
-
-  // The AST class is also a builder (somewhat unfortunately) and one is needed
-  // for the top-level structs and function declarations
-  std::unique_ptr<AST> topLevelAST;
   std::unique_ptr<NameGenerator> topLevelNames;
 
-  Map<clang::FunctionDecl*, std::unique_ptr<AST>> asts;
   Map<std::string, std::unique_ptr<NameGenerator>> nameGens;
   std::unique_ptr<IRClangMap> irClangMap;
-
-public:
-  using func_iterator = decltype(asts)::const_key_iterator;
-  using func_range = llvm::iterator_range<func_iterator>;
 
 protected:
   CishContext(const std::string& triple);
@@ -75,16 +60,11 @@ protected:
 public:
   virtual ~CishContext() = default;
 
-  AST& addAST(clang::FunctionDecl* f);
-  AST& getAST(clang::FunctionDecl* f);
-  const AST& getAST(clang::FunctionDecl* f) const;
-
   clang::ASTContext& getASTContext() const;
   const clang::LangOptions& getLangOptions() const;
   NameGenerator& getNameGenerator(const std::string& name) const;
   NameGenerator& getNameGenerator(clang::FunctionDecl* f) const;
-
-  func_range funcs();
+  Vector<clang::FunctionDecl*> getFunctions() const;
 };
 
 } // namespace cish

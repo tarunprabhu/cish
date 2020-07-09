@@ -75,8 +75,6 @@ protected:
                                  CFGBlock* rootBlock,
                                  Stmt* def,
                                  Set<Stmt*>& lhsUses) {
-    // rootBlock->dump(ast->getCFG(), cishContext.getLangOptions(), true);
-
     bool sawLhsDef = false;
     for(CFGElement& cfgElem : *rootBlock) {
       if(CFGStmt* cfgStmt = cfgElem.getAs<CFGStmt>().getPointer()) {
@@ -113,8 +111,6 @@ protected:
       return false;
     else if(uses.size() == 0)
       return false;
-
-    // block->dump(ast->getCFG(), cishContext.getLangOptions(), true);
 
     for(CFGElement& cfgElem : *block) {
       if(CFGStmt* cfgStmt = cfgElem.getAs<CFGStmt>().getPointer()) {
@@ -217,7 +213,7 @@ protected:
     if(uses.size() == 0)
       return true;
 
-    CFGBlock* rootBlock = ast->getCFGBlock(def);
+    CFGBlock* rootBlock = cm.getCFGBlock(def);
 
     if(isDefBeforeUseInRootBlock(defs, rootBlock, def, uses))
       return false;
@@ -251,7 +247,7 @@ protected:
 
   bool isLHSDefConstantForAllUses(VarDecl* lhs, BinaryOperator* def) {
     Set<Stmt*> uses = um.getTopLevelUses(lhs);
-    CFGBlock* rootBlock = ast->getCFGBlock(def);
+    CFGBlock* rootBlock = cm.getCFGBlock(def);
 
     for(VarDecl* var : Clang::getVarsInStmt(def->getRHS())) {
       Set<Stmt*> defs = um.getTopLevelDefs(var);
@@ -284,12 +280,8 @@ protected:
   }
 
 public:
-  bool process(FunctionDecl*, Stmt*) {
+  bool process(FunctionDecl* f, Stmt*) {
     bool changed = false;
-
-    // The CFG is not kept up to date because most of the AST transformation
-    // passes don't need it
-    ast->updateCFG();
 
     // Finding vars to be propagated that have more than one definition is
     // possible, but is more difficult because a more complicated
@@ -302,7 +294,7 @@ public:
     // Also, because the input is from a compiler, there is no need to check
     // if the definition dominates all the uses
     Map<VarDecl*, DeclRefExpr*> replVars;
-    for(VarDecl* lhs : ast->getVars())
+    for(VarDecl* lhs : Clang::getLocalVars(f))
       if(um.hasSingleDef(lhs) and (not um.hasZeroUses(lhs))
          and (not addrTaken.contains(lhs)))
         if(auto* def = dyn_cast<DeclRefExpr>(um.getSingleDefRHS(lhs)))
@@ -313,11 +305,9 @@ public:
     for(auto& i : replVars) {
       VarDecl* var = i.first;
       DeclRefExpr* def = i.second;
-      llvm::errs() << var->getName() << " => "
-                   << Clang::toString(def, astContext) << "\n";
       for(Expr* expr : em.getEqv(em.get(var)).clone())
         for(Stmt* use : um.getUses(var).clone())
-          changed |= ast->replaceExprWith(expr, def, use);
+          changed |= ast.replaceExprWith(expr, def, use);
     }
 
     // Now that any variables are propagated, check if there are any
@@ -330,7 +320,7 @@ public:
     // definition dominates all the uses
     Map<VarDecl*, Expr*> replExprs;
     replExprs.clear();
-    for(VarDecl* lhs : ast->getVars())
+    for(VarDecl* lhs : Clang::getLocalVars(f))
       if(um.hasSingleDef(lhs) and (not um.hasZeroUses(lhs))
          and (not addrTaken.contains(lhs)))
         if(Expr* def = um.getSingleDefRHS(lhs))
@@ -344,7 +334,7 @@ public:
       Expr* repl = i.second;
       for(Expr* expr : em.getEqv(em.get(var)).clone())
         for(Stmt* use : um.getUses(var))
-          changed |= ast->replaceExprWith(expr, repl, use);
+          changed |= ast.replaceExprWith(expr, repl, use);
     }
 
     return changed;
@@ -352,7 +342,8 @@ public:
 
 public:
   ASTPropagateExprsPass(CishContext& cishContext)
-      : ASTFunctionPass(cishContext, RequireExprNums | RequireUses) {
+      : ASTFunctionPass(cishContext,
+                        RequireExprNums | RequireUses | RequireCFG) {
     ;
   }
 

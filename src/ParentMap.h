@@ -46,7 +46,7 @@ public:
   ParentMap(const ParentMap&) = delete;
   ParentMap(ParentMap&&) = delete;
 
-  void clear();
+  ParentMap& reset(clang::FunctionDecl* f = nullptr);
   void add(clang::Stmt* stmt, clang::Stmt* parent);
   void addOrReplace(clang::Stmt* stmt, clang::Stmt* parent);
   void replace(clang::Stmt* stmt, clang::Stmt* parent);
